@@ -7,8 +7,8 @@
 //! - The server stamps a client's frames with its `ClientId`, so a client can't speak as
 //!   someone else. Talker 0 is the host.
 //!
-//! This is the only file that knows about the engine's net API; [`local_role`] is the one
-//! place that decides who is driver and who is guide.
+//! This is the only file that knows about the engine's net API. Who is driver and who is
+//! guide comes from the session (`net_session::Role`, read in `track_role`).
 
 use bevy::prelude::*;
 use engine::net::{ClientId, FromClient, FromServer, NetClient, NetRole, NetSender, NetServer};
@@ -38,16 +38,6 @@ pub enum VoiceRole {
     Offline,
     Driver,
     Guide,
-}
-
-/// Driver hosts, guide connects (docs/DESIGN.md). Swap this for the session's role resource
-/// once it exists.
-pub fn local_role(role: NetRole) -> VoiceRole {
-    match role {
-        NetRole::Offline => VoiceRole::Offline,
-        NetRole::Server | NetRole::ListenServer => VoiceRole::Driver,
-        NetRole::Client => VoiceRole::Guide,
-    }
 }
 
 /// Our talker id in the session (`None` until a client has its id).

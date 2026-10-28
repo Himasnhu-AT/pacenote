@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use bevy::time::TimeUpdateStrategy;
-use engine::net::{self, LinkConditioner, LoopbackNet, NetClient};
+use engine::net::{LinkConditioner, LoopbackNet, NetClient};
 use engine::prelude::*;
 use pacenote::voice::net::VoiceRole;
 use pacenote::voice::{TalkMode, VoicePlugin, VoiceState};
@@ -23,7 +23,7 @@ fn temp_dir(tag: &str) -> PathBuf {
 
 fn build(tag: &str, source: &str, link: LinkConditioner) -> App {
     let mut app = engine::app_with(GameInfo::new("pacenote", "Pacenote"), EngineOptions::headless_test(temp_dir(tag)));
-    app.insert_resource(NetConfig { conditioner: link, ..default() }).add_plugins(VoicePlugin).insert_resource(TimeUpdateStrategy::ManualDuration(STEP));
+    app.insert_resource(NetConfig { conditioner: link, ..default() }).add_plugins((pacenote::guide::GuidePlugin, VoicePlugin)).insert_resource(TimeUpdateStrategy::ManualDuration(STEP));
     app.finish();
     app.cleanup();
     let mut st = app.world_mut().resource_mut::<VoiceState>();
@@ -43,8 +43,9 @@ impl Pair {
         let lo = LoopbackNet::new();
         let mut driver = build("driver", driver_src, link);
         let mut guide = build("guide", guide_src, LinkConditioner { seed: link.seed + 1, ..link });
-        net::host(driver.world_mut(), lo.bind(7777), true);
-        net::connect(guide.world_mut(), lo.bind(0), "127.0.0.1:7777".parse().unwrap());
+        pacenote::net_session::host_with(driver.world_mut(), lo.bind(7777));
+        let l = lo.clone();
+        pacenote::net_session::join_with(guide.world_mut(), "127.0.0.1:7777".parse().unwrap(), move || l.bind(0));
         let mut p = Pair { driver, guide, _lo: lo };
         for _ in 0..300 {
             if p.guide.world().get_resource::<NetClient>().is_some_and(|c| c.id().is_some()) {
@@ -53,6 +54,8 @@ impl Pair {
             p.run(1);
         }
         assert!(p.guide.world().get_resource::<NetClient>().is_some_and(|c| c.id().is_some()), "guide never connected");
+        // Session::peer_connected turns true a frame after the handshake.
+        p.run(2);
         p
     }
 

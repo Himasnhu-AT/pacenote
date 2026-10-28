@@ -19,7 +19,7 @@ mic (cpal thread, any rate) ─▶ downmix + 7 kHz low-pass + resample ─▶ 16
 | `capture.rs` | `Capture`: a `voice-capture` thread owns the cpal input stream; `MicStatus` (`off/starting/live/no input device/failed/silent`) |
 | `jitter.rs` | `JitterBuffer`: 64 slots keyed by capture frame index, playout delay max(60 ms, 3 × RFC 3550 jitter) ≤ 300 ms chosen per talk spurt, late frames dropped, losses concealed by repeating the last frame fading 1 → 0.6 → 0.2 → 0, spurt ends after 8 missing frames, one frame dropped when > delay + 80 ms is buffered (sender clock drift), sender restarts detected |
 | `playback.rs` | `Player` (one jitter buffer per talker, ≤ 8), `PlayoutEngine` (inbox → render → status, no allocation), `VoiceStream`/`VoiceSource` (rodio source, 16 kHz mono) |
-| `net.rs` | `VoiceFrame`, `VoiceRole`, `local_role`, send/receive/relay systems — the only file that touches the net API |
+| `net.rs` | `VoiceFrame`, `VoiceRole`, send/receive/relay systems — the only file that touches the net API |
 | `ui.rs` | Corner indicator, top left: red dot while you transmit, mic meter, hint ("Hold V / LB to talk", "Open mic", "No microphone found", "Mic silent: check permission"), green dot + "GUIDE talking" / "DRIVER talking" |
 | `mod.rs` | `VoicePlugin`, `VoiceSettings`, `VoiceState`, systems, control commands |
 
@@ -28,7 +28,8 @@ mic (cpal thread, any rate) ─▶ downmix + 7 kHz low-pass + resample ─▶ 16
 - **When it runs.** Capture starts only in a net session (`NetRole` ≠ `Offline`) with voice
   enabled, so solo play never opens the microphone (no permission prompt). Leaving the session
   stops the stream.
-- **Roles.** `--host` (listen server) = driver, `--connect` = guide (`net::local_role`). The
+- **Roles.** From the session (`net_session::Role`: driver / guide), and only while the
+  partner is connected (`Session::peer_connected`); solo or leaving closes the mic. The
   host sends with `broadcast_except(HOST)` (it never hears itself), clients `to_server`; the
   server stamps client frames with their `ClientId` (talker id; host = 0) and relays them to the
   other clients.
@@ -126,5 +127,3 @@ Apple M5 Pro, dev profile, `cargo test --test voice -- --nocapture`:
 - Voice plays through its own rodio source rather than an engine voice, so it bypasses the
   engine renderer's bus low-pass/reverb (it follows the voice bus gain only). An engine
   "stream voice" (a voice fed by a ring buffer) would let it join the mix properly.
-- Role comes from `NetRole` (host = driver); the guide-net stream's `net_session::Role` can
-  replace `net::local_role` in one place.

@@ -315,13 +315,25 @@ fn start_device_playout(world: &mut World) {
 
 fn track_role(
     role: Res<NetRole>,
+    session_role: Option<Res<crate::net_session::Role>>,
+    session: Option<Res<crate::net_session::Session>>,
     client: Option<Res<NetClient>>,
     settings: Res<VoiceSettings>,
     mut st: ResMut<VoiceState>,
     mut mixer: Option<ResMut<Mixer>>,
 ) {
     let st = &mut *st;
-    st.role = net::local_role(*role);
+    // The session's role, and only once the partner is connected: leaving (Role::Solo) or
+    // waiting for the guide keeps the mic closed.
+    use crate::net_session::Role;
+    st.role = match session_role.as_deref() {
+        Some(Role::Driver) => VoiceRole::Driver,
+        Some(Role::Guide) => VoiceRole::Guide,
+        Some(Role::Solo) | None => VoiceRole::Offline,
+    };
+    if !session.as_deref().is_some_and(|s| s.peer_connected()) {
+        st.role = VoiceRole::Offline;
+    }
     st.talker = net::local_talker(*role, client.as_deref());
     st.mode = settings.mode.resolve(st.role);
     st.gate.threshold_db = settings.open_mic_threshold_db;
