@@ -138,7 +138,9 @@ fn join_via(world: &mut World, addr: SocketAddr, c: Connector) -> std::io::Resul
 
 /// How the guide (re)connects.
 #[derive(Resource, Clone)]
-struct Connector(std::sync::Arc<dyn Fn(&mut World, SocketAddr) -> std::io::Result<()> + Send + Sync>);
+struct Connector(std::sync::Arc<ConnectFn>);
+
+type ConnectFn = dyn Fn(&mut World, SocketAddr) -> std::io::Result<()> + Send + Sync;
 
 impl Connector {
     fn udp() -> Connector {

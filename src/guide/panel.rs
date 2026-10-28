@@ -115,17 +115,27 @@ fn spawn(mut commands: Commands) {
             p.spawn(t("", label(18.0), CREST, T::NextMods));
             rule(p);
             eyebrow(p, "COMING UP");
-            for i in 0..NOTES - 1 {
-                p.spawn(Node { column_gap: Val::Px(14.0), align_items: AlignItems::Baseline, height: Val::Px(34.0), ..default() }).with_children(|r| {
-                    r.spawn((t("", display(22.0), DIM, T::RowDist(i)), Node { width: Val::Px(62.0), ..default() }, TextLayout::justify(Justify::Right)));
-                    r.spawn((t("", display(28.0), TEXT, T::RowCall(i)), Node { width: Val::Px(110.0), ..default() }));
-                    r.spawn(t("", label(15.0), DIM, T::RowMods(i)));
-                });
-            }
+            // Three columns of equal-height cells, so the different type sizes line up.
+            p.spawn(Node { column_gap: Val::Px(14.0), ..default() }).with_children(|cols| {
+                let col = |cols: &mut ChildSpawnerCommands, width: Option<f32>, end: bool, font: &dyn Fn() -> TextFont, color: Color, tag: fn(usize) -> T| {
+                    cols.spawn(Node { flex_direction: FlexDirection::Column, width: width.map_or(Val::Auto, Val::Px), align_items: if end { AlignItems::FlexEnd } else { AlignItems::FlexStart }, ..default() })
+                        .with_children(|c| {
+                            for i in 0..NOTES - 1 {
+                                c.spawn(Node { height: Val::Px(38.0), align_items: AlignItems::Center, ..default() }).with_child(t("", font(), color, tag(i)));
+                            }
+                        });
+                };
+                col(cols, Some(62.0), true, &|| display(22.0), DIM, T::RowDist);
+                col(cols, Some(110.0), false, &|| display(28.0), TEXT, T::RowCall);
+                col(cols, None, false, &|| label(15.0), DIM, T::RowMods);
+            });
             rule(p);
             eyebrow(p, "SPLITS");
-            for i in 0..4 {
-                p.spawn(t("", display(24.0), DIM, T::Split(i)));
+            for (i, name) in ["S1", "S2", "S3", "FINISH"].into_iter().enumerate() {
+                p.spawn(Node { column_gap: Val::Px(14.0), align_items: AlignItems::Baseline, ..default() }).with_children(|r| {
+                    r.spawn((Text::new(name), display(24.0), TextColor(DIM), Node { width: Val::Px(90.0), ..default() }));
+                    r.spawn(t("", display(24.0), DIM, T::Split(i)));
+                });
             }
         });
     // Map overlays.
@@ -267,7 +277,7 @@ fn update(
             T::Gear => {
                 if let Some(car) = car {
                     if car.gear < 0 {
-                        s.push_str("R");
+                        s.push('R');
                     } else {
                         let _ = write!(s, "GEAR {}", car.gear);
                     }
@@ -313,11 +323,6 @@ fn update(
             }
             T::Split(i) => {
                 let v = if i < 3 { run.splits().get(i).copied() } else { run.finished };
-                if i < 3 {
-                    let _ = write!(s, "S{}        ", i + 1);
-                } else {
-                    s.push_str("FINISH  ");
-                }
                 match v {
                     Some(v) => {
                         clock(&mut s, v);

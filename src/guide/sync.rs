@@ -273,7 +273,7 @@ fn publish_run(run: Option<Res<StageRun>>, mut q: Query<&mut NetRun, With<Sessio
     let (Some(run), Ok(mut nr)) = (run, q.single_mut()) else { return };
     *tick = tick.wrapping_add(1);
     let want = NetRun::from_run(&run);
-    if *nr != want && (*tick % RUN_EVERY == 0 || want.event_differs(&nr)) {
+    if *nr != want && (tick.is_multiple_of(RUN_EVERY) || want.event_differs(&nr)) {
         *nr = want;
     }
 }

@@ -120,11 +120,19 @@ pub(super) fn build(app: &mut App) {
         .add_systems(Startup, configure_gizmos)
         .add_systems(
             Update,
-            (spawn_camera.run_if(no_camera), rebuild.run_if(needs_rebuild), controls, place_camera, draw_dynamic, place_labels)
+            (spawn_camera.run_if(no_camera), keep_ui_camera, rebuild.run_if(needs_rebuild), controls, place_camera, draw_dynamic, place_labels)
                 .chain()
                 .in_set(MapSystems)
                 .run_if(view_wanted),
         );
+}
+
+/// The map camera draws the UI. The engine's offscreen retarget can strip the tag when it
+/// sees this camera and the menu's fallback camera in the same frame; put it back.
+fn keep_ui_camera(mut commands: Commands, q: Query<Entity, (With<MapCamera>, Without<IsDefaultUiCamera>)>) {
+    for e in &q {
+        commands.entity(e).insert(IsDefaultUiCamera);
+    }
 }
 
 fn no_camera(q: Query<(), With<MapCamera>>) -> bool {
@@ -262,6 +270,7 @@ fn fit_scale(g: &GuideStage, size: Vec2) -> (Vec2, f32) {
     ((lo + hi) * 0.5, s)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn controls(
     actions: Res<ActionState>,
     scroll: Res<AccumulatedMouseScroll>,
