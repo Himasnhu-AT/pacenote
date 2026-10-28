@@ -1,6 +1,5 @@
-//! The one place the menus talk to networking. Until the guide-net stream's module lands
-//! these are stubs with the agreed signatures; swapping them for the real functions is a
-//! change to this file only (re-export theirs, delete the stubs).
+//! The one place the menus talk to networking. A thin adapter over
+//! `crate::net_session` (roles, host / join / leave, peer names); see that module.
 //!
 //! - [`host`]: the driver starts a listen server and becomes [`Role::Driver`].
 //! - [`join`]: the guide connects to the driver and becomes [`Role::Guide`]; from then on the
@@ -10,15 +9,8 @@
 
 use bevy::prelude::*;
 
-/// Who this machine is in the team.
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Role {
-    /// Practice: no guide connected, the run counts as solo.
-    #[default]
-    Solo,
-    Driver,
-    Guide,
-}
+pub use crate::net_session::Role;
+use crate::net_session::{self, Session};
 
 /// Connection state for the menus.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,17 +23,14 @@ pub enum NetStatus {
     Failed(String),
 }
 
-/// Stub state (replaced by the net module's own).
-#[derive(Resource, Clone, Debug)]
-struct StubNet(NetStatus);
-
+/// Host as the driver (the driver's name from the profile goes to the guide).
 pub fn host(world: &mut World, port: u16) -> Result<(), String> {
-    world.insert_resource(Role::Driver);
-    world.insert_resource(StubNet(NetStatus::Hosting { port, peer: None }));
-    info!("netlink (stub): hosting on port {port}");
-    Ok(())
+    let name = world.get_resource::<super::Profile>().map(|p| p.driver_name.clone()).unwrap_or_default();
+    world.resource_mut::<Session>().name = name;
+    net_session::host(world, port).map(|_| ()).map_err(|e| format!("Can't host on port {port}: {e}"))
 }
 
+/// Join a driver at `host:port` as the guide.
 pub fn join(world: &mut World, addr: &str) -> Result<(), String> {
     let addr = addr.trim();
     if addr.is_empty() {
@@ -50,17 +39,30 @@ pub fn join(world: &mut World, addr: &str) -> Result<(), String> {
     if !addr.contains(':') {
         return Err(format!("'{addr}' has no port (e.g. 192.168.1.20:7777)"));
     }
-    world.insert_resource(StubNet(NetStatus::Failed("Networking isn't in this build yet".into())));
-    Err("Networking isn't in this build yet (guide-net stream)".into())
+    let Some(a) = engine::net::parse_addr(addr) else {
+        return Err(format!("Can't find '{addr}'"));
+    };
+    let name = world.get_resource::<super::Profile>().map(|p| p.guide_name.clone()).unwrap_or_default();
+    world.resource_mut::<Session>().name = name;
+    net_session::join(world, a).map_err(|e| format!("Can't connect to {addr}: {e}"))
 }
 
 pub fn leave(world: &mut World) {
-    world.insert_resource(Role::Solo);
-    world.insert_resource(StubNet(NetStatus::Idle));
+    net_session::leave(world);
 }
 
 pub fn status(world: &World) -> NetStatus {
-    world.get_resource::<StubNet>().map_or(NetStatus::Idle, |s| s.0.clone())
+    let s = world.resource::<Session>();
+    let addr = s.addr.map(|a| a.to_string()).unwrap_or_default();
+    match role(world) {
+        Role::Solo => NetStatus::Idle,
+        Role::Driver => NetStatus::Hosting { port: s.addr.map_or(0, |a| a.port()), peer: s.guide.map(|_| s.peer_name.clone().unwrap_or_else(|| "Guide".into())) },
+        Role::Guide if s.connected => NetStatus::Connected(addr),
+        Role::Guide => match s.last_drop {
+            Some(r) if s.was_connected || !matches!(r, engine::net::DisconnectReason::Requested) => NetStatus::Failed(format!("No answer from {addr} ({r:?}); retrying")),
+            _ => NetStatus::Connecting(addr),
+        },
+    }
 }
 
 /// The guide's name as the driver's machine knows it (sent by the guide on connect), if any.
