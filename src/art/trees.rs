@@ -417,7 +417,7 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
 
 fn foliage(m: &mut StandardMaterial, tint: Color, wet: bool) {
     m.base_color = tint;
-    m.alpha_mode = AlphaMode::Mask(0.45);
+    m.alpha_mode = AlphaMode::Mask(0.5);
     m.double_sided = true;
     m.cull_mode = None;
     m.perceptual_roughness = if wet { 0.5 } else { 0.85 };
