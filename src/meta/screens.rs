@@ -855,7 +855,8 @@ avian3d 0.7: Joona Aalto and contributors, MIT / Apache-2.0
 ashlar: control port, MCP and trace tooling
 Barlow and Barlow Condensed: Jeremy Tribby, SIL Open Font License 1.1";
 
-/// The game's credits file (written by the art stream): `assets/credits.txt`.
+/// The game's credits file (written by the art stream): `assets/credits.txt`. Lines starting
+/// with `#` are comments, a line ending in `:` is a heading, anything else a paragraph.
 pub fn game_credits(world: &World) -> String {
     let path = world
         .get_resource::<engine::paths::AssetsDir>()
@@ -889,9 +890,11 @@ fn build_credits(world: &mut World, root: Entity) {
                         if l.is_empty() {
                             g.spawn(spacer(GAP_S));
                         } else if l.starts_with('#') {
-                            g.spawn((eyebrow(l.trim_start_matches('#').trim(), t.accent), Node { margin: UiRect::top(px(GAP_S)), ..default() }));
+                            // Comment.
+                        } else if let Some(h) = l.strip_suffix(':') {
+                            g.spawn((eyebrow(h.trim(), t.accent), Node { margin: UiRect::top(px(GAP_S)), ..default() }));
                         } else {
-                            g.spawn(text(l.to_string(), body(18.0), t.text));
+                            g.spawn((text(l.trim().to_string(), body(18.0), t.text), Node { max_width: px(880), ..default() }));
                         }
                     }
                 });
