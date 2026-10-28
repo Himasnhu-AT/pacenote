@@ -173,7 +173,7 @@ fn paint_fields(
     mut values: Query<(&TextValue, &mut Text)>,
     mut boxes: Query<(&TextBox, &mut BorderColor, &mut BackgroundColor), With<Look>>,
 ) {
-    let caret = (time.elapsed_secs() * 2.0) as u32 % 2 == 0;
+    let caret = ((time.elapsed_secs() * 2.0) as u32).is_multiple_of(2);
     for (v, mut text) in &mut values {
         let want = match &editing.0 {
             Some((k, buf)) if *k == v.0 => format!("{buf}{}", if caret { "|" } else { " " }),

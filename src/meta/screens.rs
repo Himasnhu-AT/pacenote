@@ -271,7 +271,7 @@ fn stat(p: &mut ChildSpawnerCommands, t: &Theme, value: impl Into<String>, name:
 /// A fixed-width table cell.
 fn cell(p: &mut ChildSpawnerCommands, s: impl Into<String>, font: TextFont, color: Color, width: f32) {
     p.spawn((Node { width: px(width), flex_shrink: 0.0, ..default() }, Pickable::IGNORE)).with_children(|c| {
-        c.spawn((text(s, font, color), KeepColor));
+        c.spawn((text(s, font, color), KeepColor, TextLayout::no_wrap()));
     });
 }
 
@@ -430,9 +430,13 @@ fn build_stages(world: &mut World, root: Entity) {
                             BackgroundColor(Color::NONE),
                             Pickable::IGNORE,
                         ));
-                        r.spawn((text(format!("{id:02}"), label(20.0), t.accent.with_alpha(0.8)), KeepColor, Node { width: px(28), ..default() }));
-                        r.spawn((text(name.to_uppercase(), label(25.0), t.text_muted), Node { width: px(210), ..default() }));
-                        r.spawn((text(info.clone(), body(15.0), t.text_dim), KeepColor, Node { flex_grow: 1.0, ..default() }));
+                        cell(r, format!("{id:02}"), label(20.0), t.accent.with_alpha(0.8), 28.0);
+                        r.spawn((Node { width: px(210), flex_shrink: 0.0, ..default() }, Pickable::IGNORE)).with_children(|c| {
+                            c.spawn((text(name.to_uppercase(), label(25.0), t.text_muted), TextLayout::no_wrap()));
+                        });
+                        r.spawn((Node { flex_grow: 1.0, ..default() }, Pickable::IGNORE)).with_children(|c| {
+                            c.spawn((text(info.clone(), body(15.0), t.text_dim), KeepColor, TextLayout::no_wrap()));
+                        });
                         let (bt, bc) = match best {
                             Some(s) => (board::clock(*s), t.text),
                             None => ("\u{2014}".to_string(), t.text_dim),
@@ -511,7 +515,9 @@ fn stage_details(world: &mut World) {
                 if let Some(i) = &info {
                     stat(r, &t, i.corners.to_string(), "Corners", t.text, 34.0);
                     stat(r, &t, i.tight.to_string(), "Hairpins & 2s", t.text, 34.0);
-                    stat(r, &t, i.crests.to_string(), "Crests", t.text, 34.0);
+                    if i.crests > 0 {
+                        stat(r, &t, i.crests.to_string(), "Crests", t.text, 34.0);
+                    }
                     stat(r, &t, format!("{:.0}", i.climb), "m climb", t.text, 34.0);
                 }
             });
@@ -529,7 +535,7 @@ fn stage_details(world: &mut World) {
             line(c, "Team best", team_best.as_ref(), t.text);
             line(c, "Practice best", solo_best.as_ref(), t.text);
             let ghost_line = match p.ghost {
-                0 => "Ghost off (Settings \u{2192} Game)".to_string(),
+                0 => "Ghost off (Settings > Game)".to_string(),
                 _ if ghosts.is_empty() => "No ghost yet: finish the stage to record one.".to_string(),
                 _ => format!("{} ghost{} saved", ghosts.len(), if ghosts.len() == 1 { "" } else { "s" }),
             };
@@ -751,7 +757,7 @@ fn build_results(world: &mut World, root: Entity) {
     let names = ["Split 1", "Split 2", "Split 3", "Finish"];
     let next_name = crate::stage::stages().into_iter().find(|d| d.id == r.stage % stage_count() + 1).map(|d| d.name).unwrap_or_default();
     world.commands().entity(root).with_children(|p| {
-        menu_backdrop(p, &t, 0.5, 1.0);
+        menu_backdrop(p, &t, 0.72, 1.0);
         p.spawn(menu_column(GAP_S)).with_children(|c| {
             eyebrow_bar(c, &format!("Stage {} \u{b7} {} \u{b7} {}", r.stage, res.stage_name, if mode == RunMode::Team { "team run" } else { "practice" }), t.accent);
             let mut h = c.spawn(title(headline, SIZE_H1, hcolor));
@@ -794,7 +800,7 @@ fn build_results(world: &mut World, root: Entity) {
                 }
             });
             if res.ghost_saved {
-                c.spawn(text("Ghost saved: race it next time (Settings \u{2192} Game \u{2192} Ghost car).", body(SIZE_SMALL), t.text_dim));
+                c.spawn(text("Ghost saved: race it next time (Settings > Game > Ghost car).", body(SIZE_SMALL), t.text_dim));
             }
             c.spawn(spacer(GAP_M));
             c.spawn((Node { column_gap: px(GAP_M), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|b| {

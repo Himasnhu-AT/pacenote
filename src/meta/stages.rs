@@ -104,9 +104,9 @@ impl Raster {
         let sa = (c[3] * a).clamp(0.0, 1.0);
         let da = self.px[i + 3] as f32 / 255.0;
         let oa = sa + da * (1.0 - sa);
-        for k in 0..3 {
+        for (k, ck) in c.iter().take(3).enumerate() {
             let d = self.px[i + k] as f32 / 255.0;
-            let o = if oa > 0.0 { (c[k] * sa + d * da * (1.0 - sa)) / oa } else { 0.0 };
+            let o = if oa > 0.0 { (ck * sa + d * da * (1.0 - sa)) / oa } else { 0.0 };
             self.px[i + k] = (o * 255.0).round() as u8;
         }
         self.px[i + 3] = (oa * 255.0).round() as u8;
@@ -172,7 +172,7 @@ impl Raster {
     }
 }
 
-/// Maps road XZ into a `size` px square with `pad` px margin (north up: -Z is up).
+/// Maps road XZ into a `size` px square with `pad` px margin (x right, z down, like the map).
 fn fit(line: &[Vec2], size: f32, pad: f32) -> impl Fn(Vec2) -> Vec2 + use<> {
     let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
     for p in line {
@@ -246,7 +246,9 @@ pub fn contour_map(def: &StageDef, road: &Road, size: u32, ink: [f32; 3]) -> Ras
             let d = (b - b.round()).abs() / g;
             let index = (b.round() as i32).rem_euclid(5) == 0;
             let (w, a) = if index { (1.1, 0.55) } else { (0.6, 0.28) };
-            let cov = (w - d + 0.5).clamp(0.0, 1.0);
+            // Fade out towards the picture's edges (it sits behind the menu, edges unseen).
+            let e = ((x.min(size - 1 - x).min(y).min(size - 1 - y)) as f32 / (s * 0.14)).min(1.0);
+            let cov = (w - d + 0.5).clamp(0.0, 1.0) * e * e * (3.0 - 2.0 * e);
             if cov > 0.0 {
                 r.blend(x as i32, y as i32, [ink[0], ink[1], ink[2], a], cov);
             }
@@ -390,7 +392,7 @@ mod tests {
         let t1 = std::time::Instant::now();
         let pic = preview(&info, 128);
         let map = contour_map(def, &road, 256, [0.8, 0.7, 0.3]);
-        eprintln!("road {gen_secs:.3} s, pictures {:.3} s", t1.elapsed().as_secs_f32());
+        eprintln!("road {gen_secs:.3} s, pictures {:.3} s, hash {}", t1.elapsed().as_secs_f32(), info.hash);
         let painted = |r: &Raster| r.px.chunks(4).filter(|p| p[3] > 0).count();
         assert!(painted(&pic) > 300, "the road shows in the preview");
         assert!(painted(&map) > 2000, "contours show on the map");

@@ -74,7 +74,7 @@ impl Default for Profile {
             join_address: "127.0.0.1:7777".into(),
             last_stage: 1,
             ghost: 1,
-            ghost_opacity: 0.35,
+            ghost_opacity: 0.45,
             rivals: Vec::new(),
         }
     }
@@ -405,7 +405,7 @@ fn spawn_ghost(world: &mut World, g: Ghost, road: &crate::stage::Road, hash: &st
     let size = spec.size;
     let body = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(size.x, size.y * 0.75, size.z));
     let cabin = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(size.x * 0.82, size.y * 0.5, size.z * 0.5));
-    let c = Color::srgba(0.62, 0.86, 1.0, opacity);
+    let c = Color::srgba(0.45, 0.85, 1.0, opacity);
     let mat = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
         base_color: c,
         emissive: LinearRgba::rgb(0.05, 0.12, 0.2),

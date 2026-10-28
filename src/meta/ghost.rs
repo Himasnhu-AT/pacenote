@@ -207,7 +207,7 @@ mod tests {
 
     fn input_at(i: u32) -> Input {
         Input {
-            steer: if (i / 40) % 3 == 0 { 0.0 } else { ((i as f32) * 0.031).sin() },
+            steer: if (i / 40).is_multiple_of(3) { 0.0 } else { ((i as f32) * 0.031).sin() },
             throttle: if i % 200 < 150 { 1.0 } else { 0.0 },
             brake: if i % 200 >= 170 { 0.7 } else { 0.0 },
             handbrake: i % 300 > 290,
