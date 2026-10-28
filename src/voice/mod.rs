@@ -75,7 +75,7 @@ pub struct VoiceSettings {
     pub open_mic_threshold_db: f32,
     /// Input device name; empty = the system default.
     pub input_device: String,
-    /// How far the car (sfx, ambience) drops while the other player talks.
+    /// How far the car (sfx bus) drops while the other player talks; ambience 2 dB more.
     pub duck_db: f32,
 }
 
@@ -250,7 +250,9 @@ impl Plugin for VoicePlugin {
 pub struct VoiceSet;
 
 fn duck_snapshot(db: f32) -> MixSnapshot {
-    MixSnapshot::new(DUCK_SNAPSHOT).volume("sfx", -db.abs()).volume("ambience", -db.abs()).fades(0.12, 0.7)
+    // sfx covers the car bus (a child of sfx); ambience dips a little more, like the engine's
+    // own dialogue duck.
+    MixSnapshot::new(DUCK_SNAPSHOT).volume("sfx", -db.abs()).volume("ambience", -db.abs() - 2.0).fades(0.12, 0.7)
 }
 
 fn vs(w: &World) -> &VoiceSettings {
@@ -428,13 +430,19 @@ fn capture_frames(
 
 fn run_playout(
     settings: Res<VoiceSettings>,
-    volumes: Option<Res<engine::audio::Volumes>>,
+    mixer: Option<Res<Mixer>>,
     time: Res<Time<Real>>,
     mut inbox: ResMut<VoiceInbox>,
     mut st: ResMut<VoiceState>,
 ) {
     let st = &mut *st;
-    let master = volumes.as_ref().map_or(1.0, |v| if v.muted { 0.0 } else { v.master });
+    // On the device, voice follows the engine's "voice" bus (master × Dialogue volume, mute,
+    // solo); the main-thread playout (headless, muted, tests) keeps the voice level alone so
+    // its output can be checked.
+    let master = match (&mixer, st.device_playout) {
+        (Some(m), true) => m.effective_gain(engine::sound::BusId::VOICE),
+        _ => 1.0,
+    };
     let gain = if settings.enabled { settings.volume * master } else { 0.0 };
     st.shared.set_gain(gain);
     for p in inbox.packets.drain(..) {

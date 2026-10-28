@@ -193,6 +193,28 @@ mod tests {
         assert_eq!(&pcm[..], &a[5 * FRAME..6 * FRAME]);
     }
 
+    /// `cargo test --lib voice::adpcm -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_codec() {
+        let x = sine(FRAME * 1000, 440.0, 0.5);
+        let mut enc = Encoder::new();
+        let mut bytes = [0u8; FRAME_BYTES];
+        let mut pcm = [0i16; FRAME];
+        let t = std::time::Instant::now();
+        for f in x.chunks_exact(FRAME) {
+            enc.encode(f.try_into().unwrap(), &mut bytes);
+            std::hint::black_box(&bytes);
+        }
+        let e = t.elapsed().as_secs_f64() * 1e6 / 1000.0;
+        let t = std::time::Instant::now();
+        for _ in 0..1000 {
+            decode(std::hint::black_box(&bytes), &mut pcm);
+        }
+        let d = t.elapsed().as_secs_f64() * 1e6 / 1000.0;
+        println!("adpcm per 20 ms frame: encode {e:.2} us, decode {d:.2} us");
+    }
+
     #[test]
     fn extremes_and_bad_input() {
         let mut x = vec![i16::MAX; FRAME * 4];
