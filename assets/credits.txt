@@ -1,12 +1,8 @@
-# Pacenote
+# Pacenote credits (shown on the credits screen). The art stream's version replaces this one.
+# Lines starting with '#' are comments; a line ending in ':' is a heading; blank lines separate.
+
+Pacenote:
 An original two-person rally game.
 
-# Design and code
-The Pacenote team
-
-# Art and audio
-Placeholder: the art stream fills this file with every downloaded asset,
-its author, source URL and licence (CC0 / CC-BY), as listed in assets_src/SOURCES.md.
-
-# Thanks
+Thanks:
 Everyone who reads the road out loud.
