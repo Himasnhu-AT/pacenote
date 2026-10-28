@@ -61,7 +61,7 @@ fn puff(name: &str, color: [f32; 3], alpha: f32, size: (f32, f32), grow: f32, li
         velocity: Velocity::Cone { dir: Vec3::new(0.0, 1.0, 0.0), angle: 1.0, speed: (0.6, 2.0) },
         gravity: Vec3::new(0.0, 0.25, 0.0),
         drag: 1.6,
-        size: size,
+        size,
         size_over_life: Curve::linear(0.7, grow),
         color_over_life: Gradient::srgb(&[(0.0, color, 0.0), (0.08, color, alpha), (1.0, color, 0.0)]),
         rotation: (0.0, std::f32::consts::TAU),
@@ -166,7 +166,7 @@ pub fn intensity(kind: Kind, surface: Option<Surface>, speed: f32, slip_ratio: f
     // Nothing at a standstill (the tyres carry a little slip even when held).
     let moving = ((speed - 0.8) / 3.0).clamp(0.0, 1.0);
     let slip = (slip_ratio.abs() * 2.5 + slip_angle.abs() * 3.0).clamp(0.0, 1.0) * moving;
-    let roll = v * if rear { 0.7 } else { 0.35 };
+    let roll = v * moving * if rear { 0.7 } else { 0.35 };
     let loose = (roll + slip * (0.4 + 0.6 * v)).clamp(0.0, 1.0);
     match (kind, s) {
         (Kind::Dust, Surface::Gravel) => loose,

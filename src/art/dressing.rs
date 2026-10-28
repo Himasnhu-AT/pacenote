@@ -112,6 +112,8 @@ pub fn catalog(world: &mut World, biome: Biome, wet: bool) -> PcgCatalog {
     cat
 }
 
+type NewCover = (Added<MeshMaterial3d<StandardMaterial>>, Without<Cover>);
+
 /// Ground-cover (alpha card) materials.
 #[derive(Resource, Default)]
 pub struct CoverMats(Vec<AssetId<StandardMaterial>>);
@@ -121,7 +123,7 @@ pub struct CoverMats(Vec<AssetId<StandardMaterial>>);
 pub fn tag_cover(
     mut commands: Commands,
     mats: Option<Res<CoverMats>>,
-    added: Query<(Entity, &MeshMaterial3d<StandardMaterial>, Has<Name>), (Added<MeshMaterial3d<StandardMaterial>>, Without<Cover>)>,
+    added: Query<(Entity, &MeshMaterial3d<StandardMaterial>, Has<Name>), NewCover>,
 ) {
     let Some(mats) = mats else { return };
     for (e, m, merged) in &added {

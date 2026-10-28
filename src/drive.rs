@@ -156,7 +156,7 @@ fn follow_camera(
     let fwd = car.rotation * Vec3::NEG_Z;
     let flat = Vec3::new(fwd.x, 0.0, fwd.z).normalize_or(Vec3::NEG_Z);
     if mode.0 {
-        cam.translation = car.translation + car.rotation * Vec3::new(0.0, 0.62, -0.55);
+        cam.translation = car.translation + car.rotation * crate::art::car::BONNET_CAM;
         cam.rotation = car.rotation;
         *smooth = None;
         return;

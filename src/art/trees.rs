@@ -22,6 +22,7 @@ use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::camera::primitives::MeshAabb;
 use engine::gfx::MainCamera;
 use engine::pcg::PcgEmitted;
 use engine::render_budget::{KeepDetail, Scenery};
@@ -165,6 +166,7 @@ fn core_card(g: &mut Geo, yaw: f32, y0: f32, y1: f32, w: f32, f: Frame) {
 
 /// A branch card from the trunk at height `y` outwards along `yaw`, `len` long, drooping by
 /// `droop` radians, rolled by `roll` about its own axis; the picture's base sits at the trunk.
+#[allow(clippy::too_many_arguments)]
 fn branch_card(g: &mut Geo, y: f32, yaw: f32, len: f32, width: f32, droop: f32, roll: f32, f: Frame) {
     let out = Vec3::new(yaw.sin(), 0.0, yaw.cos());
     let dir = (out * droop.cos() - Vec3::Y * droop.sin()).normalize();
@@ -512,11 +514,18 @@ pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit
         }
         for (sp, g) in per {
             field.stats.far_triangles += g.tris();
-            let h = meshes.add(g.mesh(false));
+            // GPU-only (no CPU copy kept), so the bounds go on explicitly.
+            let mut m = g.mesh(false);
+            let aabb = m.compute_aabb();
+            m.asset_usage = RenderAssetUsages::RENDER_WORLD;
+            let h = meshes.add(m);
             let range = VisibilityRange { start_margin: (FAR_START - FADE)..FAR_START, end_margin: (kit.view - 60.0)..kit.view, use_aabb: false };
             let id = commands
                 .spawn((Name::new("trees far"), Mesh3d(h), MeshMaterial3d(kit.species[&sp].far_mat.clone()), Transform::from_translation(cell.center), range, NotShadowCaster, Scenery, KeepDetail))
                 .id();
+            if let Some(a) = aabb {
+                commands.entity(id).insert((a, bevy::camera::visibility::NoAutoAabb));
+            }
             cell.far.push(id);
         }
     }

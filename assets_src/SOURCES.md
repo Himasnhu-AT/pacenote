@@ -689,6 +689,32 @@ CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and mo
 - **Credit line:** Optional (CC0): "Old Tyre" by MP, Poly Haven
 
 
+## Added by the art stream (2026-10-28)
+
+### Foliage alpha maps (Poly Haven, CC0)
+
+Poly Haven's 2K JPG foliage textures carry no alpha (the leaf/needle cut-outs are in a separate map), so these were downloaded from the same API (`https://api.polyhaven.com/files/<id>`, key `Alpha` or `<part>_alpha`, 2K JPG) into each model's `textures/` folder:
+
+| Model | File |
+|---|---|
+| shrub_02 | `shrub_02_alpha_2k.jpg` |
+| shrub_04 | `shrub_04_alpha_2k.jpg` |
+| fern_02 | `fern_02_alpha_2k.jpg` |
+| grass_medium_01 | `grass_medium_01_alpha_2k.jpg` |
+| grass_medium_02 | `grass_medium_02_alpha_2k.jpg` |
+| pine_sapling_small | `pine_sapling_small_twig_alpha_2k.jpg` |
+| fir_sapling | `fir_sapling_twigs_alpha_2k.jpg` |
+| island_tree_02 | `island_tree_02_leaves_alpha_2k.jpg` |
+
+Same authors and licence as the models above. ~3.3 MB in total.
+
+### What the game ships (assets/, built by tools/art/)
+
+- `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures and foliage cards rendered in Blender from `fir_sapling`, `pine_sapling_small` and `island_tree_02` (`tools/art/prep_textures.sh`, `tools/art/render_cards.py`).
+- `assets/models/*.pnm`: decimated rocks, shrubs, ferns, grass and a stump (`tools/art/build_meshes.py`).
+- `assets/models/car.glb`: Car Concept, rescaled, logos removed, repainted (`tools/art/build_car.py`).
+- Credits: `assets/credits.txt`.
+
 ## Not found / not downloaded
 
 ### Car (rally hatchback): manual download needed

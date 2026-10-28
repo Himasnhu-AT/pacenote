@@ -19,6 +19,10 @@ impl Plugin for CarArtPlugin {
     }
 }
 
+/// Bonnet camera position in the car's frame: over the hood, just ahead of the windscreen.
+/// (The hood top is ~0.39 m above the model's hub height at z = −1.4: see `model_height`.)
+pub const BONNET_CAM: Vec3 = Vec3::new(0.0, -0.02, -1.35);
+
 /// Model tyre radius (m), from the prepared model.
 pub const MODEL_WHEEL_RADIUS: f32 = 0.339;
 
@@ -37,13 +41,22 @@ pub struct CarRig {
 
 const NAMES: [&str; 4] = ["FL", "FR", "RL", "RR"];
 
+/// Where the model's origin (its hub height) sits in the body frame: the front mounts at static
+/// load, raised by the model's bigger tyres.
+pub fn model_height(s: &crate::vehicle::Spec) -> f32 {
+    let static_comp = (s.mass * 9.81 / 4.0 / s.spring).min(s.travel);
+    s.mounts[0].y - (s.rest - static_comp) + (MODEL_WHEEL_RADIUS - s.wheel_radius)
+}
+
 /// Adds the model to the car entity. Visual worlds only.
 pub fn spawn(world: &mut World, car: Entity) {
     if !super::visual(world) {
         return;
     }
+    let spec = world.get_resource::<CarSpec>().map(|s| s.0.clone()).unwrap_or_default();
     let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset("models/car.glb"));
-    let model = world.spawn((Name::new("car model"), CarModel, WorldAssetRoot(scene), Transform::default(), Visibility::default(), Actor)).id();
+    let tf = Transform::from_xyz(0.0, model_height(&spec), 0.0);
+    let model = world.spawn((Name::new("car model"), CarModel, WorldAssetRoot(scene), tf, Visibility::default(), Actor)).id();
     world.entity_mut(car).add_child(model);
 }
 
@@ -90,6 +103,8 @@ fn rig(
                         && let Some(mut i) = images.get_mut(img.id())
                     {
                         engine::gfx::build_mips(&mut i);
+                        // The GPU has it now; drop the CPU copy.
+                        i.asset_usage = bevy::asset::RenderAssetUsages::RENDER_WORLD;
                     }
                 }
             }
@@ -104,11 +119,12 @@ fn wheels(cars: Query<(&DrivenCar, &Children)>, rigs: Query<&CarRig>, spec: Opti
     let s = &spec.0;
     for (c, kids) in &cars {
         let Some(rig) = kids.iter().find_map(|k| rigs.get(k).ok()) else { continue };
-        let lift = MODEL_WHEEL_RADIUS - s.wheel_radius;
+        let (lift, base) = (MODEL_WHEEL_RADIUS - s.wheel_radius, model_height(s));
         for i in 0..4 {
             let w = &c.car.wheels[i];
             // Hub height in the body frame: mount minus the extended spring.
-            let y = s.mounts[i].y - (s.rest - w.compression) + lift;
+            // …relative to the model's origin.
+            let y = s.mounts[i].y - (s.rest - w.compression) + lift - base;
             if let Ok(mut t) = tfs.get_mut(rig.hub[i]) {
                 t.translation = Vec3::new(rig.rest[i].x, y, rig.rest[i].z);
                 t.rotation = if i < 2 { Quat::from_rotation_y(c.car.steer) } else { Quat::IDENTITY };
@@ -117,5 +133,20 @@ fn wheels(cars: Query<(&DrivenCar, &Children)>, rigs: Query<&CarRig>, spec: Opti
                 t.rotation = Quat::from_rotation_x(-w.angle);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_sits_on_its_wheels() {
+        let s = crate::vehicle::Spec::default();
+        let h = model_height(&s);
+        // Hubs ~0.5 m below the centre of mass; tyre bottoms reach the ground the sim uses.
+        assert!((-0.6..-0.45).contains(&h), "{h}");
+        let ground = s.mounts[0].y - s.rest + (s.mass * 9.81 / 4.0 / s.spring) - s.wheel_radius;
+        assert!((h - MODEL_WHEEL_RADIUS - ground).abs() < 1e-4);
     }
 }

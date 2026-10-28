@@ -8,6 +8,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::camera::primitives::MeshAabb;
 use engine::render_budget::{KeepDetail, Scenery};
 use engine::world::SplatLayer;
 
@@ -119,22 +120,16 @@ fn wander(s: f32) -> f32 {
     0.12 * (s / 37.0).sin() + 0.07 * (s / 13.0 + 1.3).sin()
 }
 
-/// Spawns the road ribbon and verge strips.
+/// Spawns the road: the stage's main surface as continuous ribbons, other surfaces (patches)
+/// as blended overlays that fade in and out along the road and towards the edges, and the verge
+/// strips.
 pub fn spawn_road(world: &mut World, s: &StageWorld) {
     let road = &s.road;
     let wet = world.get_resource::<Wet>().is_some_and(|w| w.0);
-    let mut road_mats: HashMap<&'static str, Handle<StandardMaterial>> = HashMap::new();
-    let mut verge_mats: HashMap<&'static str, Handle<StandardMaterial>> = HashMap::new();
-    let mut i = 0;
-    while i + 1 < road.len() {
-        let surf = road.surface[i];
-        let mut j = i;
-        while j + 1 < road.len() && road.surface[j] == surf && j - i < 100 {
-            j += 1;
-        }
-        let (set, verge_set) = surface_sets(surf, s.def.biome);
-        let mat = road_mats
-            .entry(set)
+    let main = s.def.surface;
+    let mut mats: HashMap<(&'static str, bool), Handle<StandardMaterial>> = HashMap::new();
+    let mut mat = |world: &mut World, set: &'static str, blend: bool| {
+        mats.entry((set, blend))
             .or_insert_with(|| {
                 pbr(world, set, |m| {
                     if wet {
@@ -144,32 +139,72 @@ pub fn spawn_road(world: &mut World, s: &StageWorld) {
                     if set == "snow" {
                         m.perceptual_roughness = 0.75;
                     }
-                })
-            })
-            .clone();
-        let vmat = verge_mats
-            .entry(verge_set)
-            .or_insert_with(|| {
-                pbr(world, verge_set, |m| {
-                    m.alpha_mode = AlphaMode::Blend;
-                    m.base_color = Color::srgb(0.8, 0.8, 0.8);
-                    m.depth_bias = 2.0;
-                    if wet {
-                        m.base_color = Color::srgb(0.72, 0.72, 0.74);
-                        m.perceptual_roughness = 0.6;
+                    if blend {
+                        m.alpha_mode = AlphaMode::Blend;
+                        m.depth_bias = 1.0;
                     }
                 })
             })
-            .clone();
-        let (center, mesh) = ribbon(road, i, j, surf);
-        let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
-        world.spawn((Name::new("road"), Mesh3d(h), MeshMaterial3d(mat), Transform::from_translation(center), Scenery, KeepDetail));
+            .clone()
+    };
+    let (main_set, verge_set) = surface_sets(main, s.def.biome);
+    let main_mat = mat(world, main_set, false);
+    let vmat = pbr(world, verge_set, |m| {
+        m.alpha_mode = AlphaMode::Blend;
+        m.base_color = Color::srgb(0.8, 0.8, 0.8);
+        m.depth_bias = 2.0;
+        if wet {
+            m.base_color = Color::srgb(0.72, 0.72, 0.74);
+            m.perceptual_roughness = 0.6;
+        }
+    });
+    let last = road.len() - 1;
+    let mut i = 0;
+    while i < last {
+        let j = (i + 100).min(last);
+        let (center, mesh) = ribbon(road, i, j, main, 0.04, |_, _| 1.0);
+        let (h, aabb) = add_mesh(world, mesh);
+        let id = world.spawn((Name::new("road"), Mesh3d(h), MeshMaterial3d(main_mat.clone()), Transform::from_translation(center), Scenery, KeepDetail)).id();
+        bounds(world, id, aabb);
         for side in [-1.0f32, 1.0] {
             let (center, mesh) = verge(s, i, j, side);
-            let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
-            world.spawn((Name::new("verge"), Mesh3d(h), MeshMaterial3d(vmat.clone()), Transform::from_translation(center), Scenery, KeepDetail, NotShadowCaster));
+            let (h, aabb) = add_mesh(world, mesh);
+            let id = world.spawn((Name::new("verge"), Mesh3d(h), MeshMaterial3d(vmat.clone()), Transform::from_translation(center), Scenery, KeepDetail, NotShadowCaster)).id();
+            bounds(world, id, aabb);
         }
         i = j;
+    }
+    // Patches of another surface.
+    const RAMP: usize = 5;
+    let mut i = 0;
+    while i < last {
+        let surf = road.surface[i];
+        let mut j = i;
+        while j < last && road.surface[j] == surf {
+            j += 1;
+        }
+        if surf != main {
+            let (a, b) = (i.saturating_sub(RAMP), (j + RAMP).min(last));
+            let (s0, s1) = (i as f32 * stage::STEP, j as f32 * stage::STEP);
+            let ramp = RAMP as f32 * stage::STEP;
+            let fade = move |st: f32, lat: f32, e: f32| {
+                let along = ((st - (s0 - ramp)) / ramp).min(((s1 + ramp) - st) / ramp).clamp(0.0, 1.0);
+                let rag = 0.35 * (st / 5.3).sin() + 0.25 * (st / 2.1 + lat).sin();
+                let across = ((e - 0.2 + rag * 0.5 - lat.abs()) / 0.9).clamp(0.0, 1.0);
+                along * along * (3.0 - 2.0 * along) * across
+            };
+            let pm = mat(world, surface_sets(surf, s.def.biome).0, true);
+            let mut k = a;
+            while k < b {
+                let l = (k + 100).min(b);
+                let (center, mesh) = ribbon(road, k, l, surf, 0.055, |st, lat| fade(st, lat, road.width[(st / stage::STEP) as usize].min(9.0) * 0.5 + 0.4));
+                let (h, aabb) = add_mesh(world, mesh);
+                let id = world.spawn((Name::new("road patch"), Mesh3d(h), MeshMaterial3d(pm.clone()), Transform::from_translation(center), Scenery, KeepDetail, NotShadowCaster)).id();
+                bounds(world, id, aabb);
+                k = l;
+            }
+        }
+        i = j.max(i + 1);
     }
 }
 
@@ -183,9 +218,10 @@ fn left(road: &Road, i: usize) -> Vec3 {
     Vec3::new(d.y, 0.0, -d.x)
 }
 
-/// Road ribbon for stations a..=b, positioned around its centre (so distance-based detail and
-/// transparency sorting see where it is). Returns (centre, mesh).
-fn ribbon(road: &Road, a: usize, b: usize, surf: Surface) -> (Vec3, Mesh) {
+/// Road ribbon for stations a..=b, `lift` above the road, positioned around its centre (so
+/// distance-based detail and transparency sorting see where it is), vertex alpha from
+/// `alpha(s, lateral)`. Returns (centre, mesh).
+fn ribbon(road: &Road, a: usize, b: usize, surf: Surface, lift: f32, alpha: impl Fn(f32, f32) -> f32) -> (Vec3, Mesh) {
     let center = (road.pts[a] + road.pts[b]) * 0.5;
     let (mut pos, mut uv, mut col, mut idx) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut rows: Vec<u32> = Vec::new();
@@ -198,12 +234,12 @@ fn ribbon(road: &Road, a: usize, b: usize, surf: Surface) -> (Vec3, Mesh) {
         let w = wander(st);
         rows.push(pos.len() as u32);
         for &lat in &cols {
-            let y = road.height_at(&station_pos(road, i, lat)) + 0.04;
+            let y = road.height_at(&station_pos(road, i, lat)) + lift;
             let q = Vec3::new(p.x, y, p.z) + l * lat;
             pos.push((q - center).to_array());
             uv.push([lat / 4.0, st / 4.0]);
             let k = brightness(surf, lat - w);
-            col.push([k, k, k, 1.0]);
+            col.push([k, k, k, alpha(st, lat)]);
         }
     }
     // Rows differ in column count where the width changes: stitch handles it.
@@ -296,6 +332,19 @@ fn finish(pos: Vec<[f32; 3]>, uv: Vec<[f32; 2]>, col: Option<Vec<[f32; 4]>>, idx
     m
 }
 
+fn bounds(world: &mut World, id: Entity, aabb: Option<bevy::camera::primitives::Aabb>) {
+    if let Some(a) = aabb {
+        world.entity_mut(id).insert((a, bevy::camera::visibility::NoAutoAabb));
+    }
+}
+
+/// Adds a static ground mesh GPU-only (no CPU copy) with its bounds on the entity.
+fn add_mesh(world: &mut World, mut m: Mesh) -> (Handle<Mesh>, Option<bevy::camera::primitives::Aabb>) {
+    let aabb = m.compute_aabb();
+    m.asset_usage = RenderAssetUsages::RENDER_WORLD;
+    (world.resource_mut::<Assets<Mesh>>().add(m), aabb)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,7 +381,7 @@ mod tests {
         for def in stage::stages().into_iter().filter(|d| [1, 5, 9].contains(&d.id)) {
             let s = crate::world::generate(&def);
             let n = s.road.len().min(120);
-            let (_, m) = ribbon(&s.road, 0, n - 1, def.surface);
+            let (_, m) = ribbon(&s.road, 0, n - 1, def.surface, 0.04, |_, _| 1.0);
             assert!(m.count_vertices() > 100);
             for side in [-1.0, 1.0] {
                 let (_, v) = verge(&s, 0, n - 1, side);
