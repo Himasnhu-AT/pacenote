@@ -25,6 +25,8 @@ use engine::actions::ActionState;
 use engine::sound::{BusId, Mixer, SoundBackend, SoundConfig, SoundSet};
 
 use crate::drive::{CameraMode, CarSpec, DrivenCar, StageRun};
+use crate::guide::GuideStage;
+use crate::guide::sync::NetCar;
 use crate::stage::Surface;
 use crate::vehicle::{Car, Spec};
 use crate::world::StageWorld;
@@ -44,7 +46,7 @@ impl Plugin for RallyAudioPlugin {
             .register_type::<RallyAudioStats>()
             .insert_resource(Link { shared: Arc::new(Shared::default()), started: false, frame: Frame::default() })
             .add_systems(Startup, add_buses)
-            .add_systems(PostUpdate, (start_output, gather, capture).chain().after(SoundSet::Mix));
+            .add_systems(PostUpdate, (start_output, net_car_sound, gather, capture).chain().after(SoundSet::Mix));
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
             app.add_audio_source::<RallyStream>();
         }
@@ -53,8 +55,8 @@ impl Plugin for RallyAudioPlugin {
 
 /// The car as heard on a machine that doesn't simulate it (the guide). Without a
 /// `DrivenCar`, the synth plays this instead: the engine, turbo, pops and wind, but no tyres
-/// (the replicated state has no wheel surface or slip). The guide's sync fills it every frame,
-/// e.g. from `guide::sync::NetCar` on the `Remote` entity; `active: false` means silence.
+/// (the replicated state has no wheel surface or slip). Filled every frame from
+/// `guide::sync::NetCar` on the `Remote` entity; `active: false` means silence.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub struct RemoteCarSound {
     pub active: bool,
@@ -64,6 +66,18 @@ pub struct RemoteCarSound {
     pub throttle: f32,
     /// |velocity| m/s.
     pub speed: f32,
+}
+
+/// On the guide: the replicated car (`NetCar` on the `Remote` entity) → [`RemoteCarSound`].
+fn net_car_sound(cars: Query<&NetCar, With<engine::net::Remote>>, mut r: ResMut<RemoteCarSound>) {
+    let next = cars
+        .iter()
+        .next()
+        .map(|c| RemoteCarSound { active: true, rpm: c.rpm, gear: c.gear, throttle: c.throttle, speed: c.vel.length() })
+        .unwrap_or_default();
+    if *r != next {
+        *r = next;
+    }
 }
 
 /// The car sound's parameters for a replicated car (engine and wind only).
@@ -282,6 +296,7 @@ fn gather(
     actions: Option<Res<ActionState>>,
     run: Option<Res<StageRun>>,
     stage: Option<Res<StageWorld>>,
+    guide_stage: Option<Res<GuideStage>>,
     cam: Option<Res<CameraMode>>,
     spec: Option<Res<CarSpec>>,
     cars: Query<&DrivenCar>,
@@ -296,8 +311,10 @@ fn gather(
     f.n_events = 0;
     let interior = if cam.is_some_and(|c| c.0) { 1.0 } else { 0.0 };
     // Ambience: the stage's biome / weather / time.
-    f.amb = match stage.as_deref() {
-        Some(s) => AmbParams { active: true, biome: s.def.biome, weather: s.def.weather, time: s.def.time, interior },
+    // (The guide has no `StageWorld`, only the `GuideStage` it generated from the stage id.)
+    let def = stage.as_deref().map(|s| &s.def).or(guide_stage.as_deref().map(|g| &g.def));
+    f.amb = match def {
+        Some(d) => AmbParams { active: true, biome: d.biome, weather: d.weather, time: d.time, interior },
         None => AmbParams { active: false, ..f.amb },
     };
     let spec = spec.map(|s| s.0.clone()).unwrap_or_default();

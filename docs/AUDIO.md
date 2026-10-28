@@ -171,18 +171,11 @@ Apple M-series, dev profile (game crate at opt-level 1):
 
 ## Known limits
 
-- **Guide machine:** the guide has no `DrivenCar` and no `StageWorld`. The synth then plays
-  `audio::RemoteCarSound { active, rpm, gear, throttle, speed }`: engine, turbo, pops and
-  wind, but no tyres or thumps (the replicated state has no surface, slip or impacts) and no
-  ambience. After merging guide-net, fill it from `guide::sync::NetCar` on the `Remote`
-  entity with one small system:
-
-  ```rust
-  fn net_car_sound(q: Query<&NetCar, With<engine::net::Remote>>, mut r: ResMut<audio::RemoteCarSound>) {
-      *r = q.iter().next().map(|c| audio::RemoteCarSound {
-          active: true, rpm: c.rpm, gear: c.gear, throttle: c.throttle, speed: c.vel.length() }).unwrap_or_default();
-  }
-  ```
+- **Guide machine:** the guide has no `DrivenCar` and no `StageWorld`. `net_car_sound` copies
+  `guide::sync::NetCar` from the `Remote` entity (rpm, gear, the driver's throttle, speed)
+  into `audio::RemoteCarSound`, and the synth plays that: engine, turbo, pops and wind. There
+  are no tyres, thumps or impacts, because the replicated state has no surface, slip or
+  impacts. Ambience comes from `GuideStage.def`.
 - The car is 2D, centred on the listener. That is fine for the chase and bonnet cameras,
   but there is no doppler or distance for a ghost or other cars (use engine 3D cues for
   those).
