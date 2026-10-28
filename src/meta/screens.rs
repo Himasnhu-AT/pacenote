@@ -587,7 +587,7 @@ fn join_status(world: &mut World) {
     let (msg, color) = match netlink::status(world) {
         netlink::NetStatus::Connecting(a) => (format!("Connecting to {a}\u{2026}"), t.text_muted),
         netlink::NetStatus::Connected(a) => (format!("Connected to {a}. Waiting for the driver to start a stage."), t.good),
-        netlink::NetStatus::Failed(e) => (world.resource::<NetNote>().0.clone().unwrap_or(e), t.bad),
+        netlink::NetStatus::Failed(e) => (e, t.bad),
         _ => (world.resource::<NetNote>().0.clone().unwrap_or_default(), t.text_muted),
     };
     let mut q = world.query_filtered::<(&mut Text, &mut TextColor), With<JoinStatus>>();
