@@ -34,11 +34,15 @@ pub struct ArtPlugin;
 
 impl Plugin for ArtPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "dev")]
+        dev::register(app);
+        // Headless runs (tests, servers) have no renderer: nothing to draw.
+        if !app.is_plugin_added::<bevy::pbr::MaterialPlugin<StandardMaterial>>() {
+            return;
+        }
         app.add_systems(Update, (trees::ingest, trees::stream).chain())
             .add_systems(Update, dressing::tag_cover)
             .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin));
-        #[cfg(feature = "dev")]
-        dev::register(app);
     }
 }
 
