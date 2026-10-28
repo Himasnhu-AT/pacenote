@@ -176,6 +176,33 @@ pub fn car_params(car: &Car, spec: &Spec, throttle: f32, interior: f32) -> CarPa
     }
 }
 
+/// The car sound on the guide's machine, from the driver's replicated car: the guide sits in
+/// the car, so it's the interior mix. No per-wheel contacts come over the wire, so the surface
+/// under the car stands in for all four wheels and sliding is read from wheel spin vs speed.
+pub fn net_car_params(c: &crate::guide::sync::NetCar, spec: &Spec, surface: Option<Surface>) -> CarParams {
+    let speed = c.vel.length();
+    let mut surfaces = [Contact::default(); car::SURFACES];
+    if let Some(s) = surface {
+        let k = surface_class(s);
+        let wheel_v = c.spin.iter().map(|w| (w * spec.wheel_radius).abs()).fold(0.0f32, f32::max);
+        let slip_v = (wheel_v - speed).abs();
+        surfaces[k].roll = (speed.max(wheel_v) / 25.0).min(1.6);
+        surfaces[k].slide = 2.0 * dsp::smoothstep(0.3, 7.0, slip_v);
+    }
+    CarParams {
+        active: true,
+        rpm: c.rpm,
+        idle_rpm: spec.idle_rpm,
+        redline: spec.redline,
+        throttle: c.throttle,
+        shifting: false,
+        gear: c.gear,
+        speed,
+        surfaces,
+        interior: 1.0,
+    }
+}
+
 /// Finds one-shots in state changes between sim steps: impacts, suspension slams and
 /// landings, gear changes.
 #[derive(Default, Clone, Debug)]
@@ -257,14 +284,17 @@ fn gather(
     mut link: ResMut<Link>,
     mut tr: Local<Tracker>,
     mut stats: ResMut<RallyAudioStats>,
+    guide: (Option<Res<crate::guide::GuideFeed>>, Option<Res<crate::guide::GuideStage>>),
 ) {
+    let (feed, gstage) = guide;
     let link = &mut *link;
     let f = &mut link.frame;
     f.n_events = 0;
     let interior = if cam.is_some_and(|c| c.0) { 1.0 } else { 0.0 };
     // Ambience: the stage's biome / weather / time.
-    f.amb = match stage.as_deref() {
-        Some(s) => AmbParams { active: true, biome: s.def.biome, weather: s.def.weather, time: s.def.time, interior },
+    let def = stage.as_deref().map(|s| &s.def).or(gstage.as_deref().map(|g| &g.def));
+    f.amb = match def {
+        Some(d) => AmbParams { active: true, biome: d.biome, weather: d.weather, time: d.time, interior },
         None => AmbParams { active: false, ..f.amb },
     };
     let spec = spec.map(|s| s.0.clone()).unwrap_or_default();
@@ -290,7 +320,20 @@ fn gather(
         }
         None => {
             tr.seen = false;
-            f.car.active = false;
+            // The guide: the driver's car as replicated.
+            // Silent while the driver is in a menu (stage id 0).
+            let live = feed.as_deref().filter(|f| f.stage.id != 0);
+            match (live.and_then(|f| f.car.as_ref()), gstage.as_deref()) {
+                (Some(c), Some(g)) => {
+                    let surface = crate::stage::surface_at(c.pos.x, c.pos.z, &g.road);
+                    f.car = net_car_params(c, &spec, Some(surface));
+                    stats.rpm = c.rpm;
+                    stats.throttle = c.throttle;
+                    stats.gear = c.gear;
+                    stats.speed = f.car.speed;
+                }
+                _ => f.car.active = false,
+            }
         }
     }
     let car_bus = mixer.bus(CAR_BUS).unwrap_or(BusId::SFX);
@@ -438,5 +481,22 @@ mod tests {
             }
         }
         assert!(total >= 8 && ok * 10 >= total * 8, "pitch follows rpm in {ok}/{total} windows");
+    }
+}
+
+#[cfg(test)]
+mod guide_tests {
+    use super::*;
+    use crate::guide::sync::NetCar;
+
+    #[test]
+    fn guide_hears_the_drivers_throttle_and_slides() {
+        let spec = Spec::default();
+        let rolling = NetCar { vel: Vec3::new(0.0, 0.0, -20.0), rpm: 5200.0, gear: 3, throttle: 0.8, spin: [20.0 / spec.wheel_radius; 4], ..default() };
+        let p = net_car_params(&rolling, &spec, Some(Surface::Gravel));
+        assert!(p.active && p.throttle == 0.8 && p.gear == 3 && p.interior == 1.0);
+        assert!(p.surfaces[car::GRAVEL].roll > 0.5 && p.surfaces[car::GRAVEL].slide < 0.05);
+        let spinning = NetCar { spin: [35.0 / spec.wheel_radius; 4], ..rolling };
+        assert!(net_car_params(&spinning, &spec, Some(Surface::Gravel)).surfaces[car::GRAVEL].slide > 1.0);
     }
 }
