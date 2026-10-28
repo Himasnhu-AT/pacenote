@@ -376,3 +376,27 @@ mod debug {
         }
     }
 }
+
+#[cfg(test)]
+mod start_tests {
+    use super::*;
+    use crate::vehicle::{Car, Input, Spec, step};
+
+    /// Every stage: full throttle from the start line gets the car moving down the road.
+    #[test]
+    fn every_stage_drives_off_the_line() {
+        let spec = Spec::default();
+        for def in stage::stages() {
+            let w = generate(&def);
+            let (p, h) = w.road.start();
+            let mut car = Car::new(p + Vec3::Y * 0.9, h);
+            for i in 0..300 {
+                let input = if i < 60 { Input { handbrake: true, ..Input::default() } } else { Input { throttle: 1.0, ..Input::default() } };
+                step(&mut car, &spec, input, &w, 1.0 / 60.0);
+            }
+            let moved = (car.pos - p).length();
+            // 4 s of full throttle: about 25–65 km/h depending on surface and slope.
+            assert!(car.speed() * 3.6 > 20.0 && moved > 10.0, "stage {} {}: {:.1} km/h after 4 s, moved {moved:.1} m", def.id, def.name, car.speed() * 3.6);
+        }
+    }
+}
