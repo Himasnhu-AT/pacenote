@@ -2,8 +2,10 @@
 
 pub mod audio;
 pub mod drive;
+pub mod guide;
 pub mod hud;
 pub mod meta;
+pub mod net_session;
 pub mod stage;
 pub mod vehicle;
 pub mod voice;
@@ -27,7 +29,7 @@ impl Plugin for Pacenote {
         let n = engine::cli::arg_value("stage").and_then(|v| v.parse().ok()).unwrap_or(1u32).clamp(1, 20);
         app.insert_resource(StageChoice(n))
             .insert_resource(Time::<Fixed>::from_hz(60.0))
-            .add_plugins((drive::DrivePlugin, hud::HudPlugin))
+            .add_plugins((drive::DrivePlugin, hud::HudPlugin, guide::GuidePlugin))
             .add_plugins(audio::RallyAudioPlugin)
             .add_plugins(meta::MetaPlugin)
             .add_plugins(voice::VoicePlugin)
@@ -36,6 +38,10 @@ impl Plugin for Pacenote {
 }
 
 fn load_stage(world: &mut World) {
+    // The guide builds its map from the driver's stage instead (guide::GuideStage).
+    if world.get_resource::<net_session::Role>() == Some(&net_session::Role::Guide) {
+        return;
+    }
     let n = world.resource::<StageChoice>().0;
     let def = stage::stages().into_iter().find(|d| d.id == n).expect("stage");
     let t0 = std::time::Instant::now();
