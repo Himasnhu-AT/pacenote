@@ -1,0 +1,5 @@
+/target
+.DS_Store
+# Raw downloads (CC0/CC-BY sources): keep locally, ship cooked copies in assets/.
+/assets_src/*
+!/assets_src/SOURCES.md
