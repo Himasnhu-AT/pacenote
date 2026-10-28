@@ -63,7 +63,7 @@ impl Pair {
         }
     }
 
-    fn st<'a>(app: &'a App) -> &'a VoiceState {
+    fn st(app: &App) -> &VoiceState {
         app.world().resource::<VoiceState>()
     }
     fn st_mut(app: &mut App) -> Mut<'_, VoiceState> {

@@ -387,7 +387,7 @@ mod tests {
         let mut out = [0i16; FRAME];
         for step in 0..300u32 {
             let t = f64::from(step) * 20.0;
-            if step < 100 || step >= 160 {
+            if !(100..160).contains(&step) {
                 let d = if step % 10 < 3 { 120.0 } else { 0.0 };
                 jb.push(step, &f[step as usize], t + d);
             }

@@ -111,6 +111,7 @@ Apple M5 Pro, dev profile, `cargo test --test voice -- --nocapture`:
 |---|---|
 | Clean loopback, driver open mic on `talk`, 5 s | 195 frames sent (2 bursts + pre-roll + hang), 195 received, 192 played, 0 late, playout delay 60 ms; the 16 concealed frames are the fade tails after each spurt |
 | 40 ms + 15 ms jitter, 10 % loss, 2 % dup, 2 % reorder, 4 s tone | 217 sent, 182 received, 174 played, 5 late, 24 concealed, estimated jitter 16.7 ms, delay 60 ms |
+| Two processes, real UDP on localhost (driver `--host 7777 --voice-test talk --mute`, guide `--connect --voice-test tone:300 --sound` on the audio-device playout, volumes 0), steady 10 s on the guide | 389 received, 388 played, 0 late, 0 skipped, jitter 5.3–5.6 ms, delay 60 ms (the 32 concealed are 4 spurt-end fades). Guide push-to-talk 1.5 s: driver got 75, played 73, 0 lost. In the first seconds the guide drops ~24 frames to catch up after its stage-generation stall (expected: the burst exceeds delay + 80 ms) |
 | Bandwidth per talker | 164 B payload + ~10 B message/packet framing per 20 ms ≈ 70 kbit/s up while talking, 0 when silent |
 | Cost | per 20 ms frame: encode 2.0 µs, decode 0.45 µs (dev profile, `cargo test --lib voice::adpcm -- --ignored --nocapture`); the playout path does no allocation after start-up; capture appends to a 0.5 s ring under a mutex once per device callback |
 
