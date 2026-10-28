@@ -26,8 +26,12 @@ snapshot and voice ducking all apply to it.
 | `voice` | master (built-in) | the partner's voice (stream "voice"), volume from `SoundSettings::voice_volume` |
 | `ui` | master (built-in) | menus |
 
-Ducking: the engine's default rule takes `sfx` (and so `car`) down 4 dB, `ambience` 6 dB and
-`music` 9 dB while a voice on the `voice` bus is audible (attack 0.12 s, release 0.7 s).
+Ducking: voice chat plays in its own rodio source (branch `voice`). While the partner talks,
+it turns on the mix snapshot `voice_chat` (`sfx` −4 dB, `ambience` −6 dB, fades 0.12 s in and
+0.7 s out). `Mixer::effective_gain` includes snapshot dB and the parent chain, so `car` (under
+`sfx`) and `ambience` duck through the gains this stream already mirrors, with no extra hook.
+The engine's default duck rule (the same depths, keyed on engine voices on `voice`) also still
+applies.
 Volumes come from `CoreSettings` (master/sfx/ambience/ui) through the engine.
 
 ## The sounds
