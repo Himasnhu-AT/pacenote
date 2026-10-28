@@ -6,6 +6,7 @@ pub mod hud;
 pub mod meta;
 pub mod stage;
 pub mod vehicle;
+pub mod voice;
 pub mod world;
 
 use bevy::prelude::*;
@@ -29,6 +30,7 @@ impl Plugin for Pacenote {
             .add_plugins((drive::DrivePlugin, hud::HudPlugin))
             .add_plugins(audio::RallyAudioPlugin)
             .add_plugins(meta::MetaPlugin)
+            .add_plugins(voice::VoicePlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
     }
 }
