@@ -40,6 +40,7 @@ pub struct RallyAudioPlugin;
 impl Plugin for RallyAudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RallyAudioStats>()
+            .init_resource::<RemoteCarSound>()
             .register_type::<RallyAudioStats>()
             .insert_resource(Link { shared: Arc::new(Shared::default()), started: false, frame: Frame::default() })
             .add_systems(Startup, add_buses)
@@ -47,6 +48,37 @@ impl Plugin for RallyAudioPlugin {
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
             app.add_audio_source::<RallyStream>();
         }
+    }
+}
+
+/// The car as heard on a machine that doesn't simulate it (the guide). Without a
+/// `DrivenCar`, the synth plays this instead: the engine, turbo, pops and wind, but no tyres
+/// (the replicated state has no wheel surface or slip). The guide's sync fills it every frame,
+/// e.g. from `guide::sync::NetCar` on the `Remote` entity; `active: false` means silence.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct RemoteCarSound {
+    pub active: bool,
+    pub rpm: f32,
+    pub gear: i8,
+    /// The driver's throttle 0..1.
+    pub throttle: f32,
+    /// |velocity| m/s.
+    pub speed: f32,
+}
+
+/// The car sound's parameters for a replicated car (engine and wind only).
+pub fn remote_params(r: &RemoteCarSound, spec: &Spec) -> CarParams {
+    CarParams {
+        active: r.active,
+        rpm: r.rpm,
+        idle_rpm: spec.idle_rpm,
+        redline: spec.redline,
+        throttle: r.throttle,
+        shifting: false,
+        gear: r.gear,
+        speed: r.speed,
+        surfaces: [Contact::default(); car::SURFACES],
+        interior: 0.0,
     }
 }
 
@@ -253,6 +285,7 @@ fn gather(
     cam: Option<Res<CameraMode>>,
     spec: Option<Res<CarSpec>>,
     cars: Query<&DrivenCar>,
+    remote: Res<RemoteCarSound>,
     mixer: Res<Mixer>,
     mut link: ResMut<Link>,
     mut tr: Local<Tracker>,
@@ -290,7 +323,13 @@ fn gather(
         }
         None => {
             tr.seen = false;
-            f.car.active = false;
+            f.car = remote_params(&remote, &spec);
+            if remote.active {
+                stats.rpm = remote.rpm;
+                stats.throttle = remote.throttle;
+                stats.gear = remote.gear;
+                stats.speed = remote.speed;
+            }
         }
     }
     let car_bus = mixer.bus(CAR_BUS).unwrap_or(BusId::SFX);
@@ -438,5 +477,22 @@ mod tests {
             }
         }
         assert!(total >= 8 && ok * 10 >= total * 8, "pitch follows rpm in {ok}/{total} windows");
+    }
+
+    /// A replicated car (no `DrivenCar`) still sounds: engine and wind, no tyres.
+    #[test]
+    fn remote_car_sounds_without_tyres() {
+        let spec = Spec::default();
+        let off = remote_params(&RemoteCarSound::default(), &spec);
+        assert!(!off.active);
+        let on = remote_params(&RemoteCarSound { active: true, rpm: 5200.0, gear: 3, throttle: 0.8, speed: 30.0 }, &spec);
+        assert!(on.active && on.rpm == 5200.0 && on.throttle == 0.8 && on.gear == 3);
+        assert!(on.surfaces.iter().all(|c| c.roll == 0.0 && c.slide == 0.0));
+        let mut synth = RallySynth::new(1);
+        synth.apply(&Frame { car: on, ..Frame::default() });
+        let mut out = Vec::new();
+        synth.render_into(24_000, &mut out);
+        let rms = (out[24_000..].iter().map(|v| v * v).sum::<f32>() / (out.len() - 24_000) as f32).sqrt();
+        assert!(rms > 0.02 && out.iter().all(|v| v.is_finite()), "{rms}");
     }
 }
