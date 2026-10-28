@@ -1,0 +1,12 @@
+# Pacenote
+An original two-person rally game.
+
+# Design and code
+The Pacenote team
+
+# Art and audio
+Placeholder: the art stream fills this file with every downloaded asset,
+its author, source URL and licence (CC0 / CC-BY), as listed in assets_src/SOURCES.md.
+
+# Thanks
+Everyone who reads the road out loud.

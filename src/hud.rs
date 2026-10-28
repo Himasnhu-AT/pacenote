@@ -19,13 +19,13 @@ impl Plugin for HudPlugin {
     }
 }
 
-fn spawn_hud(mut commands: Commands, q: Query<(), With<HudText>>, mut done: Local<bool>) {
-    if *done || !q.is_empty() {
+fn spawn_hud(mut commands: Commands, q: Query<(), With<HudText>>) {
+    if !q.is_empty() {
         return;
     }
-    *done = true;
     commands.spawn((
         HudText,
+        DespawnOnExit(engine::flow::AppState::InGame),
         Text::new(""),
         TextFont { font_size: bevy::text::FontSize::Px(26.0), ..default() },
         TextColor(Color::WHITE),
@@ -33,6 +33,7 @@ fn spawn_hud(mut commands: Commands, q: Query<(), With<HudText>>, mut done: Loca
     ));
     commands.spawn((
         HudCenter,
+        DespawnOnExit(engine::flow::AppState::InGame),
         Text::new(""),
         TextFont { font_size: bevy::text::FontSize::Px(64.0), ..default() },
         TextColor(Color::srgb(1.0, 0.85, 0.3)),

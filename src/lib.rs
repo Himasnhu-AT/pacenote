@@ -3,6 +3,7 @@
 pub mod audio;
 pub mod drive;
 pub mod hud;
+pub mod meta;
 pub mod stage;
 pub mod vehicle;
 pub mod world;
@@ -27,6 +28,7 @@ impl Plugin for Pacenote {
             .insert_resource(Time::<Fixed>::from_hz(60.0))
             .add_plugins((drive::DrivePlugin, hud::HudPlugin))
             .add_plugins(audio::RallyAudioPlugin)
+            .add_plugins(meta::MetaPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
     }
 }

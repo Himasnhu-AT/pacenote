@@ -68,13 +68,19 @@ pub fn spawn_car(world: &mut World) {
     let (pos, heading) = s.road.start();
     let spec = world.resource::<CarSpec>().0.clone();
     let car = Car::new(pos + Vec3::Y * 0.9, heading);
+    let tf = Transform::from_translation(car.pos).with_rotation(car.rot);
+    // Headless (tests, a dedicated server): the car without visuals.
+    if !world.contains_resource::<Assets<StandardMaterial>>() {
+        world.spawn((Name::new("car"), DrivenCar { prev: (car.pos, car.rot), car }, CarBody, tf, Visibility::default()));
+        world.insert_resource(StageRun { countdown: 3.0, ..default() });
+        return;
+    }
     let body_mesh = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(spec.size.x, spec.size.y * 0.75, spec.size.z));
     let cabin_mesh = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(spec.size.x * 0.82, spec.size.y * 0.5, spec.size.z * 0.5));
     let wheel_mesh = world.resource_mut::<Assets<Mesh>>().add(Cylinder::new(spec.wheel_radius, 0.24).mesh().resolution(18).build().rotated_by(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)));
     let paint = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgb(0.85, 0.12, 0.1), perceptual_roughness: 0.35, metallic: 0.2, ..default() });
     let glass = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgb(0.08, 0.1, 0.12), perceptual_roughness: 0.1, ..default() });
     let tyre = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgb(0.06, 0.06, 0.06), perceptual_roughness: 0.9, ..default() });
-    let tf = Transform::from_translation(car.pos).with_rotation(car.rot);
     world
         .spawn((Name::new("car"), DrivenCar { prev: (car.pos, car.rot), car }, CarBody, tf, Visibility::default(), Actor))
         .with_children(|p| {
@@ -99,10 +105,11 @@ fn simulate(
     spec: Res<CarSpec>,
     stage: Res<StageWorld>,
     mut run: ResMut<StageRun>,
-    mut cars: Query<&mut DrivenCar>,
+    mut cars: Query<(Entity, &mut DrivenCar)>,
+    mut ghost: Option<ResMut<crate::meta::ghost::Recorder>>,
 ) {
     let dt = time.delta_secs();
-    for mut c in &mut cars {
+    for (e, mut c) in &mut cars {
         let c = &mut *c;
         c.prev = (c.car.pos, c.car.rot);
         let held = run.countdown > 0.0 || run.finished.is_some();
@@ -112,6 +119,9 @@ fn simulate(
         } else {
             Input { steer: actions.value("steer"), throttle: actions.value("throttle"), brake: actions.value("brake"), handbrake: actions.pressed("handbrake") }
         };
+        if let Some(g) = ghost.as_deref_mut() {
+            g.input(e, input);
+        }
         vehicle::step(&mut c.car, &spec.0, input, &*stage, dt);
         // Clock.
         if run.countdown > 0.0 {
@@ -142,6 +152,9 @@ fn simulate(
             let i = stage.road.station(run.progress);
             let (p, d) = (stage.road.pts[i], stage.road.dir[i]);
             vehicle::recover(&mut c.car, p, d.x.atan2(d.y));
+            if let Some(g) = ghost.as_deref_mut() {
+                g.recover(e, p, d.x.atan2(d.y));
+            }
             c.prev = (c.car.pos, c.car.rot);
             run.penalty += 5.0;
         }
