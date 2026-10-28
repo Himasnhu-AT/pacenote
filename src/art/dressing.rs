@@ -1,0 +1,136 @@
+//! PCG dressing assets: the dressing graph's item names (rocks, bushes, grass, posts) mapped
+//! to the decimated Poly Haven models (`assets/models/*.pnm`, `tools/art/build_meshes.py`) and
+//! their cooked texture sets. Trees are drawn by [`super::trees`] from the graph's `trunks`.
+
+use bevy::camera::visibility::VisibilityRange;
+use bevy::light::NotShadowCaster;
+use bevy::prelude::*;
+use engine::pcg::PcgCatalog;
+use engine::prelude::*;
+
+use super::pbr;
+use crate::stage::Biome;
+
+/// Every mesh file the catalog uses (checked by a test).
+pub const MESHES: [&str; 14] = [
+    "boulder", "rock_moss_a", "rock_moss_b", "rock_moss_c", "rock_moss_d", "rock_dry", "shrub_a", "shrub_b", "fern_a", "fern_b", "grass_a", "grass_b", "grass_c", "stump",
+];
+
+/// Rock items (graph node `rocks`) per biome, with weights.
+pub fn rocks(b: Biome) -> Vec<(&'static str, f32)> {
+    match b {
+        Biome::Scrub => vec![("rock_dry", 2.0), ("boulder", 1.0)],
+        Biome::SnowForest => vec![("boulder", 1.0), ("rock_moss_c", 1.0), ("rock_moss_d", 1.0)],
+        Biome::Moor => vec![("boulder", 1.5), ("rock_moss_a", 1.0), ("rock_moss_b", 1.0), ("rock_moss_d", 1.0)],
+        _ => vec![("rock_moss_a", 1.0), ("rock_moss_b", 1.0), ("rock_moss_c", 1.0), ("rock_moss_d", 1.0), ("boulder", 0.8), ("stump", 0.5)],
+    }
+}
+
+/// Bush / ground-cover items (graph node `bushes`) per biome.
+pub fn bushes(b: Biome) -> Vec<(&'static str, f32)> {
+    match b {
+        Biome::PineForest => vec![("fern_a", 1.0), ("fern_b", 1.0), ("shrub_a", 0.5), ("grass_b", 0.8), ("grass_c", 0.6)],
+        Biome::BirchHills => vec![("grass_a", 1.5), ("grass_b", 1.2), ("grass_c", 1.0), ("shrub_a", 0.6), ("fern_a", 0.5)],
+        Biome::Scrub => vec![("shrub_a", 1.2), ("shrub_b", 1.2), ("grass_b", 1.0)],
+        Biome::Moor => vec![("grass_a", 1.5), ("grass_b", 1.5), ("grass_c", 1.0), ("shrub_b", 0.3)],
+        Biome::SnowForest => vec![("shrub_b", 0.4), ("grass_b", 0.3)],
+    }
+}
+
+/// Ground cover beyond this from its merged cell's centre is not drawn (dithered).
+const COVER_END: f32 = 95.0;
+
+/// Marks merged PCG ground cover (alpha cards) so the render budget's flat far version (an
+/// untextured copy: solid quads for foliage) never applies: it fades out instead.
+#[derive(Component)]
+pub struct Cover;
+
+/// Builds the catalog for a biome: one mesh + material per item name.
+pub fn catalog(world: &mut World, biome: Biome, wet: bool) -> PcgCatalog {
+    let mut cat = PcgCatalog::default();
+    let dir = world.resource::<AssetsDir>().0.clone();
+    let rough = |m: &mut StandardMaterial| {
+        if wet {
+            m.perceptual_roughness = 0.55;
+            m.base_color = Color::srgb(0.75, 0.75, 0.76);
+        }
+    };
+    let foliage = |m: &mut StandardMaterial, tint: Color| {
+        m.base_color = tint;
+        m.alpha_mode = AlphaMode::Mask(0.5);
+        m.double_sided = true;
+        m.cull_mode = None;
+        m.diffuse_transmission = 0.25;
+        m.perceptual_roughness = 0.8;
+    };
+    let snowy = biome == Biome::SnowForest;
+    let dry = biome == Biome::Scrub;
+    let mats = [
+        ("m_boulder", pbr(world, "m_boulder", |m| rough(m))),
+        ("m_rock_moss1", pbr(world, "m_rock_moss1", |m| rough(m))),
+        ("m_rock_moss2", pbr(world, "m_rock_moss2", |m| rough(m))),
+        ("m_rock_dry", pbr(world, "m_rock_dry", |m| rough(m))),
+        ("m_stump", pbr(world, "m_stump", |m| rough(m))),
+        ("m_shrub", pbr(world, "m_shrub", |m| foliage(m, if snowy { Color::srgb(0.7, 0.68, 0.62) } else if dry { Color::srgb(0.95, 0.9, 0.7) } else { Color::WHITE }))),
+        ("m_fern", pbr(world, "m_fern", |m| foliage(m, Color::srgb(0.85, 0.9, 0.8)))),
+        ("m_grass1", pbr(world, "m_grass1", |m| foliage(m, if dry { Color::srgb(1.0, 0.9, 0.62) } else { Color::srgb(0.9, 0.95, 0.85) }))),
+        ("m_grass2", pbr(world, "m_grass2", |m| foliage(m, if dry { Color::srgb(1.0, 0.9, 0.62) } else { Color::srgb(0.9, 0.95, 0.85) }))),
+    ];
+    let mat = |name: &str| mats.iter().find(|m| m.0 == name).map(|m| m.1.clone()).unwrap();
+    let items: [(&str, &str); 14] = [
+        ("boulder", "m_boulder"),
+        ("rock_moss_a", "m_rock_moss1"),
+        ("rock_moss_b", "m_rock_moss1"),
+        ("rock_moss_c", "m_rock_moss2"),
+        ("rock_moss_d", "m_rock_moss2"),
+        ("rock_dry", "m_rock_dry"),
+        ("stump", "m_stump"),
+        ("shrub_a", "m_shrub"),
+        ("shrub_b", "m_shrub"),
+        ("fern_a", "m_fern"),
+        ("fern_b", "m_fern"),
+        ("grass_a", "m_grass1"),
+        ("grass_b", "m_grass1"),
+        ("grass_c", "m_grass2"),
+    ];
+    for (name, m) in items {
+        match super::meshfile::load(&dir, name) {
+            Ok(mesh) => {
+                let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
+                cat.mesh(name, h, mat(m));
+            }
+            Err(e) => error!("dressing mesh {name}: {e}"),
+        }
+    }
+    let cover: Vec<AssetId<StandardMaterial>> = ["m_shrub", "m_fern", "m_grass1", "m_grass2"].iter().map(|n| mat(n).id()).collect();
+    world.insert_resource(CoverMats(cover));
+    // Marker posts: plain white posts, made in code.
+    let post = Cuboid::new(0.1, 1.05, 0.1).mesh().build().translated_by(Vec3::Y * 0.5);
+    let post_mat = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgb(0.88, 0.88, 0.85), perceptual_roughness: 0.6, ..default() });
+    let h = world.resource_mut::<Assets<Mesh>>().add(post);
+    cat.mesh("post", h, post_mat);
+    cat
+}
+
+type NewCover = (Added<MeshMaterial3d<StandardMaterial>>, Without<Cover>);
+
+/// Ground-cover (alpha card) materials.
+#[derive(Resource, Default)]
+pub struct CoverMats(Vec<AssetId<StandardMaterial>>);
+
+/// Ground cover (merged per cell or single plants) gets a dithered fade-out instead of the
+/// budget's far version.
+pub fn tag_cover(
+    mut commands: Commands,
+    mats: Option<Res<CoverMats>>,
+    added: Query<(Entity, &MeshMaterial3d<StandardMaterial>, Has<Name>), NewCover>,
+) {
+    let Some(mats) = mats else { return };
+    for (e, m, merged) in &added {
+        if mats.0.contains(&m.id()) {
+            // Merged cells measure from their centre (≤ 45 m from any plant in a 64 m cell).
+            let end = if merged { COVER_END } else { COVER_END - 30.0 };
+            commands.entity(e).insert((Cover, KeepDetail, NotShadowCaster, VisibilityRange { start_margin: 0.0..0.0, end_margin: (end - 15.0)..end, use_aabb: false }));
+        }
+    }
+}

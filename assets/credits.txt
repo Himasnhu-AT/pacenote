@@ -1,8 +1,15 @@
-# Pacenote credits (shown on the credits screen). The art stream's version replaces this one.
+# Pacenote credits (shown on the credits screen).
 # Lines starting with '#' are comments; a line ending in ':' is a heading; blank lines separate.
 
 Pacenote:
 An original two-person rally game.
+
+Car:
+"Car Concept" by Eric Chadwick, © 2024 Darmstadt Graphics Group GmbH, based on a CC0 model by Unity Fan. Licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Modified: rescaled, logos removed, repainted, wheels rigged.
+
+Textures, models and foliage (CC0, with thanks):
+Poly Haven (polyhaven.com): Rob Tuytel, Rico Cilliers, Amal Kumar, Dario Barresi, Dimitrios Savva, Charlotte Baglioni, Jenelle van Heerden, James Ray Cock, Kless Gyzen, eye-candy.xyz.
+ambientCG (ambientcg.com): Lennart Demes.
 
 Thanks:
 Everyone who reads the road out loud.

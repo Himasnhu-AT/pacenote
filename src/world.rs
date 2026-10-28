@@ -1,15 +1,12 @@
-//! The stage in the world: terrain (engine `world`), the road mesh, PCG dressing (trees,
-//! rocks, bushes, marker posts) and the collision data the car simulation reads.
+//! The stage in the world: terrain (engine `world`), the dressing graph (trees, rocks, bushes,
+//! marker posts) and the collision data the car simulation reads. The visuals (road surface,
+//! materials, trees, sky) are `crate::art`'s.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
-use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use engine::pcg::{PcgCatalog, PcgGraphRef, PcgVolume};
-use engine::render_budget::Scenery;
-use engine::world::{Heightfield, SplatLayer, WorldDesc};
+use engine::world::{Heightfield, WorldDesc};
 use pcg_core::{Area, Graph, Inputs, Op, Polyline, Rect, Side, SpawnDef, SpawnKind, Tier};
 
 use crate::stage::{self, Biome, Corner, Road, StageDef, Surface};
@@ -123,13 +120,15 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .lines("line", vec![line])
         .surface(pcg_core::Surface::Heightfield { origin: hf.origin(), cell: hf.spacing(), width: hf.nx() as usize, heights: hf.heights().to_vec() });
 
-    let (tree_r, forest_lo, forest_hi, trees, rock_keep, bush_keep): (f32, f32, f32, Vec<(&str, f32)>, f32, f32) = match w.def.biome {
-        Biome::PineForest => (4.2, 0.3, 0.6, vec![("pine", 4.0), ("spruce", 2.0), ("birch", 0.6)], 0.25, 0.3),
-        Biome::BirchHills => (6.0, 0.42, 0.7, vec![("birch", 3.0), ("pine", 1.0)], 0.2, 0.45),
-        Biome::Scrub => (9.0, 0.45, 0.75, vec![("scrub_tree", 2.0), ("pine", 0.5)], 0.6, 0.6),
-        Biome::Moor => (14.0, 0.6, 0.85, vec![("pine", 1.0), ("birch", 1.0)], 0.5, 0.35),
-        Biome::SnowForest => (4.6, 0.32, 0.6, vec![("snow_pine", 4.0), ("spruce", 1.5)], 0.2, 0.15),
+    // Trees are drawn by `art::trees` from the `trunks` points (species mix per biome there).
+    let (tree_r, forest_lo, forest_hi, rock_keep, bush_keep): (f32, f32, f32, f32, f32) = match w.def.biome {
+        Biome::PineForest => (4.2, 0.3, 0.6, 0.25, 0.3),
+        Biome::BirchHills => (6.0, 0.42, 0.7, 0.2, 0.45),
+        Biome::Scrub => (9.0, 0.45, 0.75, 0.6, 0.6),
+        Biome::Moor => (14.0, 0.6, 0.85, 0.5, 0.35),
+        Biome::SnowForest => (4.6, 0.32, 0.6, 0.2, 0.15),
     };
+    let (rocks, bushes) = (crate::art::dressing::rocks(w.def.biome), crate::art::dressing::bushes(w.def.biome));
     let spawn = |items: &[(&str, f32)], tier: Tier, shadows: bool| {
         Op::Spawn(SpawnDef { kind: SpawnKind::Mesh, items: items.iter().map(|(n, w)| (n.to_string(), *w)).collect(), tier, shadows, ..Default::default() })
     };
@@ -144,7 +143,6 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .node("trees_clear", Op::Difference { against: "road".into(), pad: 4.5 }, &["trees_in"])
         .node("trees_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.75, 1.35), jitter: 0.0 }, &["trees_clear"])
         .node("trees_on", Op::Project { offset: -0.1, align: false }, &["trees_tf"])
-        .node("trees", spawn(&trees, Tier::Essential, true), &["trees_on"])
         .node("trunks", Op::Emit { port: "trunks".into() }, &["trees_on"])
         // Boulders and rocks.
         .node("rock_pts", Op::PoissonSample { radius: 12.0 }, &["area"])
@@ -152,15 +150,17 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .node("rock_clear", Op::Difference { against: "road".into(), pad: 2.2 }, &["rock_keep"])
         .node("rock_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.6, 1.6), jitter: 0.0 }, &["rock_clear"])
         .node("rock_on", Op::Project { offset: -0.25, align: true }, &["rock_tf"])
-        .node("rocks", spawn(&[("rock", 2.0), ("rock_flat", 1.0)], Tier::Essential, true), &["rock_on"])
+        .node("rocks", spawn(&rocks, Tier::Essential, true), &["rock_on"])
         .node("boulders", Op::Emit { port: "boulders".into() }, &["rock_on"])
         // Bushes and grass tufts: detail, thinned at low quality.
         .node("bush_pts", Op::PoissonSample { radius: 3.2 }, &["area"])
         .node("bush_keep", Op::Keep { fraction: bush_keep }, &["bush_pts"])
-        .node("bush_clear", Op::Difference { against: "road".into(), pad: 1.0 }, &["bush_keep"])
+        // Ground cover only matters near the road (the camera never leaves it): a 90 m band.
+        .node("bush_band", Op::Intersect { with: "road".into(), pad: 90.0 }, &["bush_keep"])
+        .node("bush_clear", Op::Difference { against: "road".into(), pad: 1.0 }, &["bush_band"])
         .node("bush_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.6, 1.4), jitter: 0.0 }, &["bush_clear"])
         .node("bush_on", Op::Project { offset: -0.05, align: true }, &["bush_tf"])
-        .node("bushes", spawn(&[("bush", 1.0), ("grass", 2.0)], Tier::Fine, false), &["bush_on"])
+        .node("bushes", spawn(&bushes, Tier::Fine, false), &["bush_on"])
         // Marker posts both sides every 50 m.
         .node("posts_l", Op::EdgeSample { spacing: 50.0, offset: road.width[0] * 0.5 + 1.4, side: Side::Left }, &["line"])
         .node("posts_r", Op::EdgeSample { spacing: 50.0, offset: road.width[0] * 0.5 + 1.4, side: Side::Right }, &["line"])
@@ -170,27 +170,6 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .finish()
         .expect("dressing graph");
     (g, inputs)
-}
-
-/// Terrain layers for a biome.
-fn layers(b: Biome) -> Vec<SplatLayer> {
-    let l = |name: &str, color: [f32; 3], rough: f32, slope: [f32; 2], noise: f32, weight: f32| SplatLayer {
-        name: name.into(),
-        color,
-        roughness: rough,
-        slope,
-        noise,
-        weight,
-        blend: 6.0,
-        tiling: 6.0,
-        ..default()
-    };
-    match b {
-        Biome::SnowForest => vec![l("snow", [0.88, 0.9, 0.94], 0.6, [0.0, 90.0], 0.2, 1.0), l("rock", [0.42, 0.42, 0.44], 0.85, [32.0, 90.0], 0.0, 1.6)],
-        Biome::Scrub => vec![l("dry", [0.62, 0.52, 0.36], 0.95, [0.0, 90.0], 0.3, 1.0), l("scrub", [0.4, 0.42, 0.24], 0.95, [0.0, 22.0], 0.6, 0.7), l("rock", [0.55, 0.45, 0.36], 0.85, [26.0, 90.0], 0.0, 1.6)],
-        Biome::Moor => vec![l("heath", [0.36, 0.34, 0.24], 0.95, [0.0, 90.0], 0.3, 1.0), l("grass", [0.38, 0.44, 0.24], 0.95, [0.0, 18.0], 0.5, 0.8), l("rock", [0.44, 0.43, 0.42], 0.85, [24.0, 90.0], 0.0, 1.6)],
-        _ => vec![l("grass", [0.27, 0.38, 0.17], 0.95, [0.0, 90.0], 0.3, 1.0), l("forest_floor", [0.28, 0.23, 0.15], 0.95, [0.0, 25.0], 0.7, 0.8), l("rock", [0.42, 0.41, 0.4], 0.85, [30.0, 90.0], 0.0, 1.6)],
-    }
 }
 
 /// Spawns the stage: terrain, road, dressing volume.
@@ -203,7 +182,7 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
             spacing: stage::SPACING,
             chunk_quads: 64,
             origin: Some([-half, -half]),
-            layers: layers(s.def.biome),
+            layers: crate::art::ground::layers(s.def.biome, crate::art::wet(&s.def)),
             ..default()
         },
         cell_size: 512.0,
@@ -212,106 +191,8 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     if let Err(e) = engine::world::desc::spawn_world_with(world, desc, Some((*s.heights).clone())) {
         error!("terrain: {e}");
     }
-    // Headless (tests, a dedicated server) has no materials: physics data only.
-    if world.contains_resource::<Assets<StandardMaterial>>() {
-        spawn_road(world, s);
-        spawn_dressing(world, s);
-    }
+    crate::art::spawn_stage(world, s);
     world.insert_resource(s.clone());
-}
-
-fn surface_color(surf: Surface) -> Color {
-    match surf {
-        Surface::Gravel => Color::srgb(0.55, 0.49, 0.4),
-        Surface::Tarmac => Color::srgb(0.2, 0.2, 0.21),
-        Surface::Mud => Color::srgb(0.32, 0.25, 0.18),
-        Surface::Snow => Color::srgb(0.85, 0.86, 0.9),
-        _ => Color::srgb(0.4, 0.38, 0.3),
-    }
-}
-
-/// The road surface as ribbon meshes (one per ~200 m, per surface run), 4 cm above the terrain.
-fn spawn_road(world: &mut World, s: &StageWorld) {
-    let road = &s.road;
-    let mut mats: HashMap<u8, Handle<StandardMaterial>> = HashMap::new();
-    let mut i = 0;
-    while i + 1 < road.len() {
-        let surf = road.surface[i];
-        let mut j = i;
-        while j + 1 < road.len() && road.surface[j] == surf && j - i < 100 {
-            j += 1;
-        }
-        let mesh = ribbon(road, i, j);
-        let key = surf as u8;
-        let mat = mats
-            .entry(key)
-            .or_insert_with(|| world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: surface_color(surf), perceptual_roughness: 0.92, ..default() }))
-            .clone();
-        let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
-        world.spawn((Name::new("road"), Mesh3d(h), MeshMaterial3d(mat), Transform::default(), Scenery, engine::render_budget::KeepDetail));
-        i = j;
-    }
-}
-
-fn ribbon(road: &Road, a: usize, b: usize) -> Mesh {
-    let (mut pos, mut nrm, mut uv, mut idx) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let across = [-1.0f32, -0.5, 0.0, 0.5, 1.0];
-    for i in a..=b {
-        let p = road.pts[i];
-        let d = road.dir[i];
-        // Left of travel = up × direction.
-        let left = Vec3::new(d.y, 0.0, -d.x);
-        let half = road.width[i] * 0.5 + 0.4;
-        for &u in &across {
-            let lat = u * half;
-            let r = stage::RoadPos { i: i.min(road.len() - 2), t: if i == road.len() - 1 { 1.0 } else { 0.0 }, s: i as f32 * stage::STEP, lateral: lat };
-            let y = road.height_at(&r) + 0.04;
-            let q = Vec3::new(p.x, y, p.z) + left * lat;
-            pos.push(q.to_array());
-            nrm.push([0.0, 1.0, 0.0]);
-            uv.push([(u * 0.5 + 0.5) * road.width[i] / 4.0, i as f32 * stage::STEP / 4.0]);
-        }
-    }
-    let cols = across.len() as u32;
-    for r in 0..(b - a) as u32 {
-        for c in 0..cols - 1 {
-            let (i0, i1) = (r * cols + c, (r + 1) * cols + c);
-            idx.extend_from_slice(&[i0, i1, i0 + 1, i0 + 1, i1, i1 + 1]);
-        }
-    }
-    let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
-    m.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
-    m.insert_indices(Indices::U32(idx));
-    m.compute_smooth_normals();
-    m
-}
-
-/// Placeholder vegetation and props until the asset pack lands (milestone 4).
-fn spawn_dressing(world: &mut World, s: &StageWorld) {
-    let mut cat = PcgCatalog::default();
-    {
-        let mut add = |w: &mut World, name: &str, mesh: Mesh, color: Color| {
-            let m = w.resource_mut::<Assets<Mesh>>().add(mesh);
-            let mat = w.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: color, perceptual_roughness: 0.9, ..default() });
-            cat.mesh(name, m, mat);
-        };
-        add(world, "pine", Cone { radius: 1.8, height: 9.0 }.mesh().resolution(10).build().translated_by(Vec3::Y * 5.0), Color::srgb(0.12, 0.24, 0.13));
-        add(world, "spruce", Cone { radius: 2.2, height: 12.0 }.mesh().resolution(10).build().translated_by(Vec3::Y * 6.5), Color::srgb(0.1, 0.2, 0.12));
-        add(world, "snow_pine", Cone { radius: 2.0, height: 10.0 }.mesh().resolution(10).build().translated_by(Vec3::Y * 5.5), Color::srgb(0.65, 0.72, 0.7));
-        add(world, "birch", Sphere::new(2.4).mesh().ico(2).unwrap().scaled_by(Vec3::new(1.0, 1.6, 1.0)).translated_by(Vec3::Y * 5.5), Color::srgb(0.38, 0.5, 0.22));
-        add(world, "scrub_tree", Sphere::new(2.0).mesh().ico(1).unwrap().scaled_by(Vec3::new(1.3, 0.8, 1.3)).translated_by(Vec3::Y * 2.2), Color::srgb(0.35, 0.38, 0.2));
-        add(world, "rock", Sphere::new(1.0).mesh().ico(1).unwrap().scaled_by(Vec3::new(1.2, 0.8, 1.0)), Color::srgb(0.45, 0.44, 0.42));
-        add(world, "rock_flat", Sphere::new(1.0).mesh().ico(1).unwrap().scaled_by(Vec3::new(1.6, 0.5, 1.3)), Color::srgb(0.5, 0.48, 0.44));
-        add(world, "bush", Sphere::new(0.7).mesh().ico(1).unwrap().translated_by(Vec3::Y * 0.4), Color::srgb(0.22, 0.33, 0.14));
-        add(world, "grass", Cone { radius: 0.35, height: 0.6 }.mesh().resolution(5).build().translated_by(Vec3::Y * 0.3), Color::srgb(0.35, 0.45, 0.2));
-        add(world, "post", Cylinder::new(0.06, 1.1).mesh().resolution(6).build().translated_by(Vec3::Y * 0.55), Color::srgb(0.9, 0.9, 0.88));
-    }
-    world.insert_resource(cat);
-    let (graph, inputs) = dressing(s);
-    let half = stage::half_size(&s.def);
-    world.spawn(PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area: Area::new(Vec2::splat(-half), Vec2::splat(half)), cell: 128.0 });
 }
 
 #[cfg(test)]
