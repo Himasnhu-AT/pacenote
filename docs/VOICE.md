@@ -20,7 +20,7 @@ mic (cpal thread, any rate) ─▶ downmix + 7 kHz low-pass + resample ─▶ 16
 | `jitter.rs` | `JitterBuffer`: 64 slots keyed by capture frame index, playout delay max(60 ms, 3 × RFC 3550 jitter) ≤ 300 ms chosen per talk spurt, late frames dropped, losses concealed by repeating the last frame fading 1 → 0.6 → 0.2 → 0, spurt ends after 8 missing frames, one frame dropped when > delay + 80 ms is buffered (sender clock drift), sender restarts detected |
 | `playback.rs` | `Player` (one jitter buffer per talker, ≤ 8), `PlayoutEngine` (inbox → render → status, no allocation), `VoiceStream`/`VoiceSource` (rodio source, 16 kHz mono) |
 | `net.rs` | `VoiceFrame`, `VoiceRole`, `local_role`, send/receive/relay systems — the only file that touches the net API |
-| `ui.rs` | Corner indicator, top right: red dot while you transmit, mic meter, hint ("Hold V / LB to talk", "Open mic", "No microphone found", "Mic silent: check permission"), green dot + "GUIDE talking" / "DRIVER talking" |
+| `ui.rs` | Corner indicator, top left: red dot while you transmit, mic meter, hint ("Hold V / LB to talk", "Open mic", "No microphone found", "Mic silent: check permission"), green dot + "GUIDE talking" / "DRIVER talking" |
 | `mod.rs` | `VoicePlugin`, `VoiceSettings`, `VoiceState`, systems, control commands |
 
 ## Behaviour

@@ -1,4 +1,4 @@
-//! Corner indicator (top right), shown while in a session: your mic level and whether you are
+//! Corner indicator (top left), shown while in a session: your mic level and whether you are
 //! transmitting, and a "talking" light for your teammate.
 
 use bevy::prelude::*;
@@ -50,7 +50,8 @@ fn spawn_panel(mut commands: Commands, q: Query<(), With<Panel>>) {
             Name::new("Voice indicator"),
             Node {
                 position_type: PositionType::Absolute,
-                right: px(18),
+                // Top-left: top-right holds the driver's guide notice and the guide's panel.
+                left: px(18),
                 top: px(16),
                 flex_direction: FlexDirection::Column,
                 row_gap: px(6),
