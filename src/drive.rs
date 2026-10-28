@@ -20,9 +20,6 @@ pub struct DrivenCar {
 #[derive(Component)]
 struct CarBody;
 
-#[derive(Component)]
-struct CarWheel(usize);
-
 #[derive(Resource, Clone, Default)]
 pub struct CarSpec(pub Spec);
 
@@ -62,34 +59,14 @@ impl Plugin for DrivePlugin {
     }
 }
 
-/// Spawns the car at the start line, with placeholder visuals (the asset car replaces them).
+/// Spawns the car at the start line; `art::car` adds the model and drives its wheels.
 pub fn spawn_car(world: &mut World) {
     let Some(s) = world.get_resource::<StageWorld>().cloned() else { return };
     let (pos, heading) = s.road.start();
-    let spec = world.resource::<CarSpec>().0.clone();
     let car = Car::new(pos + Vec3::Y * 0.9, heading);
     let tf = Transform::from_translation(car.pos).with_rotation(car.rot);
-    // Headless (tests, a dedicated server): the car without visuals.
-    if !world.contains_resource::<Assets<StandardMaterial>>() {
-        world.spawn((Name::new("car"), DrivenCar { prev: (car.pos, car.rot), car }, CarBody, tf, Visibility::default()));
-        world.insert_resource(StageRun { countdown: 3.0, ..default() });
-        return;
-    }
-    let body_mesh = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(spec.size.x, spec.size.y * 0.75, spec.size.z));
-    let cabin_mesh = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(spec.size.x * 0.82, spec.size.y * 0.5, spec.size.z * 0.5));
-    let wheel_mesh = world.resource_mut::<Assets<Mesh>>().add(Cylinder::new(spec.wheel_radius, 0.24).mesh().resolution(18).build().rotated_by(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)));
-    let paint = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgb(0.85, 0.12, 0.1), perceptual_roughness: 0.35, metallic: 0.2, ..default() });
-    let glass = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgb(0.08, 0.1, 0.12), perceptual_roughness: 0.1, ..default() });
-    let tyre = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgb(0.06, 0.06, 0.06), perceptual_roughness: 0.9, ..default() });
-    world
-        .spawn((Name::new("car"), DrivenCar { prev: (car.pos, car.rot), car }, CarBody, tf, Visibility::default(), Actor))
-        .with_children(|p| {
-            p.spawn((Mesh3d(body_mesh), MeshMaterial3d(paint), Transform::from_xyz(0.0, -0.05, 0.0), Actor));
-            p.spawn((Mesh3d(cabin_mesh), MeshMaterial3d(glass), Transform::from_xyz(0.0, 0.4, 0.25), Actor));
-        });
-    for i in 0..4 {
-        world.spawn((Name::new("wheel"), CarWheel(i), Mesh3d(wheel_mesh.clone()), MeshMaterial3d(tyre.clone()), tf, Actor));
-    }
+    let id = world.spawn((Name::new("car"), DrivenCar { prev: (car.pos, car.rot), car }, CarBody, tf, Visibility::default(), Actor)).id();
+    crate::art::car::spawn(world, id);
     world.insert_resource(StageRun { countdown: 3.0, ..default() });
 }
 
@@ -161,23 +138,11 @@ fn simulate(
     }
 }
 
-fn draw_car(
-    fixed: Res<Time<Fixed>>,
-    spec: Res<CarSpec>,
-    mut bodies: Query<(&DrivenCar, &mut Transform), With<CarBody>>,
-    mut wheels: Query<(&CarWheel, &mut Transform), Without<CarBody>>,
-) {
+fn draw_car(fixed: Res<Time<Fixed>>, mut bodies: Query<(&DrivenCar, &mut Transform), With<CarBody>>) {
     let a = fixed.overstep_fraction();
     let Ok((c, mut tf)) = bodies.single_mut() else { return };
     tf.translation = c.prev.0.lerp(c.car.pos, a);
     tf.rotation = c.prev.1.slerp(c.car.rot, a);
-    let offset = tf.translation - c.car.pos;
-    for (w, mut wt) in &mut wheels {
-        let i = w.0;
-        let steer = if i < 2 { c.car.steer } else { 0.0 };
-        wt.translation = c.car.wheel_pos(&spec.0, i) + offset;
-        wt.rotation = tf.rotation * Quat::from_rotation_y(steer) * Quat::from_rotation_x(-c.car.wheels[i].angle);
-    }
 }
 
 fn follow_camera(

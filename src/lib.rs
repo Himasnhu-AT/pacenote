@@ -1,5 +1,6 @@
 //! Pacenote: a two-person rally game on `engine` (see docs/DESIGN.md).
 
+pub mod art;
 pub mod audio;
 pub mod drive;
 pub mod guide;
@@ -33,6 +34,7 @@ impl Plugin for Pacenote {
             .add_plugins(audio::RallyAudioPlugin)
             .add_plugins(meta::MetaPlugin)
             .add_plugins(voice::VoicePlugin)
+            .add_plugins(art::ArtPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
     }
 }
@@ -47,13 +49,8 @@ fn load_stage(world: &mut World) {
     let t0 = std::time::Instant::now();
     let s = world::generate(&def);
     info!("stage {} \"{}\": {:.1} km, {} corners, generated in {:.2} s", def.id, def.name, s.road.length() / 1000.0, s.corners.len(), t0.elapsed().as_secs_f32());
+    // Terrain, road, dressing, trees, sky and weather (the sun comes with the stage's look).
     world::spawn(world, &s);
-    // Light and sky: a plain sun for now (the look comes in milestone 4).
-    world.spawn((
-        DirectionalLight { illuminance: 25_000.0, shadow_maps_enabled: true, ..default() },
-        Transform::default().looking_to(Vec3::new(-0.4, -0.8, -0.3), Vec3::Y),
-        engine::gfx::Sun,
-    ));
     world.spawn((MainCamera, Camera3d::default(), Transform::from_xyz(0.0, 50.0, 0.0)));
     drive::spawn_car(world);
 }
