@@ -212,8 +212,11 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     if let Err(e) = engine::world::desc::spawn_world_with(world, desc, Some((*s.heights).clone())) {
         error!("terrain: {e}");
     }
-    spawn_road(world, s);
-    spawn_dressing(world, s);
+    // Headless (tests, a dedicated server) has no materials: physics data only.
+    if world.contains_resource::<Assets<StandardMaterial>>() {
+        spawn_road(world, s);
+        spawn_dressing(world, s);
+    }
     world.insert_resource(s.clone());
 }
 
