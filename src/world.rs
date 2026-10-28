@@ -390,13 +390,47 @@ mod start_tests {
             let w = generate(&def);
             let (p, h) = w.road.start();
             let mut car = Car::new(p + Vec3::Y * 0.9, h);
-            for i in 0..300 {
-                let input = if i < 60 { Input { handbrake: true, ..Input::default() } } else { Input { throttle: 1.0, ..Input::default() } };
+            // Countdown on the handbrake, then 8 s with no pedals (the guide reading the first
+            // notes): hill hold keeps the car on the line.
+            for i in 0..(60 * 9) {
+                let input = if i < 60 { Input { handbrake: true, ..Input::default() } } else { Input::default() };
                 step(&mut car, &spec, input, &w, 1.0 / 60.0);
+            }
+            let drift = (car.pos - p).length() - 0.9;
+            assert!(drift.abs() < 0.5, "stage {} {}: rolled {drift:.2} m while idle", def.id, def.name);
+            let p = car.pos;
+            for _ in 0..240 {
+                step(&mut car, &spec, Input { throttle: 1.0, ..Input::default() }, &w, 1.0 / 60.0);
             }
             let moved = (car.pos - p).length();
             // 4 s of full throttle: about 25–65 km/h depending on surface and slope.
             assert!(car.speed() * 3.6 > 20.0 && moved > 10.0, "stage {} {}: {:.1} km/h after 4 s, moved {moved:.1} m", def.id, def.name, car.speed() * 3.6);
+        }
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+    use crate::vehicle::{Car, Input, Spec, step};
+
+    #[test]
+    #[ignore]
+    fn stage5_idle_then_throttle() {
+        let spec = Spec::default();
+        let def = &stage::stages()[4];
+        let w = generate(def);
+        let (p, h) = w.road.start();
+        let mut car = Car::new(p + Vec3::Y * 0.9, h);
+        for i in 0..(60 * 30) {
+            let t = i as f32 / 60.0;
+            let input = if t < 3.0 { Input { handbrake: true, ..Input::default() } } else if t < 12.0 { Input::default() } else { Input { throttle: 1.0, ..Input::default() } };
+            step(&mut car, &spec, input, &w, 1.0 / 60.0);
+            if i % 60 == 0 {
+                let wh = &car.wheels;
+                println!("t {t:4.1} up {:.2} pos {:.2?} v {:5.2} gear {} rpm {:5.0} spin {:.1?} contact {:?} surf {:?} slip {:.2?}",
+                    car.up().y, car.pos - p, car.speed() * 3.6, car.gear, car.rpm, wh.iter().map(|w| w.spin).collect::<Vec<_>>(), wh.iter().map(|w| w.contact).collect::<Vec<_>>(), wh[0].surface, wh.iter().map(|w| w.slip_ratio).collect::<Vec<_>>());
+            }
         }
     }
 }

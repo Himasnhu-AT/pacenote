@@ -82,6 +82,8 @@ pub struct Spec {
     pub drag: f32,
     /// Trim torque when the driven wheels spin (a driver aid, on by default).
     pub traction_assist: bool,
+    /// Limited-slip coupling between wheels on an axle and between the axles (1/s).
+    pub lsd: f32,
     /// Ease the brakes on a locking wheel (on by default).
     pub abs: bool,
 }
@@ -115,6 +117,7 @@ impl Default for Spec {
             handbrake_torque: 3_200.0,
             drag: 0.72,
             traction_assist: true,
+            lsd: 25.0,
             abs: true,
         }
     }
@@ -269,7 +272,8 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
     if car.gear > 0 && car.shifting <= 0.0 && car.in_gear > 0.6 {
         // Up on road speed, or after a moment bouncing off the limiter (wheelspin on loose
         // ground: road speed alone would never shift and the limiter would cut drive).
-        let limiter = wheel_rpm(car.gear) > spec.redline - 150.0 && car.in_gear > 1.0;
+        // Only when the next gear would sit clear of the downshift point, or the box hunts.
+        let limiter = wheel_rpm(car.gear) > spec.redline - 150.0 && car.in_gear > 1.0 && road_rpm(car.gear + 1) > 3400.0;
         if (road_rpm(car.gear) > spec.redline - 400.0 || limiter) && car.gear < 5 {
             car.gear += 1;
             car.shifting = 0.12;
@@ -284,6 +288,10 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
     // Throttle (reverse: the brake pedal drives backwards).
     let pedal = if reversing { input.brake } else { input.throttle };
     let brake = if reversing { input.throttle } else { input.brake };
+    // Hill hold: stopped with no pedals, the brakes hold the car (a driver would), so it
+    // doesn't roll off a sloped start line or creep while the guide reads.
+    let idle = input.throttle < 0.05 && input.brake < 0.05;
+    let brake = if idle && speed.abs() < 1.0 { brake.max(0.5) } else { brake };
     let curve = {
         let x = (car.rpm / spec.redline).clamp(0.0, 1.0);
         // Rises to a broad plateau, falls past ~85%.
@@ -397,6 +405,27 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         w.angle = (w.angle + spin * h) % std::f32::consts::TAU;
         w.slip_ratio = slip_ratio;
         w.slip_angle = slip_angle;
+    }
+    // Limited-slip diffs (viscous): pull each axle's wheels together, then the axles. Without
+    // them an unloaded wheel (a rut, a crest) spins up and takes the drive with it. The
+    // handbrake disconnects the rear (rally cars have a hydraulic handbrake cutoff).
+    let k = 1.0 - (-spec.lsd * h).exp();
+    let pair = |a: &mut f32, b: &mut f32| {
+        let d = (*b - *a) * 0.5 * k;
+        *a += d;
+        *b -= d;
+    };
+    let [w0, w1, w2, w3] = &mut car.wheels;
+    pair(&mut w0.spin, &mut w1.spin);
+    if !input.handbrake {
+        pair(&mut w2.spin, &mut w3.spin);
+        let (mut f, mut r) = ((w0.spin + w1.spin) * 0.5, (w2.spin + w3.spin) * 0.5);
+        let (f0, r0) = (f, r);
+        pair(&mut f, &mut r);
+        w0.spin += f - f0;
+        w1.spin += f - f0;
+        w2.spin += r - r0;
+        w3.spin += r - r0;
     }
 
     // Aero drag (and a little downforce).
@@ -519,8 +548,10 @@ mod tests {
         let v = car.speed();
         assert!(v > 25.0, "0-6 s only {v:.1} m/s");
         assert!(car.gear >= 3, "gear {}", car.gear);
-        run(&mut car, &spec, Input { brake: 1.0, ..default() }, &g, 3.7);
-        assert!(car.speed().abs() < 1.0, "still {:.1} m/s after braking", car.speed());
+        // Tarmac with ABS: at least 0.8 g on average.
+        let secs = v / (0.8 * 9.81);
+        run(&mut car, &spec, Input { brake: 1.0, ..default() }, &g, secs);
+        assert!(car.speed().abs() < 1.0, "still {:.1} m/s after {secs:.1} s braking from {v:.1}", car.speed());
         // Held at a standstill, the brake becomes reverse.
         run(&mut car, &spec, Input { brake: 1.0, ..default() }, &g, 2.0);
         assert!(car.gear == -1 && car.speed() < -0.5, "no reverse: gear {} speed {}", car.gear, car.speed());

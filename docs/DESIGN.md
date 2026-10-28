@@ -52,7 +52,9 @@ is the guide's skill.
 - Tyre model: slip ratio / slip angle with a simplified Pacejka curve per surface (grip,
   peak, falloff), combined slip via friction ellipse, rolling resistance and loose-surface drag.
 - Drivetrain: engine torque curve, 5-speed gearbox (auto with clutch logic, or manual),
-  differential (4WD with centre split), handbrake locks the rear.
+  differential (4WD with centre split, viscous limited-slip front, rear and centre so an
+  unloaded wheel can't take the drive), handbrake locks the rear and cuts the rear coupling.
+  Hill hold: stopped with no pedals, the brakes hold the car (sloped start lines).
 - Damage-lite: big hits bend the steering or reduce top speed; no wreck/restart, a recover
   button (5 s penalty) resets the car to the road.
 - Input through `engine::actions`: gamepad (analogue throttle/brake/steer) and keyboard with
