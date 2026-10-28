@@ -16,7 +16,8 @@ use bevy::prelude::*;
 use engine::prelude::*;
 
 pub fn info() -> GameInfo {
-    GameInfo::new("pacenote", "Pacenote").tagline("One drives. One reads the road.")
+    // Our own assets/ wins over ./assets when run from another folder (the engine's scripts).
+    GameInfo::new("pacenote", "Pacenote").tagline("One drives. One reads the road.").assets_fallback(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"))
 }
 
 /// Which stage to load (`--stage N`, 1..=20).
