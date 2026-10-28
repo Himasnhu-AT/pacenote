@@ -266,9 +266,9 @@ mod tests {
         assert!(stream.decoder().synth.is_none(), "decoder hands the synth over once");
         let rms = |src: &mut RallySource, n: usize| (src.by_ref().take(n).map(|v| v * v).sum::<f32>() / n as f32).sqrt();
         assert!(rms(&mut src, 9600) == 0.0, "silent before a car exists");
-        let mut f = Frame::default();
-        f.car = CarParams { active: true, rpm: 5000.0, throttle: 1.0, speed: 25.0, ..CarParams::default() };
-        f.car.surfaces[GRAVEL] = Contact { roll: 1.0, slide: 0.5 };
+        let mut surfaces = [Contact::default(); 5];
+        surfaces[GRAVEL] = Contact { roll: 1.0, slide: 0.5 };
+        let mut f = Frame { car: CarParams { active: true, rpm: 5000.0, throttle: 1.0, speed: 25.0, surfaces, ..CarParams::default() }, ..Frame::default() };
         f.push(CarEvent::Impact(10.0));
         shared.publish(&f);
         rms(&mut src, 48_000);

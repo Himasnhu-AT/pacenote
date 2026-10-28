@@ -427,12 +427,14 @@ impl CarSynth {
         let at_limit = p.rpm >= redline - 80.0 && p.throttle > 0.5;
         // Limiter bounce: cut ignition about half of each ~70 ms cycle.
         let mut cut = p.shifting;
+        let mut lim_cut = false;
         if at_limit {
             e.limiter += 14.0 / RATE;
             if e.limiter >= 1.0 {
                 e.limiter -= 1.0;
             }
-            cut |= e.limiter < 0.45;
+            lim_cut = e.limiter < 0.45;
+            cut |= lim_cut;
         } else {
             e.limiter = 0.5;
         }
@@ -459,11 +461,12 @@ impl CarSynth {
             // Cylinder-to-cylinder differences: a lumpy burble at idle, evened out higher up.
             let cg = 1.0 + (CYL_GAIN[cyl as usize & 3] - 1.0) * (0.25 + 0.75 * idle_factor);
             let base = (0.3 + 0.7 * load) * (0.55 + 0.45 * rpm_n) * cg * jitter;
-            let fired = if cut { 0.08 } else { 1.0 - 0.55 * overrun };
+            // A gear change drops to an overrun burble; the limiter cuts harder.
+            let fired = if lim_cut { 0.1 } else if cut { 0.45 } else { 1.0 - 0.55 * overrun };
             impulse = base * fired;
             e.burst.trigger(base * fired * (0.15 + 0.5 * load), 0.006 + 0.01 * (1.0 - rpm_n));
             // Backfire: unburnt fuel lighting in the exhaust on overrun and on the limiter.
-            let chance = if at_limit && cut { 0.22 } else { 0.07 * overrun * e.crackle };
+            let chance = if lim_cut { 0.22 } else { 0.07 * overrun * e.crackle };
             if p.active && n.chance(chance) {
                 let pop = &mut e.pops[e.next_pop];
                 e.next_pop = (e.next_pop + 1) % 3;

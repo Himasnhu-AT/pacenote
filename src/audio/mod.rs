@@ -108,8 +108,8 @@ fn start_output(
     }
     link.started = true;
     stats.output = "off".into();
-    if let Some(path) = engine::cli::arg_value("car-audio-wav") {
-        let secs: f32 = engine::cli::arg_value("car-audio-secs").and_then(|v| v.parse().ok()).unwrap_or(20.0);
+    if let Some(path) = engine::cli::dev_value("car-audio-wav") {
+        let secs: f32 = engine::cli::dev_value("car-audio-secs").and_then(|v| v.parse().ok()).unwrap_or(20.0);
         let cap = (secs.clamp(0.5, 600.0) * dsp::RATE) as usize * 2;
         commands.insert_resource(Capture { synth: Box::new(RallySynth::new(7)), path, buf: Vec::with_capacity(cap + stream::BLOCK * 2), cap, frac: 0.0, done: false });
         stats.output = "capture".into();

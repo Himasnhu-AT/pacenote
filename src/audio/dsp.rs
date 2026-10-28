@@ -1,6 +1,9 @@
 //! Small DSP building blocks for the car and stage sounds. Pure, allocation-free, `Copy` where
 //! they can be, and deterministic (seeded noise), so the synthesis is unit-tested offline.
 
+// `next()` on envelopes and resonators reads as "next sample"; they aren't iterators.
+#![allow(clippy::should_implement_trait)]
+
 use std::f32::consts::{PI, TAU};
 
 /// Output sample rate of the rally stream (the engine mixer runs at the same rate).
