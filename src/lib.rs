@@ -1,5 +1,6 @@
 //! Pacenote: a two-person rally game on `engine` (see docs/DESIGN.md).
 
+pub mod audio;
 pub mod drive;
 pub mod hud;
 pub mod stage;
@@ -25,6 +26,7 @@ impl Plugin for Pacenote {
         app.insert_resource(StageChoice(n))
             .insert_resource(Time::<Fixed>::from_hz(60.0))
             .add_plugins((drive::DrivePlugin, hud::HudPlugin))
+            .add_plugins(audio::RallyAudioPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
     }
 }
