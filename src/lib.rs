@@ -48,6 +48,27 @@ impl Plugin for Pacenote {
             .add_plugins(codriver::CoDriverPlugin)
             .add_plugins(telemetry::TelemetryPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
+        #[cfg(feature = "dev")]
+        app.add_systems(Update, keep_game_focused);
+    }
+}
+
+/// The engine's dev metrics window opens at start beside the game; on a laptop screen it lands
+/// on top and macOS gives it focus, and the unfocused game drops to 8 updates/s. Whenever any
+/// other window of ours gains focus, hand it straight back to the game window (the metrics
+/// window still scrolls under the mouse without focus). F4 still toggles it.
+#[cfg(feature = "dev")]
+fn keep_game_focused(
+    mut focus: MessageReader<bevy::window::WindowFocused>,
+    mut primary: Query<(Entity, &mut Window), With<bevy::window::PrimaryWindow>>,
+) {
+    let Ok((game, mut window)) = primary.single_mut() else {
+        focus.clear();
+        return;
+    };
+    if focus.read().last().is_some_and(|e| e.focused && e.window != game) {
+        // Bevy synced `focused = false` from the event; setting it back calls focus_window.
+        window.focused = true;
     }
 }
 
