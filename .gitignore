@@ -8,3 +8,6 @@
 # .ktx2 + color.avg are committed.
 /assets/textures/*/*.jpg
 /assets/textures/*/*.png
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
