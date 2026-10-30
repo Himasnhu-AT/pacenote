@@ -1,0 +1,96 @@
+---
+// "The stages, by the numbers": renders src/data/stats.json as it is. When tools/telemetry/
+// analyze.py writes real numbers (sample: false), rebuild and the sample labels disappear.
+import Base from '../layouts/Base.astro';
+import StageMap from '../components/StageMap.astro';
+import SampleBadge from '../components/SampleBadge.astro';
+import Slash from '../components/Slash.astro';
+import { stages, stats, codriverRates } from '../data/stages';
+import { slug } from '../lib/stage';
+import { cta } from '../data/site';
+const fmt = new Intl.NumberFormat('en-GB');
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const rows = stats.stages.slice().sort((a, b) => a.id - b.id);
+const worst = stats.corners_worst.slice(0, 6);
+const t = stats.totals;
+const date = new Date(stats.generated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+const hardest = rows.filter((r) => r.ranked !== false && r.runs > 0).sort((a, b) => a.finish_rate - b.finish_rate)[0];
+const cd = codriverRates();
+const gain = cd ? Math.round((cd.on - cd.off) * 100) : 0;
+const verdict = !cd ? '' : gain >= 2 ? `With it on, ${gain} more runs in every 100 reach the finish.` : gain <= -2 ? `So far runs with it off finish slightly more often, by ${-gain} in every 100.` : 'So far it makes no clear difference to finishing.';
+---
+<Base title="The stages, by the numbers" description="Anonymous stats from Pacenote players: finish rates per stage, the corners that end the most runs, and whether the AI co-driver helps.">
+  <header class="page-head">
+    <h1 data-split="chars" data-intro>By the numbers</h1>
+    <p class="lead">What happens on the 20 stages, from anonymous stats the game sends (you can switch them off; see <a class="inline" href="/privacy/">privacy</a>). {stats.sample ? '' : `Updated ${date}.`}</p>
+    {stats.sample && <SampleBadge long />}
+    <dl class="meta" data-reveal="up" data-intro data-delay="0.2">
+      <div><dt>Installs</dt><dd>{fmt.format(t.installs)}</dd></div>
+      <div><dt>Runs</dt><dd>{fmt.format(t.runs)}</dd></div>
+      <div><dt>Finished</dt><dd>{fmt.format(t.finishes)}</dd></div>
+      <div><dt>Retired</dt><dd>{fmt.format(t.retirements)}</dd></div>
+      <div><dt>Crashes</dt><dd>{fmt.format(t.crashes)}</dd></div>
+      <div><dt>Km driven</dt><dd>{fmt.format(t.km_driven)}</dd></div>
+    </dl>
+  </header>
+
+  <section class="rates" aria-labelledby="rates-title">
+    <h2 class="display" id="rates-title">How many make it</h2>
+    {hardest && <p>Hardest to finish{stats.sample ? ' (sample)' : ''}: <a class="inline" href={`/stages/${slug(hardest)}/`}>{hardest.name}</a>, {pct(hardest.finish_rate)} of runs reach the end.</p>}
+    <p class="rates__key"><span><i style="background:var(--c-fg)"></i>Finished</span><span><i style="background:var(--c-accent)"></i>Retired: a part broke</span><span><i style="background:var(--c-line)"></i>Quit or restarted</span></p>
+    <ol class="rates__list" data-bars>
+      {rows.map((r) => (
+        <li class="rate">
+          <span class="rate__no">{String(r.id).padStart(2, '0')}</span>
+          <span class="rate__name"><a href={`/stages/${slug(r)}/`}>{r.name}</a></span>
+          <span class="rate__bar" data-bar role="img" aria-label={`${pct(r.finish_rate)} finished, ${pct(r.retire_rate)} retired, of ${fmt.format(r.runs)} runs`}>
+            <b class="fin" style={`width:${r.finish_rate * 100}%`}></b><b class="ret" style={`width:${r.retire_rate * 100}%`}></b>
+          </span>
+          <span class="rate__pct">{pct(r.finish_rate)}</span>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  <section class="deadly" aria-labelledby="deadly-title">
+    <h2 class="display" id="deadly-title">The corners that end runs</h2>
+    <p class="source" style="margin:var(--u) 0 calc(var(--u)*3)">Ranked by runs that ended there, then by crashes. Each ring is on the real corner.</p>
+    <ol class="deadly__list">
+      {worst.map((w, i) => {
+        const s = stages.find((x) => x.id === w.stage);
+        return s && (
+          <li class="deadly__item">
+            <div class="deadly__map"><span class="deadly__rank">{i + 1}</span><StageMap stage={s} mark={[w.index]} pad={0.12} title={`${s.name}, corner ${w.index + 1} ringed`} /></div>
+            <p class="deadly__t">{w.stage_name}, corner {w.index + 1}</p>
+            <p class="deadly__s">Stage {w.stage}, {w.turn} {w.grade <= 1 ? 'hairpin' : `grade ${w.grade}`}, at {(w.start_m / 1000).toFixed(2)} km</p>
+            <p class="deadly__n">{fmt.format(w.retirements)} runs ended, {fmt.format(w.crashes)} crashes</p>
+          </li>
+        );
+      })}
+    </ol>
+  </section>
+
+  <section class="cd" aria-labelledby="cd-title">
+    <div>
+      <h2 class="display" id="cd-title">Does the co-driver help?</h2>
+      <p>Solo runs with the AI co-driver reading the notes, against runs with it switched off (N in the game). {verdict || 'Not enough solo runs yet to compare.'}{stats.sample ? ' Sample numbers.' : ''}</p>
+    </div>
+    {cd && (
+      <div class="codriver">
+        <p class="codriver__k">Finish rate, solo</p>
+        <div class="codriver__bars" data-bars>
+          <div><span>Co-driver on</span><b data-bar style={`--v:${cd.on}`}></b><em>{pct(cd.on)}</em></div>
+          <div><span>Co-driver off</span><b data-bar style={`--v:${cd.off}`}></b><em>{pct(cd.off)}</em></div>
+        </div>
+      </div>
+    )}
+  </section>
+
+  <section class="finale finale--small" aria-label="Add your runs">
+    <p class="lead">Every run you drive in the demo counts here.</p>
+    <div class="ctas">
+      <a class="btn btn--primary" href={cta.demo.href} rel="noopener"><Slash /><span>{cta.demo.label}</span></a>
+      <a class="btn" href={cta.wishlist.href} rel="noopener"><Slash /><span>{cta.wishlist.label}</span></a>
+    </div>
+  </section>
+</Base>

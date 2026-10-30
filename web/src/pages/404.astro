@@ -1,0 +1,27 @@
+---
+import Base from '../layouts/Base.astro';
+import StageMap from '../components/StageMap.astro';
+import Slash from '../components/Slash.astro';
+import { notFound } from '../data/site';
+import { stages } from '../data/stages';
+---
+<Base title="Off the road" description="Nothing at this address." noindex>
+  <section class="lost" data-lost>
+    <div class="lost__map" aria-hidden="true"><StageMap stage={stages[18]} /></div>
+    <h1 data-split="chars" data-intro>{notFound.title}</h1>
+    <p class="lost__key" data-reveal="up" data-intro data-delay="0.2">Get back on, or <span class="nowrap">press <span class="kbd">R</span>.</span></p>
+    <p class="lost__note" data-reveal="up" data-intro data-delay="0.3">{notFound.note}</p>
+    <p data-reveal="up" data-intro data-delay="0.35"><a class="btn btn--primary" href="/" data-recover><Slash /><span>{notFound.back}</span></a></p>
+  </section>
+  <script>
+    import { onPage } from '../engine';
+    onPage(() => {
+      if (!document.querySelector('[data-lost]')) return;
+      const key = (e: KeyboardEvent) => {
+        if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && !(e.target as HTMLElement).closest('input, textarea')) document.querySelector<HTMLAnchorElement>('[data-recover]')?.click();
+      };
+      addEventListener('keydown', key);
+      return () => removeEventListener('keydown', key);
+    });
+  </script>
+</Base>

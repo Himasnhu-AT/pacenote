@@ -1,0 +1,55 @@
+---
+// A stage in plan view from the game's road data: the road, every corner coloured by grade
+// (1 hairpin = hottest), start and finish. `live` adds the layers the driver module moves
+// (src/motion/recce.ts): the driven road, the next 500 m lit, and the car.
+import { frame, viewBox, roadPath, at, type Stage } from '../lib/stage';
+interface Props {
+  stage: Stage;
+  live?: boolean;
+  numbers?: boolean; // label every corner with its index + grade
+  mark?: number[]; // corner indices to ring (deadliest corners)
+  class?: string;
+  title?: string;
+  pad?: number;
+}
+const { stage, live = false, numbers = false, mark = [], class: cls, title, pad = 0.06 } = Astro.props;
+const f = frame(stage, pad);
+const L = (stage.points.length - 1) * stage.step_m;
+const unit = Math.max(f.w, f.h) / 100; // 1% of the map, for markers and labels
+const start = at(stage, 0);
+const end = at(stage, L);
+const car = Math.max(unit * 2.2, 14);
+const label = title ?? `Map of ${stage.name}: ${(stage.length_m / 1000).toFixed(1)} km, ${stage.corners.length} corners`;
+---
+<svg class:list={['map', cls, { 'map--live': live }]} viewBox={viewBox(f)} role="img" aria-label={label} preserveAspectRatio="xMidYMid meet" style={`--mu:${unit.toFixed(2)}`}>
+  <path class="map__halo" d={roadPath(stage)} />
+  <path class="map__road" d={roadPath(stage)} pathLength={L} data-road />
+  {live && <path class="map__lit" d={roadPath(stage)} pathLength={L} data-lit />}
+  {stage.corners.map((c, i) => (
+    <path class={`map__corner g${Math.max(1, Math.min(6, c.grade))}`} d={roadPath(stage, c.start, c.end)} data-corner={i} />
+  ))}
+  {live && <path class="map__driven" d={roadPath(stage)} pathLength={L} data-driven />}
+  {mark.map((i) => {
+    const c = stage.corners[i];
+    const p = at(stage, (c.start + c.end) / 2);
+    return <g class="map__ring"><circle cx={p.x} cy={p.z} r={unit * 5.5} /><circle class="map__ring-in" cx={p.x} cy={p.z} r={unit * 2.4} /></g>;
+  })}
+  <g class="map__ends">
+    <circle class="map__start" cx={start.x} cy={start.z} r={unit * 1.3} />
+    <rect class="map__finish" x={end.x - unit * 1.2} y={end.z - unit * 1.2} width={unit * 2.4} height={unit * 2.4} />
+  </g>
+  {numbers && (
+    <g class="map__labels" aria-hidden="true">
+      {stage.corners.map((c, i) => {
+        const p = at(stage, c.start);
+        return <text x={p.x} y={p.z} dx={unit * 1.6} dy={-unit * 1.2} style={`font-size:${unit * 3}px`} class={`g${Math.max(1, c.grade)}`}>{i + 1}</text>;
+      })}
+    </g>
+  )}
+  {live && (
+    <g class="map__car" data-car transform={`translate(${start.x} ${start.z}) rotate(${(start.heading * 180) / Math.PI})`}>
+      <circle r={car * 1.6} class="map__car-glow" />
+      <path d={`M${car} 0L${-car * 0.75} ${car * 0.7}L${-car * 0.35} 0L${-car * 0.75} ${-car * 0.7}Z`} />
+    </g>
+  )}
+</svg>

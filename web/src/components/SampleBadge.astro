@@ -1,0 +1,11 @@
+---
+// Shown wherever stats.json numbers appear while `sample` is true (made-up layout numbers).
+interface Props { long?: boolean }
+const { long = false } = Astro.props;
+---
+<p class="sample" role="note">
+  <strong>Sample data</strong>
+  <span>{long
+    ? 'These numbers are made up to lay out the page. Real ones from the demo replace them once players have driven the stages.'
+    : 'Made-up numbers for layout. Real ones arrive with the demo.'}</span>
+</p>

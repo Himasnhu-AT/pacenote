@@ -1,0 +1,22 @@
+---
+import { nav, site, contact, cta } from '../data/site';
+const year = new Date().getFullYear();
+---
+<footer class="foot">
+  <div class="foot__row">
+    <p class="foot__name" aria-hidden="true">Pacenote</p>
+    <ul class="foot__links">
+      <li><a class="util" href="/">Home</a></li>
+      {nav.map((n) => <li><a class="util" href={n.href}>{n.label}</a></li>)}
+      <li><a class="util" href="/privacy/">Privacy</a></li>
+      <li><a class="util" href={cta.wishlist.href} rel="noopener">Steam</a></li>
+      <li><a class="util" href={contact.press.href}>Press: {contact.press.label}</a></li>
+      {contact.discord.href && <li><a class="util" href={contact.discord.href} rel="noopener">{contact.discord.label}</a></li>}
+    </ul>
+    <div class="foot__small">
+      <p>© {year} {site.studio.name}. Pacenote is an original game; no real cars, teams or brands.</p>
+      <p>Every image is an in-game capture. Every map is the game’s own road data.</p>
+      <p>Set in Archivo and Barlow, the typeface the game uses.</p>
+    </div>
+  </div>
+</footer>

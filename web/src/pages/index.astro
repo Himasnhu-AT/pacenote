@@ -1,0 +1,248 @@
+---
+import Base from '../layouts/Base.astro';
+import Shot from '../components/Shot.astro';
+import LiveStage from '../components/LiveStage.astro';
+import StageMap from '../components/StageMap.astro';
+import Slash from '../components/Slash.astro';
+import SampleBadge from '../components/SampleBadge.astro';
+import { home, cta, gallery, shots, facts, release } from '../data/site';
+import { stages, stats, codriverRates } from '../data/stages';
+import { slug, km, biomeName, timeName, gradeWidth } from '../lib/stage';
+
+const pinewater = stages[0];
+const recceStage = stages.find((s) => s.id === home.recce.stage) ?? pinewater;
+const R = home.roles;
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const worst = stats.corners_worst[0];
+const cd = codriverRates();
+const worstStage = stages.find((s) => s.id === worst?.stage);
+const fmt = new Intl.NumberFormat('en-GB');
+const faqLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: home.faq.items.map((f) => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })),
+};
+---
+<Base>
+  <script slot="head" type="application/ld+json" set:html={JSON.stringify(faqLd)} />
+
+  <!-- 1. Hero: the two seats -->
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero__seats">
+      <figure class="seat seat--driver">
+        <figcaption class="seat__cap"><span class="seat__who">{home.hero.driver}</span><span class="seat__what">{home.hero.driverNote}</span></figcaption>
+        <Shot src={shots.hero.src} alt={shots.hero.alt} eager sizes="(min-width: 768px) 50vw, 100vw" class="seat__img" />
+      </figure>
+      <div class="seat seat--guide" data-reveal="clip" data-intro data-delay="0.08">
+        <p class="seat__cap"><span class="seat__who">{home.hero.guide}</span><span class="seat__what">{home.hero.guideNote}</span></p>
+        <LiveStage stage={pinewater} mode="idle" startAt={60} compact />
+      </div>
+    </div>
+    <div class="hero__foot">
+      <h1 class="hero__title" id="hero-title" data-split="chars" data-intro>Pacenote</h1>
+      <div class="hero__line">
+        <p data-reveal="up" data-intro data-delay="0.3">{home.hero.line}</p>
+        <div class="ctas" data-reveal="up" data-intro data-delay="0.38">
+          <a class="btn btn--primary" href={cta.wishlist.href} rel="noopener"><Slash /><span>{cta.wishlist.label}</span></a>
+          <a class="btn" href={cta.demo.href} rel="noopener"><Slash /><span>{cta.demo.label}</span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. The roles -->
+  <section class="roles" id="roles" aria-labelledby="roles-title">
+    <h2 class="roles__title display" id="roles-title" data-split="lines">{R.title}</h2>
+
+    <article class="role role--driver">
+      <div class="role__media" data-reveal="clip">
+        <Shot src={shots.driver.src} alt={shots.driver.alt} sizes="(min-width: 1024px) 58vw, 100vw" />
+      </div>
+      <div class="role__text">
+        <h3 class="role__name">{R.driver.name}</h3>
+        <p data-reveal="up">{R.driver.text}</p>
+        <ul class="role__list" data-reveal="up">{R.driver.list.map((l) => <li>{l}</li>)}</ul>
+      </div>
+    </article>
+
+    <article class="role role--guide">
+      <div class="role__text">
+        <h3 class="role__name">{R.guide.name}</h3>
+        <p data-reveal="up">{R.guide.text}</p>
+        <ul class="role__list" data-reveal="up">{R.guide.list.map((l) => <li>{l}</li>)}</ul>
+      </div>
+      <div class="role__media" data-reveal="clip">
+        {shots.guide
+          ? <Shot src={shots.guide.src} alt={shots.guide.alt} sizes="(min-width: 1024px) 58vw, 100vw" />
+          : <div class="role__map"><StageMap stage={stages[3]} numbers /></div>}
+      </div>
+    </article>
+
+    <article class="role role--solo">
+      <div class="role__text">
+        <h3 class="role__name">{R.solo.name}</h3>
+        <p data-reveal="up">{R.solo.text}</p>
+      </div>
+      <figure class="transcript">
+        <ol>
+          {R.solo.transcript.map((l, i) => (
+            <li class={`transcript__line is-${l.k}`} data-reveal="up" data-delay={String(i * 0.05)}>“{l.t}”</li>
+          ))}
+        </ol>
+        <figcaption>{R.solo.transcriptNote}</figcaption>
+      </figure>
+    </article>
+  </section>
+
+  <!-- 3. Read the road (signature) -->
+  <section class="recce" aria-labelledby="recce-title" data-recce>
+    <div class="recce__pin" data-pin>
+      <header class="recce__head">
+        <h2 class="display recce__title" id="recce-title">{home.recce.title}</h2>
+        <p class="recce__lead">{home.recce.lead} <span class="if-motion">{home.recce.leadMotion}</span><span class="if-still">{home.recce.leadStill}</span> {home.recce.leadEnd}</p>
+      </header>
+      <LiveStage stage={recceStage} mode="scroll" startAt={0} />
+      <div class="recce__range" data-range-wrap hidden>
+        <label for="recce-range">Metres along {recceStage.name}</label>
+        <input id="recce-range" type="range" min="0" max={Math.floor(recceStage.length_m)} step="10" value="0" data-range />
+      </div>
+      <aside class="grades" aria-labelledby="grades-title">
+        <h3 class="grades__title" id="grades-title">{home.recce.gradesTitle}</h3>
+        <ol class="grades__list">
+          {home.recce.grades.map((g) => (
+            <li class={`g${g.g}`}><span class="grades__n">{g.g}</span><span class="grades__w" style={`font-stretch:${gradeWidth(g.g)}%`}>{g.word}</span><span class="grades__note">{g.note}</span></li>
+          ))}
+        </ol>
+        <p class="grades__more">{home.recce.gradesNote}</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 4. The stages: index -->
+  <section class="stages" id="stages" aria-labelledby="stages-title">
+    <div class="stages__head">
+      <h2 class="display" id="stages-title" data-split="lines">{home.stages.title}</h2>
+      <p data-reveal="up">{home.stages.lead}</p>
+    </div>
+    <ol class="index">
+      {stages.map((s) => (
+        <li>
+          <a class="index__row" href={`/stages/${slug(s)}/`} data-dest={`Stage ${s.id} · ${s.name}`}>
+            <Slash />
+            <span class="index__no">{String(s.id).padStart(2, '0')}</span>
+            <span class="index__name">{s.name}</span>
+            <span class="index__map" aria-hidden="true"><StageMap stage={s} pad={0.08} class="map--thumb" /></span>
+            <span class="index__km">{km(s.length_m)} km</span>
+            <span class="index__meta">{s.surface} · {biomeName[s.biome]}</span>
+            <span class="index__sky">{s.weather === 'Clear' ? '' : `${s.weather} · `}{timeName[s.time]}</span>
+          </a>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  <!-- 5. Damage and the car -->
+  <section class="damage" aria-labelledby="damage-title">
+    <div class="damage__media" data-reveal="clip">
+      <Shot src={shots.crash.src} alt={shots.crash.alt} sizes="(min-width: 1024px) 66vw, 100vw" />
+    </div>
+    <div class="damage__text">
+      <h2 class="display" id="damage-title" data-split="lines">{home.damage.title}</h2>
+      <p data-reveal="up">{home.damage.lead}</p>
+      <ul class="parts">
+        {home.damage.parts.map((p, i) => (
+          <li class="part" data-reveal="up" data-delay={String(i * 0.06)}>
+            <span class="part__name">{p.name}</span>
+            <span class="part__meter" aria-hidden="true"><i style={`--v:${[0.32, 0.27, 0.14][i]}`}></i></span>
+            <span class="part__text">{p.text}</span>
+          </li>
+        ))}
+      </ul>
+      <p class="damage__retire" data-reveal="up">{home.damage.retire}</p>
+      <p class="damage__recover" data-reveal="up">{home.damage.recover}</p>
+    </div>
+    <figure class="damage__car" data-reveal="clip">
+      <Shot src={shots.car.src} alt={shots.car.alt} sizes="(min-width: 1024px) 40vw, 100vw" />
+      <figcaption>{shots.car.caption}</figcaption>
+    </figure>
+  </section>
+
+  <!-- 6. Numbers -->
+  <section class="numbers" aria-labelledby="numbers-title">
+    <div class="numbers__head">
+      <h2 class="display" id="numbers-title" data-split="lines">{home.numbers.title}</h2>
+      <p data-reveal="up">{home.numbers.lead}</p>
+      {stats.sample && <SampleBadge />}
+    </div>
+    <dl class="totals" data-reveal="up">
+      <div><dt>Runs</dt><dd>{fmt.format(stats.totals.runs)}</dd></div>
+      <div><dt>Kilometres driven</dt><dd>{fmt.format(stats.totals.km_driven)}</dd></div>
+      <div><dt>Crashes</dt><dd>{fmt.format(stats.totals.crashes)}</dd></div>
+      <div><dt>Runs that reached the finish</dt><dd>{pct(stats.totals.finishes / Math.max(1, stats.totals.runs))}</dd></div>
+    </dl>
+    {worst && worstStage && (
+      <figure class="worst" data-reveal="up">
+        <div class="worst__map"><StageMap stage={worstStage} mark={[worst.index]} title={`${worstStage.name} with corner ${worst.index + 1} ringed`} /></div>
+        <figcaption>
+          <span class="worst__k">Deadliest corner{stats.sample ? ' (sample)' : ''}</span>
+          <span class="worst__v">Stage {worst.stage}, {worst.stage_name}: corner {worst.index + 1}, {worst.turn} {worst.grade <= 1 ? 'hairpin' : worst.grade} at {(worst.start_m / 1000).toFixed(2)} km</span>
+          <span class="worst__n">{fmt.format(worst.crashes)} crashes, {fmt.format(worst.retirements)} runs ended here</span>
+        </figcaption>
+      </figure>
+    )}
+    {cd && (
+      <div class="codriver" data-reveal="up">
+        <p class="codriver__k">Finish rate, solo</p>
+        <div class="codriver__bars" data-bars>
+          <div><span>Co-driver on</span><b data-bar style={`--v:${cd.on}`}></b><em>{pct(cd.on)}</em></div>
+          <div><span>Co-driver off</span><b data-bar style={`--v:${cd.off}`}></b><em>{pct(cd.off)}</em></div>
+        </div>
+      </div>
+    )}
+    <a class="btn numbers__more" href="/stats/"><Slash /><span>{home.numbers.more}</span></a>
+  </section>
+
+  <!-- 7. Gallery wall -->
+  <section class="wall" aria-labelledby="wall-title">
+    <h2 class="display wall__title" id="wall-title" data-split="lines">{home.gallery.title}</h2>
+    <ul class="wall__grid">
+      {gallery.map((g, i) => (
+        <li class={`wall__item wall__item--${i}`}>
+          <figure data-reveal="clip">
+            <Shot src={g.src} alt={g.alt} sizes="(min-width: 1024px) 45vw, 100vw" />
+            <figcaption>{g.caption}</figcaption>
+          </figure>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <!-- 8. FAQ -->
+  <section class="faq" id="faq" aria-labelledby="faq-title">
+    <h2 class="display" id="faq-title">{home.faq.title}</h2>
+    <div class="faq__list">
+      {home.faq.items.map((f) => (
+        <details class="faq__item">
+          <summary><span>{f.q}</span><i aria-hidden="true"></i></summary>
+          <p>{f.a}{'link' in f && f.link && <> <a class="inline" href={f.link.href}>{f.link.label}</a>.</>}</p>
+        </details>
+      ))}
+    </div>
+  </section>
+
+  <!-- 9. Finale -->
+  <section class="finale" id="get" aria-labelledby="finale-title">
+    <h2 class="finale__title" id="finale-title" data-split="chars">{home.finale.title}</h2>
+    <div class="finale__body">
+      <p data-reveal="up">{home.finale.text}</p>
+      <div class="ctas" data-reveal="up">
+        <a class="btn btn--primary btn--big" href={cta.wishlist.href} rel="noopener"><Slash /><span>{cta.wishlist.label}</span></a>
+        <a class="btn btn--big" href={cta.demo.href} rel="noopener"><Slash /><span>{cta.demo.label}</span></a>
+      </div>
+    </div>
+    <dl class="facts">
+      {facts.map((f) => <div><dt>{f.label}</dt><dd>{f.value}</dd></div>)}
+      {release.map((f) => <div><dt>{f.label}</dt><dd>{f.value}</dd></div>)}
+    </dl>
+  </section>
+</Base>

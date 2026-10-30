@@ -4222,6 +4222,7 @@ dependencies = [
 name = "pacenote"
 version = "0.1.0"
 dependencies = [
+ "ashlar-trace",
  "bevy",
  "cpal",
  "engine",

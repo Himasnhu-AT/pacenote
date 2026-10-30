@@ -84,7 +84,7 @@ impl Plugin for ScreensPlugin {
             .init_resource::<NetNote>()
             .insert_resource(MenuConfig {
                 eyebrow: "Two-person rally",
-                main_items: vec![
+                main_items: main_items(vec![
                     ("Practice", MenuAction::Custom("practice")),
                     ("Host as driver", MenuAction::Custom("host")),
                     ("Join as guide", MenuAction::Open("join")),
@@ -94,7 +94,7 @@ impl Plugin for ScreensPlugin {
                     ("Settings", MenuAction::Settings),
                     ("Credits", MenuAction::Open("credits")),
                     ("Quit", MenuAction::Quit),
-                ],
+                ]),
                 pause_items: vec![
                     ("Resume", MenuAction::Resume),
                     ("Restart stage", MenuAction::Custom("restart")),
@@ -120,6 +120,14 @@ impl Plugin for ScreensPlugin {
     }
 }
 
+/// The demo adds "Wishlist on Steam" under "Practice".
+fn main_items(mut v: Vec<(&'static str, MenuAction)>) -> Vec<(&'static str, MenuAction)> {
+    if crate::demo::ACTIVE {
+        v.insert(1, ("Wishlist on Steam", MenuAction::Custom("wishlist")));
+    }
+    v
+}
+
 fn register_settings(app: &mut App) {
     fn p(w: &World) -> &Profile {
         w.resource::<Profile>()
@@ -141,6 +149,15 @@ fn register_settings(app: &mut App) {
         kind: FieldKind::Slider { min: 0.1, max: 1.0, step: 0.05, format: format_percent },
         get: |w| p(w).ghost_opacity,
         set: |w, v| w.resource_mut::<Profile>().ghost_opacity = v.clamp(0.1, 1.0),
+    })
+    .register_setting(FieldDef {
+        key: "share_stats",
+        tab: "Game",
+        label: "Share anonymous stats",
+        hint: "Run times, crashes and performance, with no names or voice. Helps tune the stages. See pacenote's privacy page.",
+        kind: FieldKind::Toggle,
+        get: |w| if p(w).share_stats { 1.0 } else { 0.0 },
+        set: |w, v| w.resource_mut::<Profile>().share_stats = v > 0.5,
     });
 }
 
@@ -219,11 +236,13 @@ pub fn on_menu(world: &mut World, id: &'static str) {
         "next" => {
             let cur = world.get_resource::<StageNow>().map_or(1, |s| s.id);
             let mode = world.get_resource::<RunMode>().copied().unwrap_or_default();
-            super::start_stage(world, cur % stage_count() + 1, mode);
+            super::start_stage(world, crate::demo::next_stage(cur, stage_count()), mode);
         }
         "menu" => {
             world.resource_mut::<NextState<AppState>>().set(AppState::MainMenu);
         }
+        "wishlist" => crate::demo::open_store(world, "menu"),
+        "wishlist_end" => crate::demo::open_store(world, "end"),
         _ => {}
     }
 }
@@ -367,7 +386,8 @@ fn crew_card(world: &mut World, slot: Entity) {
             });
             c.spawn(rule(t.line));
             c.spawn((Node { column_gap: px(GAP_L), ..default() }, Pickable::IGNORE)).with_children(|r| {
-                stat(r, &t, format!("{driven}/{}", stage_count()), "Stages timed", t.text, 32.0);
+                let open = if crate::demo::ACTIVE { crate::demo::STAGES.len() as u32 } else { stage_count() };
+                stat(r, &t, format!("{driven}/{open}"), "Stages timed", t.text, 32.0);
                 stat(r, &t, leads.to_string(), "Stage records", if leads > 0 { t.accent } else { t.text_dim }, 32.0);
             });
             if !last.is_empty() {
@@ -414,9 +434,11 @@ fn build_stages(world: &mut World, root: Entity) {
             c.spawn(spacer(GAP_S));
             c.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(2), margin: UiRect::left(px(-14)), ..default() }, Pickable::IGNORE)).with_children(|list| {
                 for (k, (id, name, info, best)) in rows.iter().enumerate() {
+                    let locked = !crate::demo::allowed(*id);
+                    let action = if locked { "wishlist" } else { STAGE_IDS[k] };
                     list.spawn((
                         Button,
-                        ActionButton(MenuAction::Custom(STAGE_IDS[k]).into()),
+                        ActionButton(MenuAction::Custom(action).into()),
                         Focusable { order: k as u32 + 1 },
                         StageRow(*id),
                         nav_look(&t),
@@ -438,6 +460,7 @@ fn build_stages(world: &mut World, root: Entity) {
                             c.spawn((text(info.clone(), body(15.0), t.text_dim), KeepColor, TextLayout::no_wrap()));
                         });
                         let (bt, bc) = match best {
+                            _ if locked => ("FULL GAME".to_string(), t.accent),
                             Some(s) => (board::clock(*s), t.text),
                             None => ("\u{2014}".to_string(), t.text_dim),
                         };
@@ -541,7 +564,12 @@ fn stage_details(world: &mut World) {
             };
             c.spawn(text(ghost_line, body(SIZE_SMALL), t.text_dim));
             c.spawn(spacer(GAP_S));
-            action_button(c, &t, verb, MenuAction::Custom(STAGE_IDS[(id - 1) as usize]), None, true, 512.0);
+            if crate::demo::allowed(id) {
+                action_button(c, &t, verb, MenuAction::Custom(STAGE_IDS[(id - 1) as usize]), None, true, 512.0);
+            } else {
+                c.spawn(text("Not in the demo: this stage comes with the full game.", body(SIZE_SMALL), t.text_dim));
+                action_button(c, &t, "Wishlist on Steam", MenuAction::Custom("wishlist"), None, true, 512.0);
+            }
         });
     });
 }
@@ -755,7 +783,7 @@ fn build_results(world: &mut World, root: Entity) {
         format!("P{} on the stage \u{b7} {}", res.inserted.rank, r.team_label())
     };
     let names = ["Split 1", "Split 2", "Split 3", "Finish"];
-    let next_name = crate::stage::stages().into_iter().find(|d| d.id == r.stage % stage_count() + 1).map(|d| d.name).unwrap_or_default();
+    let next_name = crate::stage::stages().into_iter().find(|d| d.id == crate::demo::next_stage(r.stage, stage_count())).map(|d| d.name).unwrap_or_default();
     world.commands().entity(root).with_children(|p| {
         menu_backdrop(p, &t, 0.72, 1.0);
         p.spawn(menu_column(GAP_S)).with_children(|c| {
@@ -807,7 +835,13 @@ fn build_results(world: &mut World, root: Entity) {
                 action_button(b, &t, "Retry", MenuAction::Custom("retry"), Some(1), true, 220.0);
                 action_button(b, &t, &format!("Next: {next_name}"), MenuAction::Custom("next"), Some(2), false, 300.0);
                 action_button(b, &t, "Menu", MenuAction::Custom("menu"), Some(3), false, 160.0);
+                if crate::demo::ACTIVE {
+                    action_button(b, &t, "Wishlist on Steam", MenuAction::Custom("wishlist_end"), Some(4), false, 300.0);
+                }
             });
+            if crate::demo::ACTIVE {
+                c.spawn(text("This is the free demo: 3 of the 20 stages. Wishlist Pacenote on Steam to hear when the full game is out.", body(SIZE_SMALL), t.text_dim));
+            }
         });
         spawn_footer(p, &t, &[("A / D", "Choose"), ("Enter", "Select")]);
     });
@@ -862,7 +896,14 @@ pub fn game_credits(world: &World) -> String {
         .get_resource::<engine::paths::AssetsDir>()
         .map(|a| a.0.join("credits.txt"))
         .filter(|p| p.is_file())
-        .unwrap_or_else(|| std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/credits.txt")));
+        .unwrap_or_else(|| {
+            // Dev builds run from anywhere; shipped ones only look next to the game.
+            #[cfg(feature = "dev")]
+            let p = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/credits.txt"));
+            #[cfg(not(feature = "dev"))]
+            let p = std::path::PathBuf::from("assets/credits.txt");
+            p
+        });
     std::fs::read_to_string(path).unwrap_or_else(|_| "Pacenote\n(credits.txt is missing)".into())
 }
 

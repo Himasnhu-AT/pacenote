@@ -1,0 +1,16 @@
+// Steam depot build script template (one per depot: Windows, macOS). upload.sh fills it.
+"DepotBuild"
+{
+	"DepotID" "__DEPOT__"
+	// Relative to the app build's ContentRoot: windows/ or macos/ of the edition's dist folder.
+	"FileMapping"
+	{
+		"LocalPath" "__SUBDIR__/*"
+		"DepotPath" "."
+		"Recursive" "1"
+	}
+	"FileExclusion" "*.pdb"
+	"FileExclusion" ".DS_Store"
+	// Players' settings and saves live outside the install folder (%APPDATA%\pacenote,
+	// ~/Library/Application Support/pacenote), so nothing in the depot is user data.
+}

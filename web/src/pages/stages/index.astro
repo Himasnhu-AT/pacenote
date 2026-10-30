@@ -1,0 +1,40 @@
+---
+import Base from '../../layouts/Base.astro';
+import StageMap from '../../components/StageMap.astro';
+import Slash from '../../components/Slash.astro';
+import { stages } from '../../data/stages';
+import { slug, km, biomeName, timeName } from '../../lib/stage';
+import { biomes } from '../../data/site';
+const order = ['PineForest', 'BirchHills', 'Scrub', 'Moor', 'SnowForest'];
+const total = stages.reduce((a, s) => a + s.length_m, 0);
+const corners = stages.reduce((a, s) => a + s.corners.length, 0);
+---
+<Base title="The 20 stages" description={`All 20 Pacenote stages: ${km(total)} km of gravel, tarmac, mud and snow, ${corners} corners, drawn from the game's road data.`}>
+  <header class="page-head">
+    <h1 data-split="chars" data-intro>The stages</h1>
+    <p class="lead">Twenty fixed roads, {km(total)} km and {corners} corners in all. Every map here is the game’s own road, seen from above; the orange marks are the hairpins and grade 2 corners.</p>
+  </header>
+  <section class="biomes">
+    {order.map((b) => {
+      const list = stages.filter((s) => s.biome === b);
+      return (
+        <div class="biome">
+          <div class="biome__head"><h2>{biomeName[b]}</h2><p>{biomes[b as keyof typeof biomes]}</p></div>
+          <ul class="cards">
+            {list.map((s) => (
+              <li>
+                <a class="card" href={`/stages/${slug(s)}/`} data-dest={`Stage ${s.id} · ${s.name}`}>
+                  <Slash />
+                  <span class="card__map" aria-hidden="true"><StageMap stage={s} class="map--thumb" pad={0.06} title={`Outline of ${s.name}`} /></span>
+                  <span class="card__no">Stage {String(s.id).padStart(2, '0')}</span>
+                  <span class="card__name">{s.name}</span>
+                  <span class="card__meta">{km(s.length_m)} km · {s.surface} · {s.weather === 'Clear' ? '' : `${s.weather}, `}{timeName[s.time].toLowerCase()}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+    })}
+  </section>
+</Base>

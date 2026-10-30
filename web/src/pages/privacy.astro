@@ -1,0 +1,34 @@
+---
+import Base from '../layouts/Base.astro';
+import { privacy, contact } from '../data/site';
+const P = privacy;
+---
+<Base title="Privacy" description="What the Pacenote demo and game send as anonymous stats, and how to turn it off.">
+  <header class="page-head">
+    <h1 data-split="chars" data-intro>{P.title}</h1>
+    <p class="lead">{P.lead}</p>
+  </header>
+  <section class="prose">
+    <ul class="key">{P.summary.map((s) => <li>{s}</li>)}</ul>
+    <h2>Who you are</h2>
+    <p>{P.ids}</p>
+    <p>{P.device}</p>
+    <h2>What a run sends</h2>
+    <div class="table-wrap">
+      <table class="events">
+        <thead><tr><th scope="col">Event</th><th scope="col">When</th><th scope="col">What it carries</th></tr></thead>
+        <tbody>{P.events.map((e) => <tr><td><code>{e.name}</code></td><td>{e.when}</td><td>{e.props}</td></tr>)}</tbody>
+      </table>
+    </div>
+    <h2>Where it goes and why</h2>
+    <p>{P.where}</p>
+    <p>{P.use}</p>
+    <h2>Turning it off</h2>
+    <p>Settings, Profile, “Share anonymous stats”. With it off, none of the above is sent, crash reports included.</p>
+    <h2>This website</h2>
+    <p>No cookies, no analytics, no third-party scripts or fonts. The “Read it to me” button uses your browser’s built-in speech and picks a voice on your device when there is one; some browsers send the text to their own speech service.</p>
+    <h2>Contact</h2>
+    <p>{P.contact} <a class="inline" href={contact.press.href}>{contact.press.label}</a></p>
+    <p class="source">Last updated {P.updated}.</p>
+  </section>
+</Base>

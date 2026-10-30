@@ -1,0 +1,107 @@
+---
+// One page per stage: the real map with every corner numbered, the elevation, the whole stage
+// read as the co-driver chains it, and the stage's numbers from stats.json.
+import Base from '../../layouts/Base.astro';
+import StageMap from '../../components/StageMap.astro';
+import Profile from '../../components/Profile.astro';
+import Shot from '../../components/Shot.astro';
+import Slash from '../../components/Slash.astro';
+import SampleBadge from '../../components/SampleBadge.astro';
+import { stages, stats, statsFor } from '../../data/stages';
+import { stageShots, cta } from '../../data/site';
+import { slug, calls, phrase, gradeWidth, km, biomeName, timeName, fmtTime, type Stage } from '../../lib/stage';
+
+export function getStaticPaths() {
+  return stages.map((s) => ({ params: { slug: slug(s) }, props: { stage: s } }));
+}
+interface Props { stage: Stage }
+const { stage } = Astro.props;
+const i = stages.indexOf(stage);
+const prev = stages[(i - 1 + stages.length) % stages.length];
+const next = stages[(i + 1) % stages.length];
+const cs = calls(stage);
+const hairpins = stage.corners.filter((c) => c.grade <= 1).length;
+const ys = stage.points.map((p) => p[2]);
+const rise = Math.round(Math.max(...ys) - Math.min(...ys));
+const st = statsFor(stage.id);
+const shot = stageShots[stage.id as keyof typeof stageShots];
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const conditions = `${stage.weather === 'Clear' ? 'Clear' : stage.weather}, ${timeName[stage.time].toLowerCase()}`;
+const description = `Stage ${stage.id} of Pacenote: ${stage.name}, ${km(stage.length_m)} km of ${stage.surface.toLowerCase()} through ${biomeName[stage.biome].toLowerCase()}, ${stage.corners.length} corners. The real map, elevation and every pace note.`;
+---
+<Base title={`Stage ${stage.id}: ${stage.name}`} description={description}>
+  <header class="page-head">
+    <p class="crumb"><a href="/stages/">Stages</a> / {String(stage.id).padStart(2, '0')}</p>
+    <h1 data-split="chars" data-intro>{stage.name}</h1>
+    <p class="lead">{km(stage.length_m)} km of {stage.surface.toLowerCase()} through {biomeName[stage.biome].toLowerCase()}. {conditions}.</p>
+    <dl class="meta" data-reveal="up" data-intro data-delay="0.2">
+      <div><dt>Length</dt><dd>{km(stage.length_m)} km</dd></div>
+      <div><dt>Surface</dt><dd>{stage.surface}</dd></div>
+      <div><dt>Conditions</dt><dd>{conditions}</dd></div>
+      <div><dt>Corners</dt><dd>{stage.corners.length}</dd></div>
+      <div><dt>Hairpins</dt><dd>{hairpins}</dd></div>
+      <div><dt>Height range</dt><dd>{rise} m</dd></div>
+    </dl>
+  </header>
+
+  <section class="stage-plan" aria-label="Map and elevation">
+    <div class="stage-plan__map" data-reveal="fade"><StageMap stage={stage} numbers pad={0.05} /></div>
+    <div class="stage-plan__shot">
+      {shot && (
+        <figure data-reveal="clip">
+          <Shot src={shot.src} alt={shot.alt} sizes="(min-width: 900px) 33vw, 100vw" />
+          <figcaption>{shot.caption}</figcaption>
+        </figure>
+      )}
+      <ul class="legend" aria-label="Corner grades">
+        {[1, 2, 3, 4, 5, 6].map((g) => <li class={`g${g}`}><i></i>{g === 1 ? '1 hairpin' : g === 6 ? '6 flat' : g}</li>)}
+        <li><i style="height:8px;width:8px;border-radius:50%"></i>Start</li>
+      </ul>
+      <p class="source">The map is the game’s own road, a point every 10 m, viewed from above. Numbers are corner order.</p>
+    </div>
+    <Profile stage={stage} />
+  </section>
+
+  <section class="sheet" aria-labelledby="sheet-title">
+    <h2 class="display" id="sheet-title">The notes</h2>
+    <p class="sheet__intro">{cs.length} calls, in the order and words the AI co-driver uses. In the game each is read a few seconds before you get there, with the distance in front: “150 left four”.</p>
+    <ol class="sheet__list">
+      {cs.map((c) => (
+        <li>
+          <span class="sheet__at">{(c.at / 1000).toFixed(2)}</span>
+          <span class="sheet__call">
+            {c.notes.map((n, k) => {
+              const g = n.corner === null ? null : stage.corners[n.corner].grade;
+              return <>{k > 0 && <span class="live__into"> into </span>}<span class={g !== null ? `g${Math.max(1, g)}` : ''} style={`font-stretch:${gradeWidth(g)}%`}>{phrase(n, stage.corners)}</span></>;
+            })}
+          </span>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  {st && (
+    <section class="stage-stats" aria-labelledby="ss-title">
+      <h2 class="display" id="ss-title">{stage.name} so far</h2>
+      {stats.sample && <SampleBadge />}
+      <dl>
+        <div><dt>Runs</dt><dd>{st.runs.toLocaleString('en-GB')}</dd></div>
+        <div><dt>Finished</dt><dd>{pct(st.finish_rate)}</dd></div>
+        <div><dt>Retired</dt><dd>{pct(st.retire_rate)}<small>a part broke</small></dd></div>
+        <div><dt>Median time</dt><dd>{fmtTime(st.median_time_s)}</dd></div>
+        <div><dt>Worst corner</dt><dd>{st.top_corner ? `No. ${st.top_corner.index + 1}` : 'none'}{st.top_corner && <small>{st.top_corner.turn} {st.top_corner.grade <= 1 ? 'hairpin' : st.top_corner.grade}, {st.top_corner.crashes} crashes</small>}</dd></div>
+      </dl>
+    </section>
+  )}
+
+  <nav class="pager" aria-label="Other stages">
+    <a class="target" href={`/stages/${slug(prev)}/`} data-dest={`Stage ${prev.id} · ${prev.name}`}><Slash /><small>Previous stage</small><strong>{prev.name}</strong></a>
+    <a class="target" href={`/stages/${slug(next)}/`} data-dest={`Stage ${next.id} · ${next.name}`}><Slash /><small>Next stage</small><strong>{next.name}</strong></a>
+  </nav>
+  <section class="finale finale--small" aria-label="Get Pacenote">
+    <div class="ctas">
+      <a class="btn btn--primary" href={cta.wishlist.href} rel="noopener"><Slash /><span>{cta.wishlist.label}</span></a>
+      <a class="btn" href={cta.demo.href} rel="noopener"><Slash /><span>{cta.demo.label}</span></a>
+    </div>
+  </section>
+</Base>

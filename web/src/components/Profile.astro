@@ -1,0 +1,18 @@
+---
+// Elevation along the road, start to finish (height exaggerated to fill the strip).
+import { profile, type Stage } from '../lib/stage';
+interface Props { stage: Stage; live?: boolean; class?: string; w?: number; h?: number }
+const { stage, live = false, class: cls, w = 1000, h = 120 } = Astro.props;
+const p = profile(stage, w, h * 0.9);
+const rise = Math.round(p.hi - p.lo);
+---
+<figure class:list={['profile', cls]}>
+  <svg viewBox={`0 ${-h * 0.1} ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Elevation of ${stage.name}: ${rise} m between the lowest and highest point`}>
+    <path class="profile__area" d={p.area} />
+    <path class="profile__line" d={p.line} />
+    {stage.crests.map((k) => <line class="profile__crest" x1={(k / stage.length_m) * w} x2={(k / stage.length_m) * w} y1={-h * 0.1} y2={h} />)}
+    {live && <rect class="profile__done" x="0" y={-h * 0.1} width={w} height={h} data-profile-done />}
+    {live && <line class="profile__now" x1="0" x2="0" y1={-h * 0.1} y2={h} data-profile-now />}
+  </svg>
+  <figcaption><span>Elevation</span><span>{rise} m from lowest to highest</span></figcaption>
+</figure>

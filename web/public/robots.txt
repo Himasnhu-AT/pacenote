@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://pacenote.marlstudio.com/sitemap-index.xml

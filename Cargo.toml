@@ -17,10 +17,17 @@ ron = "0.12"
 # Microphone capture for voice chat (same version rodio already pulls in: no new copy).
 cpal = "0.17.3"
 serde_json = "1"
+# Only for the tracer's consent categories: the same crate (and revision) the engine uses.
+ashlar-trace = { git = "https://github.com/Himasnhu-AT/ashlar", rev = "561745aaf96e07a0efe2ed61f37b0a365f46a530", default-features = false, optional = true }
 
 [features]
 default = ["dev"]
-dev = ["engine/devtools", "engine/trace", "engine/devkit"]
+dev = ["engine/devtools", "engine/devkit", "telemetry"]
+# Anonymous stats and crash reports (docs/TELEMETRY.md). Ship builds: `--no-default-features
+# --features telemetry`, with PACENOTE_TRACE_ENDPOINT / PACENOTE_TRACE_KEY set at build time.
+telemetry = ["engine/trace", "dep:ashlar-trace"]
+# The free demo: three stages, wishlist prompts (src/demo.rs). PACENOTE_STEAM_URL at build time.
+demo = []
 
 [profile.dev]
 opt-level = 1

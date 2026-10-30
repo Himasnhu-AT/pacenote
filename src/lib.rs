@@ -3,6 +3,7 @@
 pub mod art;
 pub mod audio;
 pub mod codriver;
+pub mod demo;
 pub mod drive;
 pub mod guide;
 pub mod hud;
@@ -10,6 +11,7 @@ pub mod loading;
 pub mod meta;
 pub mod net_session;
 pub mod stage;
+pub mod telemetry;
 pub mod vehicle;
 pub mod voice;
 pub mod world;
@@ -19,7 +21,11 @@ use engine::prelude::*;
 
 pub fn info() -> GameInfo {
     // Our own assets/ wins over ./assets when run from another folder (the engine's scripts).
-    GameInfo::new("pacenote", "Pacenote").tagline("One drives. One reads the road.").assets_fallback(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"))
+    let info = GameInfo::new("pacenote", if demo::ACTIVE { "Pacenote Demo" } else { "Pacenote" }).tagline("One drives. One reads the road.");
+    // Dev builds only: shipped builds must not carry a path into the source tree.
+    #[cfg(feature = "dev")]
+    let info = info.assets_fallback(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"));
+    info
 }
 
 /// Which stage to load (`--stage N`, 1..=20).
@@ -30,7 +36,7 @@ pub struct Pacenote;
 
 impl Plugin for Pacenote {
     fn build(&self, app: &mut App) {
-        let n = engine::cli::arg_value("stage").and_then(|v| v.parse().ok()).unwrap_or(1u32).clamp(1, 20);
+        let n = demo::clamp_stage(engine::cli::arg_value("stage").and_then(|v| v.parse().ok()).unwrap_or(1u32).clamp(1, 20));
         app.insert_resource(StageChoice(n))
             .insert_resource(Time::<Fixed>::from_hz(60.0))
             .add_plugins((drive::DrivePlugin, hud::HudPlugin, guide::GuidePlugin))
@@ -40,6 +46,7 @@ impl Plugin for Pacenote {
             .add_plugins(art::ArtPlugin)
             .add_plugins(loading::LoadingPlugin)
             .add_plugins(codriver::CoDriverPlugin)
+            .add_plugins(telemetry::TelemetryPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
     }
 }

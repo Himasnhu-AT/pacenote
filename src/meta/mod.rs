@@ -63,6 +63,10 @@ pub struct Profile {
     pub ghost_opacity: f32,
     /// Chosen rival team key per stage.
     pub rivals: Vec<(u32, String)>,
+    /// Send anonymous gameplay stats (docs/TELEMETRY.md). On by default.
+    pub share_stats: bool,
+    /// The first-launch note about stats was shown.
+    pub stats_notice_seen: bool,
 }
 
 impl Default for Profile {
@@ -76,6 +80,8 @@ impl Default for Profile {
             ghost: 1,
             ghost_opacity: 0.45,
             rivals: Vec::new(),
+            share_stats: true,
+            stats_notice_seen: false,
         }
     }
 }
@@ -212,7 +218,7 @@ fn apply_menu(world: &mut World) {
 
 /// Loads stage `id` (1..=20) as practice or a team run (hosting when `Team`).
 pub fn start_stage(world: &mut World, id: u32, mode: RunMode) {
-    let id = id.clamp(1, crate::stage::stages().len() as u32);
+    let id = crate::demo::clamp_stage(id.clamp(1, crate::stage::stages().len() as u32));
     match mode {
         RunMode::Practice => {
             if netlink::role(world) != Role::Solo {

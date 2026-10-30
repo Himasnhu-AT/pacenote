@@ -1,0 +1,15 @@
+---
+// Home only, first visit per session, desktop (src/motion/setup.ts): the start countdown.
+// 5 to 1 follows real loading (fonts, hero image), then GO and the orange slash clears it.
+const home = Astro.url.pathname === '/';
+---
+{home && (
+  <div id="loader" role="status" aria-label="Loading">
+    <div class="loader__inner">
+      <p class="loader__name" data-loader-out>Stage 1 · Pinewater · 3.2 km</p>
+      <p class="loader__count" data-loader-out><span data-loader-count>5</span></p>
+      <p class="loader__hint" data-loader-out>Start in</p>
+    </div>
+    <div class="loader__bar" data-loader-bar></div>
+  </div>
+)}

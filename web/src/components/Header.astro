@@ -1,0 +1,34 @@
+---
+import { nav, cta } from '../data/site';
+import Slash from './Slash.astro';
+const path = Astro.url.pathname;
+const current = (href: string) => (!href.startsWith('/#') && path.startsWith(href) ? 'page' : undefined);
+---
+<header class="frame" data-frame>
+  <a class="frame__mark" href="/" aria-label="Pacenote, home" aria-current={path === '/' ? 'page' : undefined}>
+    <span class="wordmark">Pacenote</span>
+  </a>
+  <nav class="frame__nav" aria-label="Main">
+    <ul>
+      {nav.map((n) => (
+        <li><a class="target" href={n.href} aria-current={current(n.href)}><Slash /><span>{n.label}</span></a></li>
+      ))}
+    </ul>
+  </nav>
+  <a class="btn btn--primary btn--small frame__cta" href={cta.wishlist.href} rel="noopener" aria-label={cta.wishlist.label}><Slash /><span><span class="long">{cta.wishlist.label}</span><span class="short" aria-hidden="true">Wishlist</span></span></a>
+  <button class="frame__menu target" type="button" aria-expanded="false" aria-controls="menu" data-menu-open><Slash /><span>Menu</span></button>
+</header>
+<div class="menu" id="menu" hidden data-menu role="dialog" aria-modal="true" aria-label="Menu">
+  <nav aria-label="Menu">
+    <ul>
+      <li><a href="/" aria-current={path === '/' ? 'page' : undefined}><span>Home</span></a></li>
+      {nav.map((n) => (<li><a href={n.href} aria-current={current(n.href)}><span>{n.label}</span></a></li>))}
+      <li><a href="/privacy/" aria-current={current('/privacy/')}><span>Privacy</span></a></li>
+    </ul>
+  </nav>
+  <div class="menu__ctas">
+    <a class="btn btn--primary" href={cta.wishlist.href} rel="noopener"><Slash /><span>{cta.wishlist.label}</span></a>
+    <a class="btn" href={cta.demo.href} rel="noopener"><Slash /><span>{cta.demo.label}</span></a>
+  </div>
+  <button class="menu__close target" type="button" data-menu-close><Slash /><span>Close</span></button>
+</div>

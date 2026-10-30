@@ -1,0 +1,58 @@
+---
+// The signature: a real stage, a car on it, and the co-driver's calls for the road ahead.
+// One driver module (src/motion/recce.ts) maps a single number, metres along the road, to the
+// car, the lit 500 m, the profile marker, the odometer and the call sheet.
+//   mode="idle"   the car drives itself on the GSAP ticker (hero)
+//   mode="scroll" scroll progress through the pinned section is the throttle
+// Server-rendered first frame: the car at `startAt` with its calls, so nothing depends on JS.
+import StageMap from './StageMap.astro';
+import Profile from './Profile.astro';
+import { calls, spoken, phrase, gradeWidth, km, type Stage, type Call } from '../lib/stage';
+import { home } from '../data/site';
+interface Props { stage: Stage; mode: 'idle' | 'scroll'; startAt?: number; compact?: boolean; id?: string }
+const { stage, mode, startAt = 0, compact = false, id } = Astro.props;
+const cs = calls(stage);
+const data = {
+  step: stage.step_m,
+  length: stage.length_m,
+  points: stage.points.map((p) => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]),
+  calls: cs.map((c) => ({ at: Math.round(c.at), end: Math.round(c.end), text: c.text, grade: c.grade, parts: parts(c), corners: c.notes.flatMap((n) => (n.corner === null ? [] : [n.corner])) })),
+};
+function parts(c: Call) {
+  return c.notes.map((n) => ({ t: phrase(n, stage.corners), g: n.corner === null ? null : stage.corners[n.corner].grade }));
+}
+const firstIdx = Math.max(0, cs.findIndex((c) => c.end >= startAt));
+const first = cs[firstIdx];
+const next = cs.slice(firstIdx + 1, firstIdx + (compact ? 2 : 4));
+const R = home.recce;
+---
+<div class:list={['live', `live--${mode}`, { 'live--compact': compact }]} data-live={mode} data-start={startAt} id={id}>
+  <script type="application/json" data-live-data set:html={JSON.stringify(data)} />
+  <div class="live__map">
+    <StageMap stage={stage} live title={`Live map of ${stage.name}, stage ${stage.id}. The car drives the real road; the next 500 metres are lit.`} />
+  </div>
+  <div class="live__sheet">
+    <p class="live__odo" aria-hidden="true"><span data-odo>{km(startAt)}</span><span class="live__odo-of"> / {km(stage.length_m)} km</span></p>
+    <p class="live__label">{compact ? 'Next call' : 'Co-driver'}</p>
+    <p class="live__call" data-call data-n={first ? first.notes.length : 1} aria-hidden="true">
+      {first && parts(first).map((p, i) => (
+        <span class="live__line">{i > 0 ? <span class="live__into">into</span> : (first.at - startAt > 40 && <span class="live__dist">{spoken(first, first.at - startAt).split(' ')[0]}</span>)}{' '}<span class:list={['live__part', p.g !== null && `g${Math.max(1, p.g)}`]} style={`font-stretch:${gradeWidth(p.g)}%`}>{p.t}</span></span>
+      ))}
+    </p>
+    {!compact && (
+      <ol class="live__next" data-next aria-hidden="true">
+        {next.map((c) => (
+          <li><span class="live__next-d">{Math.round(c.at - startAt)}</span><span class="live__next-t">{c.text}</span></li>
+        ))}
+      </ol>
+    )}
+    {!compact && (
+      <div class="live__voice">
+        <button class="btn btn--ghost" type="button" aria-pressed="false" data-speak hidden><span class="slash" aria-hidden="true"></span><span data-speak-label>{R.speak}</span></button>
+        <p class="live__voice-note" data-speak-note hidden>{R.speakNote}</p>
+      </div>
+    )}
+    <p class="sr-only">{`${stage.name} has ${cs.length} calls. The first: ${cs[0]?.text}.`}</p>
+  </div>
+  {!compact && <Profile stage={stage} live class="live__profile" />}
+</div>

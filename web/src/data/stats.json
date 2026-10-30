@@ -1,0 +1,480 @@
+{
+ "generated_at": "2026-10-30T12:00:00Z",
+ "sample": true,
+ "totals": {
+  "installs": 2140,
+  "runs": 14044,
+  "finishes": 8714,
+  "retirements": 3947,
+  "km_driven": 44519,
+  "crashes": 27840
+ },
+ "stages": [
+  {
+   "id": 1,
+   "name": "Pinewater",
+   "runs": 696,
+   "finish_rate": 0.654,
+   "retire_rate": 0.234,
+   "median_time_s": 215.4,
+   "best_time_s": 157.2,
+   "crashes": 1171,
+   "top_corner": {
+    "index": 12,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 2624,
+    "crashes": 268,
+    "retirements": 42
+   }
+  },
+  {
+   "id": 2,
+   "name": "Kettle Ridge",
+   "runs": 1213,
+   "finish_rate": 0.604,
+   "retire_rate": 0.297,
+   "median_time_s": 267.8,
+   "best_time_s": 207.4,
+   "crashes": 2103,
+   "top_corner": {
+    "index": 17,
+    "turn": "right",
+    "grade": 1,
+    "start_m": 3904,
+    "crashes": 310,
+    "retirements": 33
+   }
+  },
+  {
+   "id": 3,
+   "name": "Birchmoor",
+   "runs": 849,
+   "finish_rate": 0.808,
+   "retire_rate": 0.128,
+   "median_time_s": 175.4,
+   "best_time_s": 133.7,
+   "crashes": 1213,
+   "top_corner": {
+    "index": 7,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 1828,
+    "crashes": 520,
+    "retirements": 107
+   }
+  },
+  {
+   "id": 4,
+   "name": "Low Fen",
+   "runs": 440,
+   "finish_rate": 0.571,
+   "retire_rate": 0.301,
+   "median_time_s": 241.6,
+   "best_time_s": 196.8,
+   "crashes": 1027,
+   "top_corner": {
+    "index": 16,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 3316,
+    "crashes": 182,
+    "retirements": 36
+   }
+  },
+  {
+   "id": 5,
+   "name": "Sunscar",
+   "runs": 721,
+   "finish_rate": 0.576,
+   "retire_rate": 0.315,
+   "median_time_s": 197.4,
+   "best_time_s": 154.1,
+   "crashes": 1400,
+   "top_corner": {
+    "index": 14,
+    "turn": "left",
+    "grade": 2,
+    "start_m": 2608,
+    "crashes": 173,
+    "retirements": 20
+   }
+  },
+  {
+   "id": 6,
+   "name": "Thornback",
+   "runs": 450,
+   "finish_rate": 0.701,
+   "retire_rate": 0.175,
+   "median_time_s": 256.0,
+   "best_time_s": 198.9,
+   "crashes": 849,
+   "top_corner": {
+    "index": 11,
+    "turn": "right",
+    "grade": 1,
+    "start_m": 2010,
+    "crashes": 112,
+    "retirements": 23
+   }
+  },
+  {
+   "id": 7,
+   "name": "High Cairn",
+   "runs": 511,
+   "finish_rate": 0.653,
+   "retire_rate": 0.274,
+   "median_time_s": 338.0,
+   "best_time_s": 255.5,
+   "crashes": 865,
+   "top_corner": {
+    "index": 9,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 2090,
+    "crashes": 112,
+    "retirements": 14
+   }
+  },
+  {
+   "id": 8,
+   "name": "Grey Hollow",
+   "runs": 893,
+   "finish_rate": 0.622,
+   "retire_rate": 0.31,
+   "median_time_s": 265.7,
+   "best_time_s": 207.8,
+   "crashes": 1644,
+   "top_corner": {
+    "index": 11,
+    "turn": "left",
+    "grade": 2,
+    "start_m": 2346,
+    "crashes": 280,
+    "retirements": 50
+   }
+  },
+  {
+   "id": 9,
+   "name": "Frostline",
+   "runs": 805,
+   "finish_rate": 0.578,
+   "retire_rate": 0.336,
+   "median_time_s": 267.2,
+   "best_time_s": 205.8,
+   "crashes": 1984,
+   "top_corner": {
+    "index": 11,
+    "turn": "right",
+    "grade": 1,
+    "start_m": 1348,
+    "crashes": 219,
+    "retirements": 47
+   }
+  },
+  {
+   "id": 10,
+   "name": "White Spruce",
+   "runs": 851,
+   "finish_rate": 0.482,
+   "retire_rate": 0.401,
+   "median_time_s": 322.9,
+   "best_time_s": 264.3,
+   "crashes": 1787,
+   "top_corner": {
+    "index": 0,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 20,
+    "crashes": 282,
+    "retirements": 37
+   }
+  },
+  {
+   "id": 11,
+   "name": "Long Drop",
+   "runs": 793,
+   "finish_rate": 0.469,
+   "retire_rate": 0.404,
+   "median_time_s": 409.6,
+   "best_time_s": 302.5,
+   "crashes": 1645,
+   "top_corner": {
+    "index": 25,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 4542,
+    "crashes": 169,
+    "retirements": 18
+   }
+  },
+  {
+   "id": 12,
+   "name": "Saw Mill",
+   "runs": 873,
+   "finish_rate": 0.665,
+   "retire_rate": 0.257,
+   "median_time_s": 164.0,
+   "best_time_s": 122.4,
+   "crashes": 1793,
+   "top_corner": {
+    "index": 4,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 904,
+    "crashes": 292,
+    "retirements": 52
+   }
+  },
+  {
+   "id": 13,
+   "name": "Meadow Run",
+   "runs": 459,
+   "finish_rate": 0.694,
+   "retire_rate": 0.189,
+   "median_time_s": 308.3,
+   "best_time_s": 226.0,
+   "crashes": 812,
+   "top_corner": {
+    "index": 1,
+    "turn": "right",
+    "grade": 3,
+    "start_m": 50,
+    "crashes": 101,
+    "retirements": 8
+   }
+  },
+  {
+   "id": 14,
+   "name": "Bramble",
+   "runs": 402,
+   "finish_rate": 0.651,
+   "retire_rate": 0.236,
+   "median_time_s": 193.3,
+   "best_time_s": 153.2,
+   "crashes": 653,
+   "top_corner": {
+    "index": 3,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 870,
+    "crashes": 145,
+    "retirements": 24
+   }
+  },
+  {
+   "id": 15,
+   "name": "Dust Devil",
+   "runs": 485,
+   "finish_rate": 0.466,
+   "retire_rate": 0.45,
+   "median_time_s": 361.5,
+   "best_time_s": 287.3,
+   "crashes": 1389,
+   "top_corner": {
+    "index": 3,
+    "turn": "left",
+    "grade": 2,
+    "start_m": 258,
+    "crashes": 83,
+    "retirements": 17
+   }
+  },
+  {
+   "id": 16,
+   "name": "Red Rocks",
+   "runs": 774,
+   "finish_rate": 0.654,
+   "retire_rate": 0.257,
+   "median_time_s": 183.5,
+   "best_time_s": 134.6,
+   "crashes": 1363,
+   "top_corner": {
+    "index": 9,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 1786,
+    "crashes": 264,
+    "retirements": 52
+   }
+  },
+  {
+   "id": 17,
+   "name": "Moorgate",
+   "runs": 767,
+   "finish_rate": 0.666,
+   "retire_rate": 0.211,
+   "median_time_s": 285.9,
+   "best_time_s": 209.4,
+   "crashes": 1491,
+   "top_corner": {
+    "index": 2,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 514,
+    "crashes": 304,
+    "retirements": 53
+   }
+  },
+  {
+   "id": 18,
+   "name": "Tor Crossing",
+   "runs": 802,
+   "finish_rate": 0.698,
+   "retire_rate": 0.198,
+   "median_time_s": 372.8,
+   "best_time_s": 271.2,
+   "crashes": 1195,
+   "top_corner": {
+    "index": 2,
+    "turn": "right",
+    "grade": 2,
+    "start_m": 784,
+    "crashes": 116,
+    "retirements": 23
+   }
+  },
+  {
+   "id": 19,
+   "name": "Iceback",
+   "runs": 476,
+   "finish_rate": 0.611,
+   "retire_rate": 0.26,
+   "median_time_s": 222.6,
+   "best_time_s": 163.8,
+   "crashes": 1243,
+   "top_corner": {
+    "index": 6,
+    "turn": "left",
+    "grade": 1,
+    "start_m": 1094,
+    "crashes": 252,
+    "retirements": 28
+   }
+  },
+  {
+   "id": 20,
+   "name": "Silent Pines",
+   "runs": 784,
+   "finish_rate": 0.596,
+   "retire_rate": 0.332,
+   "median_time_s": 380.1,
+   "best_time_s": 310.3,
+   "crashes": 2213,
+   "top_corner": {
+    "index": 22,
+    "turn": "right",
+    "grade": 1,
+    "start_m": 4280,
+    "crashes": 279,
+    "retirements": 65
+   }
+  }
+ ],
+ "corners_worst": [
+  {
+   "stage": 3,
+   "stage_name": "Birchmoor",
+   "index": 7,
+   "turn": "left",
+   "grade": 1,
+   "start_m": 1828,
+   "crashes": 520,
+   "retirements": 107
+  },
+  {
+   "stage": 20,
+   "stage_name": "Silent Pines",
+   "index": 22,
+   "turn": "right",
+   "grade": 1,
+   "start_m": 4280,
+   "crashes": 279,
+   "retirements": 65
+  },
+  {
+   "stage": 17,
+   "stage_name": "Moorgate",
+   "index": 6,
+   "turn": "left",
+   "grade": 1,
+   "start_m": 1766,
+   "crashes": 295,
+   "retirements": 63
+  },
+  {
+   "stage": 12,
+   "stage_name": "Saw Mill",
+   "index": 11,
+   "turn": "right",
+   "grade": 1,
+   "start_m": 2480,
+   "crashes": 261,
+   "retirements": 59
+  },
+  {
+   "stage": 10,
+   "stage_name": "White Spruce",
+   "index": 1,
+   "turn": "right",
+   "grade": 1,
+   "start_m": 432,
+   "crashes": 261,
+   "retirements": 58
+  },
+  {
+   "stage": 17,
+   "stage_name": "Moorgate",
+   "index": 2,
+   "turn": "left",
+   "grade": 1,
+   "start_m": 514,
+   "crashes": 304,
+   "retirements": 53
+  },
+  {
+   "stage": 8,
+   "stage_name": "Grey Hollow",
+   "index": 8,
+   "turn": "right",
+   "grade": 1,
+   "start_m": 1698,
+   "crashes": 252,
+   "retirements": 53
+  },
+  {
+   "stage": 2,
+   "stage_name": "Kettle Ridge",
+   "index": 12,
+   "turn": "right",
+   "grade": 1,
+   "start_m": 2724,
+   "crashes": 304,
+   "retirements": 52
+  },
+  {
+   "stage": 12,
+   "stage_name": "Saw Mill",
+   "index": 4,
+   "turn": "left",
+   "grade": 1,
+   "start_m": 904,
+   "crashes": 292,
+   "retirements": 52
+  },
+  {
+   "stage": 16,
+   "stage_name": "Red Rocks",
+   "index": 9,
+   "turn": "left",
+   "grade": 1,
+   "start_m": 1786,
+   "crashes": 264,
+   "retirements": 52
+  }
+ ],
+ "codriver": {
+  "on_finish_rate": 0.71,
+  "off_finish_rate": 0.58
+ }
+}

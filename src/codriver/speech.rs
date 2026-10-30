@@ -17,7 +17,7 @@ enum Backend {
 }
 
 fn detect() -> Backend {
-    let has = |cmd: &str, arg: &str| Command::new(cmd).arg(arg).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok();
+    let has = |cmd: &str, arg: &str| no_window(Command::new(cmd).arg(arg)).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok();
     if cfg!(target_os = "macos") {
         return if has("say", "-v?") { Backend::Say } else { Backend::None };
     }
@@ -111,6 +111,17 @@ impl Drop for Speech {
     }
 }
 
+/// No console window for a child of a windowed (no-console) game on Windows; a no-op elsewhere.
+pub fn no_window(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 fn spawn(b: Backend, text: &str, rate: u32) -> Option<Child> {
     let mut cmd = match b {
         Backend::Say => {
@@ -139,7 +150,7 @@ fn spawn(b: Backend, text: &str, rate: u32) -> Option<Child> {
         }
         Backend::None => return None,
     };
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()
+    no_window(&mut cmd).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()
 }
 
 #[cfg(test)]

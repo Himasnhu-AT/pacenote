@@ -168,9 +168,9 @@ pub fn damage_line(before: &crate::vehicle::Damage, after: &crate::vehicle::Dama
     };
     let state = |d: f32| {
         if d > 0.7 {
-            "badly damaged, nurse it home"
+            "is badly damaged, nurse it home"
         } else if d > 0.35 {
-            "damaged"
+            "is damaged"
         } else {
             "took a knock"
         }

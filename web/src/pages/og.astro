@@ -1,0 +1,38 @@
+---
+// Source for public/og.png (1200x630): not linked, not in the sitemap. Regenerate with
+// `node <awwwards skill>/scripts/og.mjs http://127.0.0.1:4410/og/` (see README).
+import Shot from '../components/Shot.astro';
+import StageMap from '../components/StageMap.astro';
+import { stages } from '../data/stages';
+import { shots } from '../data/site';
+import '../styles/tokens.css';
+import '../styles/engine.css';
+import '../styles/site.css';
+const st = stages[1];
+---
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><meta name="robots" content="noindex" /><title>Pacenote OG</title>
+<style is:global>
+  body { width: 1200px; height: 630px; overflow: hidden; background: var(--c-bg); }
+  .og { position: relative; width: 1200px; height: 630px; display: grid; grid-template-columns: 620px 1fr; }
+  .og__shot { position: relative; overflow: hidden; align-self: start; height: 400px; -webkit-mask-image: linear-gradient(#000 62%, transparent); mask-image: linear-gradient(#000 62%, transparent); }
+  .og__shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 60%; }
+  .og__map { position: relative; padding: 40px 40px 170px; }
+  .og__map svg { width: 100%; height: 100%; }
+  .og__title { position: absolute; left: 36px; bottom: 74px; font-family: var(--f-display); font-weight: 900; font-stretch: 125%; font-size: 158px; line-height: 0.8; letter-spacing: -0.045em; text-transform: uppercase; color: var(--c-fg); text-shadow: 0 6px 40px rgb(11 21 48 / 0.5); }
+  .og__line { position: absolute; left: 40px; bottom: 30px; font-size: 26px; color: var(--c-fg); }
+  .og__line b { color: var(--c-accent); font-weight: 600; }
+  .og__tag { position: absolute; left: 0; top: 0; padding: 14px 20px; background: var(--c-bg); font-family: var(--f-display); font-weight: 850; font-stretch: 120%; text-transform: uppercase; font-size: 22px; }
+  .og__tag--r { left: 620px; }
+  .og__shade { display: none; }
+</style></head>
+<body>
+  <div class="og">
+    <div class="og__shot"><Shot src={shots.hero.src} alt="" eager widths={[1200]} sizes="620px" /></div>
+    <div class="og__map"><StageMap stage={st} /></div>
+    <span class="og__tag">Driver sees</span><span class="og__tag og__tag--r">Guide sees</span>
+    <div class="og__shade"></div>
+    <p class="og__title">Pacenote</p>
+    <p class="og__line">Two people, one rally car. <b>Free demo on Steam.</b></p>
+  </div>
+</body></html>

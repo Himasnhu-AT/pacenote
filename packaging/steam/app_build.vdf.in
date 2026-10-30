@@ -1,0 +1,20 @@
+// Steam app build script template. upload.sh fills the __PLACEHOLDERS__ and writes
+// app_build_<APPID>.vdf into the build folder; don't edit ids here.
+// Docs: https://partner.steamgames.com/doc/sdk/uploading
+"AppBuild"
+{
+	"AppID" "__APPID__"
+	"Desc" "__DESC__"
+	// 1 = build the manifests without uploading (check what would go up).
+	"Preview" "__PREVIEW__"
+	// Branch to set the build live on after upload. Never "default" from a script: set the
+	// public branch live by hand in Steamworks (App Admin > SteamPipe > Builds).
+	"SetLive" "__SETLIVE__"
+	"ContentRoot" "__CONTENT_ROOT__"
+	"BuildOutput" "__BUILD_OUTPUT__"
+	"Depots"
+	{
+		"__DEPOT_WIN__" "depot_build___DEPOT_WIN__.vdf"
+		"__DEPOT_MAC__" "depot_build___DEPOT_MAC__.vdf"
+	}
+}
