@@ -71,6 +71,8 @@ pub fn sim_hash(spec: &Spec, hz: u32) -> String {
     h.str(&format!("{spec:?}"));
     h.u64(hz as u64);
     h.u64(vehicle::SUBSTEPS as u64);
+    // Sim revisions that change how the same inputs drive (2: damage).
+    h.u64(2);
     format!("{:016x}", h.0)
 }
 

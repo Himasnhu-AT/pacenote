@@ -359,6 +359,8 @@ struct Cell {
 #[derive(Resource, Default)]
 pub struct TreeField {
     cells: HashMap<IVec2, Cell>,
+    /// Cells in near range still waiting for their near trees (after this frame's spawns).
+    waiting: usize,
     pub stats: TreeStats,
 }
 
@@ -413,6 +415,11 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
     }
     world.insert_resource(TreeKit { species, mix, view });
     world.insert_resource(TreeField::default());
+}
+
+/// Near trees are out around the camera (true when the stage has no trees).
+pub fn near_ready(world: &World) -> bool {
+    world.get_resource::<TreeField>().is_none_or(|f| f.waiting == 0)
 }
 
 fn foliage(m: &mut StandardMaterial, tint: Color, wet: bool) {
@@ -534,7 +541,13 @@ pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit
 }
 
 /// Spawns near trees for cells around the camera and removes them for cells far away.
-pub fn stream(mut commands: Commands, kit: Option<Res<TreeKit>>, field: Option<ResMut<TreeField>>, cams: Query<&GlobalTransform, With<MainCamera>>) {
+pub fn stream(
+    mut commands: Commands,
+    kit: Option<Res<TreeKit>>,
+    field: Option<ResMut<TreeField>>,
+    cams: Query<&GlobalTransform, With<MainCamera>>,
+    loading: Option<Res<crate::loading::Loading>>,
+) {
     let (Some(kit), Some(mut field), Ok(cam)) = (kit, field, cams.single()) else { return };
     let eye = cam.translation();
     let d2 = |c: &Cell| Vec2::new(c.center.x - eye.x, c.center.z - eye.z).length_squared();
@@ -550,7 +563,10 @@ pub fn stream(mut commands: Commands, kit: Option<Res<TreeKit>>, field: Option<R
     // Load the nearest few missing cells.
     let mut want: Vec<(f32, IVec2)> = field.cells.iter().filter(|(_, c)| c.near.is_empty() && !c.trees.is_empty() && d2(c) < NEAR_LOAD * NEAR_LOAD).map(|(k, c)| (d2(c), *k)).collect();
     want.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (_, key) in want.into_iter().take(SPAWNS_PER_FRAME) {
+    // Behind the loading screen nobody sees a long frame: fill the view at once.
+    let per_frame = if loading.is_some() { SPAWNS_PER_FRAME * 8 } else { SPAWNS_PER_FRAME };
+    field.waiting = want.len().saturating_sub(per_frame);
+    for (_, key) in want.into_iter().take(per_frame) {
         let c = field.cells.get_mut(&key).unwrap();
         let range = VisibilityRange { start_margin: 0.0..0.0, end_margin: (NEAR_END - FADE)..NEAR_END, use_aabb: false };
         for t in &c.trees {

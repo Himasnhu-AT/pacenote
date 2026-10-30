@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use engine::actions::ActionState;
 use engine::sound::{BusId, Mixer, SoundBackend, SoundConfig, SoundSet};
 
-use crate::drive::{CameraMode, CarSpec, DrivenCar, StageRun};
+use crate::drive::{CameraView, CarSpec, DrivenCar, StageRun};
 use crate::guide::GuideStage;
 use crate::guide::sync::NetCar;
 use crate::stage::Surface;
@@ -297,7 +297,7 @@ fn gather(
     run: Option<Res<StageRun>>,
     stage: Option<Res<StageWorld>>,
     guide_stage: Option<Res<GuideStage>>,
-    cam: Option<Res<CameraMode>>,
+    cam: Option<Res<CameraView>>,
     spec: Option<Res<CarSpec>>,
     cars: Query<&DrivenCar>,
     remote: Res<RemoteCarSound>,
@@ -309,7 +309,7 @@ fn gather(
     let link = &mut *link;
     let f = &mut link.frame;
     f.n_events = 0;
-    let interior = if cam.is_some_and(|c| c.0) { 1.0 } else { 0.0 };
+    let interior = if cam.is_some_and(|c| *c != CameraView::Chase) { 1.0 } else { 0.0 };
     // Ambience: the stage's biome / weather / time.
     // (The guide has no `StageWorld`, only the `GuideStage` it generated from the stage id.)
     let def = stage.as_deref().map(|s| &s.def).or(guide_stage.as_deref().map(|g| &g.def));

@@ -2,9 +2,11 @@
 
 pub mod art;
 pub mod audio;
+pub mod codriver;
 pub mod drive;
 pub mod guide;
 pub mod hud;
+pub mod loading;
 pub mod meta;
 pub mod net_session;
 pub mod stage;
@@ -36,6 +38,8 @@ impl Plugin for Pacenote {
             .add_plugins(meta::MetaPlugin)
             .add_plugins(voice::VoicePlugin)
             .add_plugins(art::ArtPlugin)
+            .add_plugins(loading::LoadingPlugin)
+            .add_plugins(codriver::CoDriverPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
     }
 }
@@ -47,11 +51,6 @@ fn load_stage(world: &mut World) {
     }
     let n = world.resource::<StageChoice>().0;
     let def = stage::stages().into_iter().find(|d| d.id == n).expect("stage");
-    let t0 = std::time::Instant::now();
-    let s = world::generate(&def);
-    info!("stage {} \"{}\": {:.1} km, {} corners, generated in {:.2} s", def.id, def.name, s.road.length() / 1000.0, s.corners.len(), t0.elapsed().as_secs_f32());
-    // Terrain, road, dressing, trees, sky and weather (the sun comes with the stage's look).
-    world::spawn(world, &s);
-    world.spawn((MainCamera, Camera3d::default(), Transform::from_xyz(0.0, 50.0, 0.0)));
-    drive::spawn_car(world);
+    // Generation, terrain, road, dressing, trees, sky, camera and car, behind the loading screen.
+    loading::begin(world, def);
 }

@@ -6,14 +6,14 @@ Every file under `assets_src/` is listed here. Only CC0 and CC BY licences are u
 
 ## Credits that must appear in the game (CC BY)
 
-- "Car Concept" by Eric Chadwick, © 2024 Darmstadt Graphics Group GmbH, based on a CC0 model by Unity Fan. Licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Modified.
+- None at the moment. (The CC BY Car Concept below is no longer shipped: the game's car is an original procedural model, `tools/art/build_rallycar.py`. Restore its credit line if it is ever used again.)
 
 CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and models from Poly Haven (polyhaven.com) and ambientCG (ambientcg.com), CC0. Smoke sprites by Kenney (kenney.nl), CC0. Hay bale and fence by carlosjorgereis (OpenGameArt), CC0."
 
 
 ## models/car
 
-### Car Concept (`khronos_car_concept`) — placeholder car
+### Car Concept (`khronos_car_concept`): former placeholder car, no longer used
 
 - **Use:** Realistic car for driving/physics/rendering tests until a hatchback is sourced. Sporty concept with a rear hatch; separate wheel nodes (WheelFrontL/R, WheelRearL/R + Rim/BrakeDisc/BrakePad children, Axles). NOT a hatchback rally car. Contains Khronos and 3D Commerce logos (licence-plate texture, steering-wheel emblem): these are trademarks, not CC-BY, and must be removed/replaced before shipping. Uses KHR_materials_variants/clearcoat/transmission/iridescence.
 - **Path:** `assets_src/models/car/khronos_car_concept/`
@@ -712,12 +712,12 @@ Same authors and licence as the models above. ~3.3 MB in total.
 
 - `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures and foliage cards rendered in Blender from `fir_sapling`, `pine_sapling_small` and `island_tree_02` (`tools/art/prep_textures.sh`, `tools/art/render_cards.py`).
 - `assets/models/*.pnm`: decimated rocks, shrubs, ferns, grass and a stump (`tools/art/build_meshes.py`).
-- `assets/models/car.glb`: Car Concept, rescaled, logos removed, repainted (`tools/art/build_car.py`).
+- `assets/models/rallycar.glb`: original procedural rally hatchback with livery and cockpit (`tools/art/build_rallycar.py`); no third-party content.
 - Credits: `assets/credits.txt`.
 
 ## Not found / not downloaded
 
-### Car (rally hatchback): manual download needed
+### Car (rally hatchback): solved with an original procedural model; the options below were the download candidates
 No realistic, unbranded hatchback in glTF is downloadable without an account under CC0/CC BY. Poly Haven has no cars (only `covered_car`, a car under a tarp). Khronos samples only have Car Concept (above) and the toy-like ToyCar. Sketchfab's download API returns 401 without login. These CC BY 4.0 models are downloadable as glTF from Sketchfab with a free account (licence read from the Sketchfab API on 2026-10-28; re-check the page before use):
 
 | Model | Author | Faces | Why |

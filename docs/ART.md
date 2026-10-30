@@ -12,7 +12,7 @@ surface, trees and dressing, the car model, sky and weather, wheel spray. One pl
 | `terrain.rs`, `terrain.wgsl` | full-PBR terrain material (colour + normal + ORM per layer, two-scale anti-tiling, AO-weighted layer blend) put on the engine's terrain chunks; same splat map and layer rules as the engine's |
 | `trees.rs` | trees built from foliage cards: pine, spruce, snowy spruce, birch, olive-like scrub tree (3 variants each), placed on the dressing graph's `trunks` points (the ones the car collides with) |
 | `dressing.rs` | PCG catalog: decimated Poly Haven rocks, shrubs, ferns, grass, stump; item mixes per biome; ground cover fades out at ~95 m instead of the budget's flat far version |
-| `car.rs` | Car Concept model on the simulated car: hubs follow suspension and steer, wheels spin; bonnet camera position |
+| `car.rs` | the rally car model on the simulated car: hubs follow suspension and steer, wheels spin; steering wheel, tacho and speedo follow the sim; lamp pod hidden from inside; cockpit-eye and bonnet camera positions |
 | `look.rs` | `Look` per stage: sun angle/colour/lux per time of day, atmosphere or overcast gradient sky, fog distance per weather (also where trees and scenery stop), exposure, grading |
 | `spray.rs` | dust, gravel chips, mud clods, snow powder, tarmac smoke per wheel from surface, speed and slip; rain around the camera on wet stages |
 | `meshfile.rs` | reader for `assets/models/*.pnm` (small binary meshes, read synchronously at load) |
@@ -28,7 +28,7 @@ tools/art/prep_textures.sh                       # ground/road/model sets → as
 blender -b --factory-startup -P tools/art/render_cards.py -- <assets_src> assets/textures   # foliage cards (+ snow variant)
 memgate -- cargo run --manifest-path <engine>/tools/cook/Cargo.toml -- assets/textures       # → KTX2 (BC7/BC5), alpha kept
 blender -b --factory-startup -P tools/art/build_meshes.py -- <assets_src> assets/models      # rocks/plants → .pnm
-blender -b --factory-startup -P tools/art/build_car.py -- <CarConcept.glb> assets/models/car.glb
+blender -b --factory-startup -P tools/art/build_rallycar.py -- assets/models/rallycar.glb [preview_dir]   # car (no sources needed)
 ```
 
 - **Foliage cards** are orthographic side renders of the Poly Haven saplings (unlit albedo,
@@ -40,14 +40,24 @@ blender -b --factory-startup -P tools/art/build_car.py -- <CarConcept.glb> asset
   shadows; spawned for PCG cells within 220 m of the camera (3 cells per frame), removed beyond
   270 m, fade out at 150 m. Far = the core cards merged per 64 m PCG cell, GPU-only mesh, no
   shadows, from 104 m (to the cell centre) to the fog distance.
-- **Car**: Car Concept (CC BY 4.0, credit in `assets/credits.txt`), rescaled to the sim's
-  2.47 m wheelbase, nose to −Z, body joined per material, wheels re-rigged as `Hub*` (steer +
-  suspension, caliper) → `Spin*` (tyre, rim, disc); the steering-wheel emblem deleted, the plate
-  texture and every emissive "logo" texture removed, material variants dropped, deep blue
-  livery. Bevy 0.19 issues found: the clearcoat lobe washes the paint out to white, and
-  `KHR_texture_transform` on normal/emissive maps is ignored (the paint's flake normal tiles
-  30× and sparkled), so both are off. glTF images get CPU-built mips at load, then drop
-  their CPU copy.
+- **Car**: an original 3-door gravel-rally hatchback built entirely in `build_rallycar.py`
+  (no downloaded parts): the body is a loft of parametric cross-sections (bonnet → windscreen →
+  roof → hatch from per-station height/width curves), wheel wells cut with booleans, then flared
+  arches, mud flaps, skid plate, tow hooks, roof scoop and spoiler, mirrors, lamps, and a 4-lamp
+  bonnet pod (node `LightPod`). Livery (white, navy, orange; door number panel "14") is a
+  generated 1024² atlas: sides map by (y, height) with the number drawn un-mirrored on each
+  side, top by (y, x), ends by (x, height). Wheels: knobbly gravel tyres (R 0.325 m), white
+  six-spoke rims, discs, orange calipers; rig `Hub*` (steer + suspension, caliper) → `Spin*`.
+  ~16 k triangles, 15 materials, 0.5 MB. Every material is single-sided: the body shell is
+  invisible from inside, so the cockpit shows the interior's own skin (the shell's opaque cabin
+  faces copied 3.5 cm in and flipped), dash, binnacle with live gauges (`Tacho`, `Speedo`),
+  steering wheel (`SteeringWheel`, turns about its column), seats with harnesses, shifter,
+  hydraulic handbrake and a roll cage; the glass (alpha blended) shows only from outside.
+  `preview_dir` renders Workbench previews (four exterior views and the driver's eye).
+- **Cameras** (`drive.rs` `CameraView`, `C` cycles): cockpit (default; driver's eye at the left
+  seat, view direction lagged ~55 ms behind the body to filter suspension shake, pitched 3°
+  down) → bonnet → chase. The lamp pod is hidden in cockpit and bonnet views.
+  glTF images get CPU-built mips at load, then drop their CPU copy.
 
 ## Measurements
 

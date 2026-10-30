@@ -269,7 +269,7 @@ pub fn restart_stage(world: &mut World) {
 pub fn recover(world: &mut World) {
     let Some(stage) = world.get_resource::<StageWorld>().cloned() else { return };
     let run = world.resource::<StageRun>().clone();
-    if run.countdown > 0.0 || run.finished.is_some() {
+    if run.countdown > 0.0 || run.finished.is_some() || run.retired {
         return;
     }
     let i = stage.road.station(run.progress);

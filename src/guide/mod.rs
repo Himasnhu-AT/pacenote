@@ -195,23 +195,27 @@ pub struct Note {
 
 /// The next `out.capacity()` notes from `s` (corners still in progress included).
 pub fn upcoming(g: &GuideStage, s: f32, max: usize, out: &mut Vec<Note>) {
+    upcoming_in(&g.corners, &g.crests, s, max, out);
+}
+
+/// [`upcoming`] over any stage's corners and crests (the AI co-driver reads the driver's own).
+pub fn upcoming_in(corners: &[Corner], crests: &[f32], s: f32, max: usize, out: &mut Vec<Note>) {
     out.clear();
-    let corners = &g.corners;
     let first = corners.partition_point(|c| c.end < s);
     let mut ci = first;
-    let mut ki = g.crests.partition_point(|&k| k < s);
+    let mut ki = crests.partition_point(|&k| k < s);
     let mut prev_end = if first > 0 { corners[first - 1].end } else { -1e9 };
     while out.len() < max {
         let c = corners.get(ci);
         // Crests that fall inside a corner are part of its call already.
-        while let Some(&k) = g.crests.get(ki) {
+        while let Some(&k) = crests.get(ki) {
             if corners.iter().skip(ci.saturating_sub(1)).take(3).any(|c| k >= c.start - 30.0 && k <= c.end) {
                 ki += 1;
             } else {
                 break;
             }
         }
-        let k = g.crests.get(ki).copied();
+        let k = crests.get(ki).copied();
         let note = match (c, k) {
             (Some(c), Some(k)) if k < c.start => {
                 ki += 1;

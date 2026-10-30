@@ -35,11 +35,29 @@ pub struct StageRun {
     pub progress: f32,
     /// Split times at each quarter of the stage.
     pub splits: Vec<f32>,
+    /// The car was wrecked: the run is over without a time.
+    pub retired: bool,
 }
 
-/// Bonnet (true) or chase camera.
-#[derive(Resource, Clone, Copy, Default)]
-pub struct CameraMode(pub bool);
+/// The driver's camera, cycled with the camera action: cockpit → bonnet → chase. A run
+/// starts in the cockpit; the choice then sticks for later stages.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CameraView {
+    #[default]
+    Cockpit,
+    Bonnet,
+    Chase,
+}
+
+impl CameraView {
+    pub fn next(self) -> Self {
+        match self {
+            CameraView::Cockpit => CameraView::Bonnet,
+            CameraView::Bonnet => CameraView::Chase,
+            CameraView::Chase => CameraView::Cockpit,
+        }
+    }
+}
 
 pub struct DrivePlugin;
 
@@ -47,7 +65,7 @@ impl Plugin for DrivePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CarSpec>()
             .init_resource::<StageRun>()
-            .init_resource::<CameraMode>()
+            .init_resource::<CameraView>()
             .add_action(ActionDef::axis1d("steer").label("Steer").group("Driving").bind(Binding::key_axis(KeyCode::KeyD, KeyCode::KeyA)).bind(Binding::key_axis(KeyCode::ArrowRight, KeyCode::ArrowLeft)).bind(Binding::pad_axis(GamepadAxis::LeftStickX)))
             .add_action(ActionDef::button("throttle").label("Throttle").group("Driving").bind(Binding::key(KeyCode::KeyW)).bind(Binding::key(KeyCode::ArrowUp)).bind(Binding::pad(GamepadButton::RightTrigger2)))
             .add_action(ActionDef::button("brake").label("Brake / reverse").group("Driving").bind(Binding::key(KeyCode::KeyS)).bind(Binding::key(KeyCode::ArrowDown)).bind(Binding::pad(GamepadButton::LeftTrigger2)))
@@ -68,14 +86,17 @@ pub fn spawn_car(world: &mut World) {
     let id = world.spawn((Name::new("car"), DrivenCar { prev: (car.pos, car.rot), car }, CarBody, tf, Visibility::default(), Actor)).id();
     crate::art::car::spawn(world, id);
     world.insert_resource(StageRun { countdown: 3.0, ..default() });
+    // Every stage starts seated in the car.
+    world.insert_resource(CameraView::Cockpit);
 }
 
-fn controls(actions: Res<ActionState>, mut cam: ResMut<CameraMode>) {
+fn controls(actions: Res<ActionState>, mut cam: ResMut<CameraView>) {
     if actions.just_pressed("camera") {
-        cam.0 = !cam.0;
+        *cam = cam.next();
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn simulate(
     time: Res<Time<Fixed>>,
     actions: Res<ActionState>,
@@ -84,12 +105,17 @@ fn simulate(
     mut run: ResMut<StageRun>,
     mut cars: Query<(Entity, &mut DrivenCar)>,
     mut ghost: Option<ResMut<crate::meta::ghost::Recorder>>,
+    loading: Option<Res<crate::loading::Loading>>,
 ) {
     let dt = time.delta_secs();
+    // Nothing moves behind the loading screen (the ghost recording starts with the countdown).
+    if loading.is_some() {
+        return;
+    }
     for (e, mut c) in &mut cars {
         let c = &mut *c;
         c.prev = (c.car.pos, c.car.rot);
-        let held = run.countdown > 0.0 || run.finished.is_some();
+        let held = run.countdown > 0.0 || run.finished.is_some() || run.retired;
         // Held on the handbrake (the foot brake at a standstill would select reverse).
         let input = if held {
             Input { handbrake: true, ..default() }
@@ -100,12 +126,16 @@ fn simulate(
             g.input(e, input);
         }
         vehicle::step(&mut c.car, &spec.0, input, &*stage, dt);
-        // Clock.
         if run.countdown > 0.0 {
             run.countdown -= dt;
             continue;
         }
-        if run.finished.is_some() {
+        if run.finished.is_some() || run.retired {
+            continue;
+        }
+        if c.car.damage.wrecked() {
+            info!("retired: car wrecked at {:.0} m ({:?})", run.progress, c.car.damage);
+            run.retired = true;
             continue;
         }
         run.time += dt;
@@ -147,19 +177,40 @@ fn draw_car(fixed: Res<Time<Fixed>>, mut bodies: Query<(&DrivenCar, &mut Transfo
 
 fn follow_camera(
     time: Res<Time>,
-    mode: Res<CameraMode>,
+    view: Res<CameraView>,
+    spec: Res<CarSpec>,
     cars: Query<&Transform, (With<CarBody>, Without<MainCamera>)>,
     mut cams: Query<&mut Transform, With<MainCamera>>,
     mut smooth: Local<Option<(Vec3, Vec3)>>,
+    mut head: Local<Option<Quat>>,
 ) {
     let (Ok(car), Ok(mut cam)) = (cars.single(), cams.single_mut()) else { return };
     let fwd = car.rotation * Vec3::NEG_Z;
     let flat = Vec3::new(fwd.x, 0.0, fwd.z).normalize_or(Vec3::NEG_Z);
-    if mode.0 {
-        cam.translation = car.translation + car.rotation * crate::art::car::BONNET_CAM;
-        cam.rotation = car.rotation;
-        *smooth = None;
-        return;
+    match *view {
+        CameraView::Cockpit => {
+            // Fixed to the seat; the view direction follows the body through a short lag so
+            // the suspension's high-frequency shake doesn't reach the eye. Pitched a little
+            // down, the way a driver looks at the road.
+            let k = 1.0 - (-time.delta_secs() * 18.0).exp();
+            let look = match *head {
+                Some(q) if q.dot(car.rotation).abs() > 0.97 => q.slerp(car.rotation, k),
+                _ => car.rotation,
+            };
+            *head = Some(look);
+            cam.translation = car.translation + car.rotation * crate::art::car::cockpit_eye(&spec.0);
+            cam.rotation = look * Quat::from_rotation_x(-0.05);
+            *smooth = None;
+            return;
+        }
+        CameraView::Bonnet => {
+            cam.translation = car.translation + car.rotation * crate::art::car::bonnet_cam(&spec.0);
+            cam.rotation = car.rotation;
+            *smooth = None;
+            *head = None;
+            return;
+        }
+        CameraView::Chase => *head = None,
     }
     let want_eye = car.translation - flat * 6.8 + Vec3::Y * 2.3;
     let want_at = car.translation + flat * 4.0 + Vec3::Y * 0.9;

@@ -26,10 +26,12 @@ Full design: `docs/DESIGN.md`.
 | Path | What |
 |---|---|
 | `src/stage.rs` | 20 stage definitions, road growth, terrain shaping, corner grades 1–6, crests (pure, tested) |
-| `src/vehicle.rs` | Car sim (pure, deterministic): raycast suspension, Pacejka tyres per surface, ABS, traction assist, viscous LSD, hill hold, auto gearbox, impulse obstacle hits |
+| `src/vehicle.rs` | Car sim (pure, deterministic): raycast suspension, Pacejka tyres per surface, ABS, traction assist, viscous LSD, hill hold, auto gearbox, impulse obstacle hits, `Damage` (engine / steering / suspension; a broken part retires the car) |
 | `src/world.rs` | `StageWorld` (road, heights, obstacles; implements `Ground`), terrain + PCG dressing spawn |
-| `src/drive.rs` | Input actions, 60 Hz fixed-step sim, cameras (chase / bonnet), `StageRun` (clock, splits, progress) |
-| `src/hud.rs` | Driver HUD |
+| `src/drive.rs` | Input actions, 60 Hz fixed-step sim, cameras (cockpit / bonnet / chase), `StageRun` (clock, splits, progress, retired) |
+| `src/loading.rs` | Loading screen: stage generated on a worker, built, pipelines warmed, near scenery and trees in, frames settled; then the countdown |
+| `src/codriver/` | AI co-driver: pace notes read ahead by time (`calls.rs`, pure), damage/splits/finish/off-road/roof lines, system TTS (`speech.rs`: `say`, espeak, PowerShell), subtitles; `N` toggles; quiet when a human guide is connected |
+| `src/hud.rs` | Driver HUD (speed, gear, clock, damage readout, retired message) |
 | `src/art/` | Textured terrain material (`terrain.wgsl`), road ribbon, card trees, rocks/plants, car model, per-stage look (sky/fog/rain), wheel spray |
 | `src/audio/` | Synthesised engine/turbo/tyres/ambience on a custom stream; guide hears the replicated car (`RemoteCarSound`) |
 | `src/meta/` | Menus, stage select, leaderboards (`board.rs`), ghosts (`ghost.rs`), results, credits; `netlink.rs` adapts to `net_session` |
@@ -38,7 +40,7 @@ Full design: `docs/DESIGN.md`.
 | `src/voice/` | Mic capture (cpal), IMA ADPCM, jitter buffer, playback, push-to-talk / open mic, indicator |
 | `tests/` | `guide_net.rs` (two apps on loopback), `meta.rs` (scenario flow), `voice.rs` (two-app voice) |
 | `tools/art/` | Blender / Python scripts that build meshes, foliage cards, and prep textures |
-| `assets/` | Cooked KTX2 textures + `color.avg`, `.pnm` meshes, `car.glb`, `credits.txt` (sources are gitignored) |
+| `assets/` | Cooked KTX2 textures + `color.avg`, `.pnm` meshes, `rallycar.glb`, `credits.txt` (sources are gitignored) |
 | `assets_src/` | Raw CC0 / CC-BY downloads, local only; `SOURCES.md` is tracked |
 
 ## Build, test, run
@@ -93,6 +95,20 @@ You can also use the menus: Host as driver / Join as guide.
   (`github.com/Himasnhu-AT/hull`), committed separately.
 
 ## Known issues and gaps (candidates to fix)
+
+Loading / damage / co-driver (added 30 Oct):
+- The freeze on entering a stage (up to 13 s, window not responding) was the stage built in one
+  frame, then every pipeline compiling synchronously on first draw (macOS) while 30k scenery
+  entities streamed in. It all happens behind `loading.rs` now (~4 s on an M5 Pro). Scenery past
+  450 m of the start still streams in during play, nearest first.
+- Damage isn't replicated to the guide (`NetCar` lacks it), and a retired run isn't on the
+  results screen or the board: the HUD says RETIRED and Esc offers restart / leave.
+- The co-driver uses the OS voice (`say`): its sound skips the engine mixer and volume. Voice,
+  rate and timing (`calls::LEAD_S`) may want tuning by ear. Corner calls don't include
+  "don't cut" / "caution" from terrain (only grade, long, crest, narrows).
+- Worktrees: cargo gives every checkout of this package the same artifact hashes, so two
+  worktrees on the shared target dir overwrite each other's binary. Give a second worktree its
+  own `CARGO_TARGET_DIR`.
 
 Driving:
 - Accel is now 0–100 km/h in ~8 s on gravel (after the LSD + hill-hold fix, `bdb30ba`). The
