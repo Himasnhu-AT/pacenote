@@ -120,11 +120,20 @@ fn follow_stage(mut commands: Commands, q: Query<&NetStage, With<Remote>>, curre
     if ns.id == 0 {
         return;
     }
+    let weather = crate::meta::stages::WEATHERS.get(ns.weather as usize).copied();
+    let time = crate::meta::stages::TIMES.get(ns.time as usize).copied();
     match current {
         Some(mut g) if g.def.id == ns.id => {
             let ok = g.road_hash == ns.road_hash;
             if g.hash_ok != ok {
                 g.hash_ok = ok;
+            }
+            // Same road, new weather or time of day (the driver picked again).
+            if let (Some(w), Some(t)) = (weather, time)
+                && (g.def.weather, g.def.time) != (w, t)
+            {
+                g.def.weather = w;
+                g.def.time = t;
             }
         }
         _ => {
@@ -134,6 +143,10 @@ fn follow_stage(mut commands: Commands, q: Query<&NetStage, With<Remote>>, curre
                 return;
             };
             g.hash_ok = g.road_hash == ns.road_hash;
+            if let (Some(w), Some(t)) = (weather, time) {
+                g.def.weather = w;
+                g.def.time = t;
+            }
             info!(
                 "guide: stage {} \"{}\" generated in {:.0} ms, {} corners, road hash {:016x} ({})",
                 g.def.id,

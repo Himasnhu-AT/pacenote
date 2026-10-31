@@ -27,7 +27,11 @@ pub enum NetStatus {
 pub fn host(world: &mut World, port: u16) -> Result<(), String> {
     let name = world.get_resource::<super::Profile>().map(|p| p.driver_name.clone()).unwrap_or_default();
     world.resource_mut::<Session>().name = name;
-    net_session::host(world, port).map(|_| ()).map_err(|e| format!("Can't host on port {port}: {e}"))
+    let r = net_session::host(world, port).map(|_| ()).map_err(|e| format!("Can't host on port {port}: {e}"));
+    if r.is_err() {
+        crate::telemetry::host_failed(world);
+    }
+    r
 }
 
 /// Join a driver at `host:port` as the guide.

@@ -15,7 +15,7 @@
 pub mod board;
 pub mod ghost;
 pub mod netlink;
-mod screens;
+pub(crate) mod screens;
 pub mod stages;
 mod textfield;
 
@@ -28,7 +28,8 @@ use engine::ui::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::StageChoice;
-use crate::drive::{CarSpec, DrivenCar, StageRun};
+use crate::stage::{StageDef, TimeOfDay, Weather};
+use crate::drive::{CameraView, CarSpec, DrivenCar, StageRun};
 use crate::world::StageWorld;
 
 use board::{Board, BoardFile, Inserted, Record, team_key};
@@ -65,8 +66,31 @@ pub struct Profile {
     pub rivals: Vec<(u32, String)>,
     /// Send anonymous gameplay stats (docs/TELEMETRY.md). On by default.
     pub share_stats: bool,
+    /// Send crash and hang reports (docs/TELEMETRY.md). On by default.
+    pub send_crash_reports: bool,
     /// The first-launch note about stats was shown.
     pub stats_notice_seen: bool,
+    /// Weather and time of day picked per stage (only stages not at their defaults).
+    pub conditions: Vec<(u32, Weather, TimeOfDay)>,
+    /// Driver's camera: 0 cockpit, 1 bonnet, 2 chase ([`CAMERA_VIEWS`]). Runs start in it; C
+    /// in game changes it (and it's remembered).
+    pub camera: u32,
+}
+
+/// The camera views in [`Profile::camera`] order.
+pub const CAMERA_VIEWS: [CameraView; 3] = [CameraView::Cockpit, CameraView::Bonnet, CameraView::Chase];
+
+/// "Cockpit" / "Bonnet" / "Chase".
+pub fn view_name(v: CameraView) -> &'static str {
+    match v {
+        CameraView::Cockpit => "Cockpit",
+        CameraView::Bonnet => "Bonnet",
+        CameraView::Chase => "Chase",
+    }
+}
+
+pub fn view_index(v: CameraView) -> u32 {
+    CAMERA_VIEWS.iter().position(|x| *x == v).unwrap_or(0) as u32
 }
 
 impl Default for Profile {
@@ -81,7 +105,10 @@ impl Default for Profile {
             ghost_opacity: 0.45,
             rivals: Vec::new(),
             share_stats: true,
+            send_crash_reports: true,
             stats_notice_seen: false,
+            conditions: Vec::new(),
+            camera: 0,
         }
     }
 }
@@ -94,6 +121,52 @@ impl Profile {
         self.rivals.retain(|(s, _)| *s != stage);
         self.rivals.push((stage, team));
     }
+    /// The weather and time picked for `def`'s stage (its own when none was picked).
+    pub fn conditions(&self, def: &StageDef) -> (Weather, TimeOfDay) {
+        self.conditions.iter().find(|(s, ..)| *s == def.id).map_or((def.weather, def.time), |(_, w, t)| (*w, *t))
+    }
+    /// Remember a pick (forgotten again when it's the stage's default).
+    pub fn set_conditions(&mut self, def: &StageDef, weather: Weather, time: TimeOfDay) {
+        self.conditions.retain(|(s, ..)| *s != def.id);
+        if (weather, time) != (def.weather, def.time) {
+            self.conditions.push((def.id, weather, time));
+        }
+    }
+}
+
+/// Stage `id` as it will be driven: the published stage with the weather and time picked for
+/// it (Profile), or `--weather <clear|overcast|fog|rain>` / `--time <morning|noon|afternoon|dusk>`
+/// on the command line (dev builds) for tests.
+pub fn stage_def(world: &World, id: u32) -> Option<StageDef> {
+    let def = stages::base_def(id)?;
+    let (mut w, mut t) = world.get_resource::<Profile>().map_or((def.weather, def.time), |p| p.conditions(&def));
+    if let Some(v) = engine::cli::dev_value("weather") {
+        w = stages::WEATHERS.into_iter().find(|x| format!("{x:?}").eq_ignore_ascii_case(&v)).unwrap_or(w);
+    }
+    if let Some(v) = engine::cli::dev_value("time") {
+        t = stages::TIMES.into_iter().find(|x| format!("{x:?}").eq_ignore_ascii_case(&v)).unwrap_or(t);
+    }
+    if !stages::weathers_for(&def).contains(&w) {
+        w = def.weather;
+    }
+    Some(stages::with_conditions(def, w, t))
+}
+
+/// The assists picked in Settings (what the next run is driven with).
+pub fn picked_assists(world: &World) -> stages::Assists {
+    world.get_resource::<crate::prefs::Prefs>().map_or_else(stages::Assists::default, |p| p.assists())
+}
+
+/// The assists the loaded car actually has.
+pub fn run_assists(world: &World) -> stages::Assists {
+    world.get_resource::<CarSpec>().map_or_else(stages::Assists::default, |s| stages::Assists { abs: s.0.abs, traction_control: s.0.traction_assist })
+}
+
+/// The board hash of stage `id` as it will be driven (see [`stages::board_hash`]); None until
+/// the catalog has the stage.
+pub fn board_hash_for(world: &World, id: u32) -> Option<String> {
+    let road = world.resource::<StageCatalog>().info(id)?.hash.clone();
+    Some(stages::board_hash(&road, &stage_def(world, id)?, picked_assists(world)))
 }
 
 /// How the next / current run counts.
@@ -165,11 +238,65 @@ impl Plugin for MetaPlugin {
             .add_plugins((textfield::TextFieldPlugin, screens::ScreensPlugin))
             .add_systems(Startup, (load_board, start_catalog, import_from_cli).chain())
             .add_systems(Update, poll_catalog)
+            .add_systems(Update, (sync_camera, free_pointer))
             .add_systems(Update, (collect_menu, apply_menu).chain().after(engine::ui::UiSet::Screens))
             .add_systems(Update, (stage_ready, watch_finish, follow_ghost).chain().run_if(resource_exists::<StageWorld>))
             .add_systems(OnExit(AppState::InGame), teardown);
         #[cfg(feature = "dev")]
         dev::register(app);
+    }
+}
+
+/// Keeps the driver's camera and `Profile::camera` the same, whichever changed: C in game
+/// (toast naming the view), the setting, or the stage picker's chip.
+fn sync_camera(
+    view: Option<ResMut<CameraView>>,
+    mut profile: ResMut<Profile>,
+    state: Option<Res<State<AppState>>>,
+    role: Option<Res<Role>>,
+    mut last: Local<Option<(CameraView, u32)>>,
+    mut toasts: MessageWriter<Toast>,
+) {
+    let Some(mut view) = view else { return };
+    let want = CAMERA_VIEWS[(profile.camera as usize).min(CAMERA_VIEWS.len() - 1)];
+    let mut toast = false;
+    match *last {
+        // First frame: the saved choice wins.
+        None => {
+            if *view != want {
+                *view = want;
+            }
+        }
+        Some((_, p)) if p != profile.camera => {
+            if *view != want {
+                *view = want;
+                toast = true;
+            }
+        }
+        Some((v, _)) if v != *view => {
+            profile.camera = view_index(*view);
+            toast = true;
+        }
+        _ => {}
+    }
+    // Name the view when it changes in game (C, or the setting from the pause menu).
+    let in_game = state.is_some_and(|s| *s.get() == AppState::InGame) && role.is_none_or(|r| *r != Role::Guide);
+    if toast && in_game {
+        toasts.write(Toast::new(format!("{} camera", view_name(*view))).secs(1.6));
+    }
+    *last = Some((*view, profile.camera));
+}
+
+/// The mouse pointer is only captured while there's a car to drive: the guide (map, pan, zoom)
+/// and a finished or retired run keep it free. (The engine also frees it whenever a screen such
+/// as the results is open.)
+fn free_pointer(run: Option<Res<StageRun>>, role: Option<Res<Role>>, capture: Option<ResMut<engine::input::CaptureCursor>>) {
+    let Some(mut capture) = capture else { return };
+    let guide = role.is_some_and(|r| *r == Role::Guide);
+    let done = run.is_some_and(|r| r.finished.is_some() || r.retired);
+    let want = !(guide || done);
+    if capture.0 != want {
+        capture.0 = want;
     }
 }
 
@@ -181,7 +308,8 @@ fn load_board(mut commands: Commands, dir: Option<Res<DataDir>>) {
 
 fn start_catalog(mut cat: ResMut<StageCatalog>, theme: Res<Theme>) {
     let a = theme.accent.to_srgba();
-    cat.start([a.red, a.green, a.blue]);
+    let m = theme.text_muted.to_srgba();
+    cat.start([a.red, a.green, a.blue], [m.red, m.green, m.blue]);
 }
 
 fn poll_catalog(mut cat: ResMut<StageCatalog>, images: Option<ResMut<Assets<Image>>>, mut rebuild: MessageWriter<RebuildScreen>, screens: Option<Res<Screens>>) {
@@ -336,12 +464,14 @@ fn stage_ready(world: &mut World) {
         return;
     }
     let (def, road) = (stage.def.clone(), stage.road.clone());
-    let hash = world
+    let road_hash = world
         .resource::<StageCatalog>()
         .info(def.id)
-        .filter(|i| i.def == def)
+        .filter(|i| stages::with_conditions(i.def.clone(), def.weather, def.time) == def)
         .map(|i| i.hash.clone())
         .unwrap_or_else(|| stages::stage_hash(&def, &road));
+    // Each weather / time of day has its own board and ghosts.
+    let hash = stages::board_hash(&road_hash, &def, run_assists(world));
     world.insert_resource(StageNow { id: def.id, name: def.name.clone(), hash: hash.clone() });
     world.resource_mut::<Finished>().0 = false;
     if netlink::role(world) == Role::Guide {
@@ -355,7 +485,12 @@ fn stage_ready(world: &mut World) {
 pub fn pick_ghost(world: &World, stage: u32, hash: &str) -> Option<Ghost> {
     let p = world.resource::<Profile>();
     let mode = world.get_resource::<RunMode>().copied().unwrap_or_default();
-    let ghosts = list_ghosts(world, stage);
+    // Only ghosts driven in this weather and time of day.
+    let cond = board::split_hash(hash).1;
+    // …and with this car: a ghost replays its inputs through the sim, so one recorded with
+    // other handling would drive somewhere else.
+    let sim = ghost::sim_hash(&world.resource::<CarSpec>().0, HZ);
+    let ghosts: Vec<Ghost> = list_ghosts(world, stage).into_iter().filter(|g| board::split_hash(&g.stage_hash).1 == cond && g.sim_hash == sim).collect();
     let solo_key = team_key(&p.driver_name, "");
     let team = team_key(&p.driver_name, &p.guide_name);
     let ours = |g: &&Ghost| if mode == RunMode::Team { g.team() == team } else { g.team() == solo_key };
@@ -419,9 +554,12 @@ fn spawn_ghost(world: &mut World, g: Ghost, road: &crate::stage::Road, hash: &st
         unlit: true,
         ..default()
     });
+    // The box is centred on the body (`spec.body_centre`, above the low centre of mass the
+    // ghost's transform follows).
+    let o = spec.body_centre;
     world.entity_mut(id).with_children(|p| {
-        p.spawn((Mesh3d(body), MeshMaterial3d(mat.clone()), Transform::from_xyz(0.0, -0.05, 0.0), bevy::light::NotShadowCaster));
-        p.spawn((Mesh3d(cabin), MeshMaterial3d(mat), Transform::from_xyz(0.0, 0.4, 0.25), bevy::light::NotShadowCaster));
+        p.spawn((Mesh3d(body), MeshMaterial3d(mat.clone()), Transform::from_translation(o + Vec3::new(0.0, -0.05, 0.0)), bevy::light::NotShadowCaster));
+        p.spawn((Mesh3d(cabin), MeshMaterial3d(mat), Transform::from_translation(o + Vec3::new(0.0, 0.4, 0.25)), bevy::light::NotShadowCaster));
     });
 }
 
@@ -493,11 +631,19 @@ pub fn finish_run(world: &mut World) {
     if let Some(dir) = world.get_resource::<DataDir>().cloned() {
         if let Err(e) = dir.save_json(BOARD_FILE, &world.resource::<Boards>().0) {
             warn!("leaderboard: {e}");
+            crate::telemetry::handled(world, &e, "board.save");
         }
         if inserted.team_best {
             let spec = world.resource::<CarSpec>().0.clone();
             let g = world.resource::<Recorder>().ghost(now.id, &now.hash, &ghost::sim_hash(&spec, HZ), &rec.driver, &rec.guide, total, rec.date, VERSION, HZ);
-            ghost_saved = save_ghost(&dir, &g).map_err(|e| warn!("ghost: {e}")).is_ok();
+            ghost_saved = match save_ghost(&dir, &g) {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("ghost: {e}");
+                    crate::telemetry::handled(world, &e, "ghost.save");
+                    false
+                }
+            };
         }
     }
     info!("finish: stage {} {} {} (rank {}, team best {})", now.id, rec.team_label(), board::clock(total), inserted.rank, inserted.team_best);
@@ -595,6 +741,11 @@ mod dev {
             )
             .add_control_command("meta.start", "Load a stage", params(&[("stage", "integer", "1..=20"), ("mode", "string", "practice | team")]), start)
             .add_control_command("meta.finish", "Finish the current run now (tests, screenshots)", params(&[("time", "number", "clock seconds (default: current)")]), force_finish)
+            .add_control_command("meta.retire", "Retire the car now (tests, screenshots of the RETIRED plate)", params(&[]), |w, _| {
+                let mut run = w.get_resource_mut::<StageRun>().ok_or("no run")?;
+                run.retired = true;
+                Ok(json!({}))
+            })
             .add_control_command("meta.restart", "Restart the current stage", params(&[]), |w, _| {
                 restart_stage(w);
                 Ok(json!({}))

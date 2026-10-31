@@ -149,3 +149,62 @@ fn a_run_replays_exactly_and_its_ghost_races_in_lockstep() {
     assert_eq!(gstep, s.world().resource::<ghost::Recorder>().steps, "ghost on the same fixed step");
     assert_eq!(gcar, car, "same inputs → the ghost is exactly where the car is");
 }
+
+#[test]
+fn camera_view_follows_the_saved_choice_and_c_is_remembered() {
+    use pacenote::drive::CameraView;
+    use pacenote::meta::Profile;
+    let mut s = scenario(true);
+    s.wait_until(30, |w| state(w) == AppState::MainMenu).expect("main menu");
+    // The saved choice (Settings / stage picker) sets the view...
+    s.world_mut().resource_mut::<Profile>().camera = 2;
+    s.step(2);
+    assert_eq!(*s.world().resource::<CameraView>(), CameraView::Chase);
+    // ...and a run starts in it.
+    s.world_mut().write_message(MenuEvent("stage:3"));
+    s.wait_until(600, |w| stage_id(w) == Some(3)).expect("stage 3 loads");
+    s.step(3);
+    assert_eq!(*s.world().resource::<CameraView>(), CameraView::Chase, "a run starts in the chosen view");
+    // C in game (the view changes) is remembered.
+    *s.world_mut().resource_mut::<CameraView>() = CameraView::Bonnet;
+    s.step(2);
+    assert_eq!(s.world().resource::<Profile>().camera, 1);
+}
+
+#[test]
+fn the_pointer_is_free_once_the_run_is_over() {
+    use engine::input::CaptureCursor;
+    let mut s = scenario(false);
+    s.wait_until(600, |w| w.get_resource::<StageWorld>().is_some()).expect("stage");
+    s.step(2);
+    assert!(s.world().resource::<CaptureCursor>().0, "driving: the game lets the engine capture");
+    s.world_mut().resource_mut::<StageRun>().retired = true;
+    s.step(2);
+    assert!(!s.world().resource::<CaptureCursor>().0, "retired: pointer free");
+    s.world_mut().resource_mut::<StageRun>().retired = false;
+    s.step(2);
+    assert!(s.world().resource::<CaptureCursor>().0);
+}
+
+#[test]
+fn assists_apply_before_a_run_never_during_it() {
+    use pacenote::drive::{CarSpec, SteerSettings};
+    use pacenote::prefs::Prefs;
+    let mut s = scenario(true);
+    s.wait_until(30, |w| state(w) == AppState::MainMenu).expect("main menu");
+    {
+        let mut p = s.world_mut().resource_mut::<Prefs>();
+        p.abs = false;
+        p.steer_speed = 1.4;
+    }
+    s.step(2);
+    assert!(!s.world().resource::<CarSpec>().0.abs, "picked in the menu: the next run has it");
+    assert_eq!(s.world().resource::<SteerSettings>().keyboard_speed, 1.4);
+    s.world_mut().write_message(MenuEvent("stage:3"));
+    s.wait_until(600, |w| w.get_resource::<StageNow>().is_some_and(|n| n.id == 3)).expect("stage 3");
+    assert!(s.world().resource::<StageNow>().hash.ends_with("@noabs"), "its own board: {}", s.world().resource::<StageNow>().hash);
+    s.wait_until(600, |w| w.resource::<StageRun>().time > 0.5).expect("clock running");
+    s.world_mut().resource_mut::<Prefs>().abs = true;
+    s.step(5);
+    assert!(!s.world().resource::<CarSpec>().0.abs, "never changes mid-run");
+}

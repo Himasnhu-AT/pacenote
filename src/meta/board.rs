@@ -40,6 +40,14 @@ pub struct Record {
     pub version: String,
     /// [`super::stage_hash`] of the road it was driven on (hex).
     pub stage_hash: String,
+    /// [`crate::vehicle::REVISION`] of the car that drove it (0: before handling was
+    /// versioned). Only runs with the current handling rank; older ones list as stale.
+    pub handling: u32,
+}
+
+/// The handling revision new runs are driven with.
+pub fn handling() -> u32 {
+    crate::vehicle::REVISION as u32
 }
 
 impl Record {
@@ -57,6 +65,7 @@ impl Record {
             date,
             version: version.into(),
             stage_hash: stage_hash.into(),
+            handling: handling(),
         };
         r.id = r.content_id();
         r
@@ -90,8 +99,8 @@ impl Record {
     pub fn rank_cmp(&self, o: &Record) -> std::cmp::Ordering {
         self.total().total_cmp(&o.total()).then(self.date.cmp(&o.date)).then_with(|| self.team().cmp(&o.team()))
     }
-    fn slot(&self) -> (u32, String, String) {
-        (self.stage, self.team(), self.stage_hash.clone())
+    fn slot(&self) -> (u32, String, String, u32) {
+        (self.stage, self.team(), self.stage_hash.clone(), self.handling)
     }
 }
 
@@ -99,6 +108,12 @@ impl Record {
 pub fn clean_name(s: &str) -> String {
     let joined = s.split_whitespace().collect::<Vec<_>>().join(" ");
     joined.chars().filter(|c| !c.is_control() && *c != '|').take(24).collect()
+}
+
+/// A board hash as (road hash, conditions): `"abc@rain-dusk"` → `("abc", "rain-dusk")`,
+/// `"abc"` → `("abc", "")` (the stage's default weather and time).
+pub fn split_hash(h: &str) -> (&str, &str) {
+    h.split_once('@').unwrap_or((h, ""))
 }
 
 pub fn team_key(driver: &str, guide: &str) -> String {
@@ -192,18 +207,28 @@ impl Board {
 
     /// Current records for a stage (driven on the road with `hash`), fastest first.
     pub fn ranking(&self, stage: u32, hash: &str, solo: bool) -> Vec<&Record> {
-        let mut v: Vec<&Record> = self.records.iter().filter(|r| r.stage == stage && r.stage_hash == hash && r.solo() == solo).collect();
+        let mut v: Vec<&Record> = self.records.iter().filter(|r| r.stage == stage && r.stage_hash == hash && r.solo() == solo && r.handling == handling()).collect();
         v.sort_by(|a, b| a.rank_cmp(b));
         v
     }
 
     /// Everything on a stage for display: current team runs, then current solo runs, then
-    /// stale ones (another road hash), each fastest first. `bool` = stale.
+    /// stale ones (another road or an older car's handling, same weather and time), each
+    /// fastest first. `bool` = stale.
+    /// Runs in other weather or at another time of day are another board: not listed.
     pub fn listing(&self, stage: u32, hash: &str) -> Vec<(&Record, bool)> {
         let mut out: Vec<(&Record, bool)> = Vec::new();
         out.extend(self.ranking(stage, hash, false).into_iter().map(|r| (r, false)));
         out.extend(self.ranking(stage, hash, true).into_iter().map(|r| (r, false)));
-        let mut stale: Vec<&Record> = self.records.iter().filter(|r| r.stage == stage && r.stage_hash != hash).collect();
+        let (road, cond) = split_hash(hash);
+        let mut stale: Vec<&Record> = self
+            .records
+            .iter()
+            .filter(|r| {
+                let (rr, rc) = split_hash(&r.stage_hash);
+                r.stage == stage && (rr != road || r.handling != handling()) && rc == cond
+            })
+            .collect();
         stale.sort_by(|a, b| a.rank_cmp(b));
         out.extend(stale.into_iter().map(|r| (r, true)));
         out
@@ -216,7 +241,7 @@ impl Board {
 
     /// A team's current record on a stage.
     pub fn best_of(&self, stage: u32, hash: &str, team: &str) -> Option<&Record> {
-        self.records.iter().find(|r| r.stage == stage && r.stage_hash == hash && r.team() == team)
+        self.records.iter().find(|r| r.stage == stage && r.stage_hash == hash && r.team() == team && r.handling == handling())
     }
 }
 
@@ -331,8 +356,42 @@ pub fn delta(d: f32) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn other_weather_is_another_board() {
+        let mut b = Board::default();
+        let r = |hash: &str, t: f32| Record::new(3, "Ann", "Bo", t, 0.0, vec![], 1, "0.1", hash);
+        b.insert(r("aa", 100.0));
+        b.insert(r("aa@rain-dusk", 120.0));
+        b.insert(r("old", 90.0));
+        b.insert(r("old@rain-dusk", 80.0));
+        let dry: Vec<(f32, bool)> = b.listing(3, "aa").iter().map(|(r, s)| (r.time, *s)).collect();
+        assert_eq!(dry, vec![(100.0, false), (90.0, true)], "the wet time stays off the dry board");
+        let wet: Vec<(f32, bool)> = b.listing(3, "aa@rain-dusk").iter().map(|(r, s)| (r.time, *s)).collect();
+        assert_eq!(wet, vec![(120.0, false), (80.0, true)]);
+        assert_eq!(b.leader(3, "aa").unwrap().time, 100.0);
+        assert_eq!(split_hash("aa@fog-noon"), ("aa", "fog-noon"));
+    }
+
     fn rec(stage: u32, d: &str, g: &str, t: f32, date: u64) -> Record {
         Record::new(stage, d, g, t, 0.0, vec![t * 0.25, t * 0.5, t * 0.75], date, "0.1.0", "aa")
+    }
+
+    #[test]
+    fn old_handling_runs_list_as_stale() {
+        let mut b = Board::default();
+        // A fast run from before the handling changed (files from then load with 0).
+        let mut old = rec(1, "Ann", "Bo", 90.0, 1);
+        old.handling = 0;
+        old.id = old.content_id();
+        b.records.push(old.clone());
+        assert!(b.ranking(1, "aa", false).is_empty() && b.leader(1, "aa").is_none());
+        // A slower run with today's car still counts as the team's best and the stage record.
+        let ins = b.insert(rec(1, "Ann", "Bo", 100.0, 2));
+        assert!(ins.team_best && ins.stage_record && ins.rank == 1, "{ins:?}");
+        let l = b.listing(1, "aa");
+        assert_eq!(l.len(), 2);
+        assert!(!l[0].1 && l[0].0.time == 100.0);
+        assert!(l[1].1 && l[1].0.time == 90.0, "the old run lists as stale");
     }
 
     #[test]

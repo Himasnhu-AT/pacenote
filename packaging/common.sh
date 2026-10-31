@@ -11,8 +11,16 @@
 #                      Shroud target dir from .cargo/config.toml, so dev builds aren't clobbered)
 #   DIST               output root; default <repo>/dist/steam
 #   MEMGATE            memgate binary (default: the one on PATH); MEMGATE_PROFILE (default release)
-#   PACENOTE_TRACE_ENDPOINT / PACENOTE_TRACE_KEY
-#                      compiled into the `telemetry` build; never printed here
+#   PACENOTE_STORE_URL / PACENOTE_STEAM_URL
+#                      the demo's store page (an itch.io URL: "Follow on itch.io" buttons)
+#   PACENOTE_TRACE_ENDPOINT
+#                      telemetry server, compiled into the `telemetry` build
+#                      (default https://api.marlstudio.com)
+#   PACENOTE_TRACE_KEY the app's write key (ingest only), compiled in. Default: the
+#                      PACENOTE_WRITE_KEY line of $PACENOTE_KEYS_FILE
+#                      (~/codes/synthai/backend/infra/secrets/keys.env). Never printed: logs
+#                      say "set (N chars)" or "not set". Missing: the build works, sends nothing.
+#   PACENOTE_BUILD_SHA set here to the git sha (compiled in as the build id; dev builds have none)
 #
 # Exports: ROOT VERSION BUILD_NO EDITION FEATURES CARGO_TARGET_DIR DIST RUSTFLAGS, and the helpers
 # step / die / need / gate / features_args / copy_docs.
@@ -34,6 +42,8 @@ VERSION="$(awk '/^\[/{p=($0=="[package]");next} p&&$1=="version"{gsub(/[" ]/,"",
 BUILD_NO="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
 GIT_SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 export VERSION BUILD_NO GIT_SHA
+# The telemetry build id: packaged builds only (a dev `cargo run` has none = test data).
+export PACENOTE_BUILD_SHA="$GIT_SHA"
 
 EDITION="${EDITION:-demo}"
 case "$EDITION" in
@@ -71,14 +81,31 @@ features_args() {
 }
 
 if echo ",$FEATURES," | grep -q ",telemetry,"; then
-  if [ -z "${PACENOTE_TRACE_ENDPOINT:-}" ] || [ -z "${PACENOTE_TRACE_KEY:-}" ]; then
-    warn "PACENOTE_TRACE_ENDPOINT / PACENOTE_TRACE_KEY not set: this build will send no telemetry"
+  export PACENOTE_TRACE_ENDPOINT="${PACENOTE_TRACE_ENDPOINT:-https://api.marlstudio.com}"
+  if [ -z "${PACENOTE_TRACE_KEY:-}" ]; then
+    # Only the PACENOTE_WRITE_KEY line is read from the keys file; nothing else in it.
+    keys_file="${PACENOTE_KEYS_FILE:-$HOME/codes/synthai/backend/infra/secrets/keys.env}"
+    if [ -f "$keys_file" ]; then
+      line="$(grep -E '^[[:space:]]*(export[[:space:]]+)?PACENOTE_WRITE_KEY=' "$keys_file" | tail -n 1 || true)"
+      key="${line#*=}"
+      key="${key%\"}"; key="${key#\"}"; key="${key%\'}"; key="${key#\'}"
+      [ -n "$key" ] && export PACENOTE_TRACE_KEY="$key"
+      unset line key
+    fi
+  fi
+  echo "telemetry: endpoint $PACENOTE_TRACE_ENDPOINT, build $PACENOTE_BUILD_SHA"
+  if [ -n "${PACENOTE_TRACE_KEY:-}" ]; then
+    echo "telemetry: key set (${#PACENOTE_TRACE_KEY} chars)"
+  else
+    echo "telemetry: key not set"
+    warn "no PACENOTE_TRACE_KEY (env) or PACENOTE_WRITE_KEY (in ${PACENOTE_KEYS_FILE:-$HOME/codes/synthai/backend/infra/secrets/keys.env}): this build works but sends no telemetry. Create the app on the server first (docs/TELEMETRY.md)."
   fi
 fi
 
 if echo ",$FEATURES," | grep -q ",demo,"; then
-  # The demo's wishlist buttons open this (the full game's store page), compiled in.
-  [ -n "${PACENOTE_STEAM_URL:-}" ] || warn "PACENOTE_STEAM_URL not set: the demo's wishlist buttons have no store page to open"
+  # The demo's store buttons open this (the full game's store page), compiled in.
+  # PACENOTE_STORE_URL wins (an itch.io URL makes them "Follow on itch.io"), else PACENOTE_STEAM_URL.
+  [ -n "${PACENOTE_STORE_URL:-}${PACENOTE_STEAM_URL:-}" ] || warn "PACENOTE_STORE_URL / PACENOTE_STEAM_URL not set: the demo's store buttons have no store page to open"
 fi
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$GAME_DIR/pacenote-build/target-ship}"

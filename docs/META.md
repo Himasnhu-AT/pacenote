@@ -16,10 +16,38 @@ credits. One plugin, `meta::MetaPlugin`, added in `lib.rs`.
 
 ## Flow
 
-Main menu → **Practice** (straight into `Profile.last_stage`, solo) / **Host as driver** (stage
-select, then `netlink::host`, team run) / **Join as guide** (address + name, `netlink::join`;
-the net module then owns the guide's flow) / **Stage select** (practice) / **Leaderboards** /
-**Team names** / **Settings** / **Credits** / **Quit**.
+Main menu (no stage shown: a neutral contour backdrop, the crew card) → **Play** (stage picker,
+solo practice) / **Play together** (screen "together": **Host as driver** = the same stage picker,
+then `netlink::host`, team run; **Join as guide** = address + name, `netlink::join`, then the net
+module owns the guide's flow; and the crew's two names) / **Settings** / **Quit**. **Credits** is a
+small link bottom right. The demo adds its store button under Play.
+
+The stage picker ("stages"): the 20 stages, a details panel, and per stage a **weather** (Clear,
+Overcast, Fog, Rain; no rain on the snow stages) and **time of day** (Morning, Midday, Afternoon,
+Dusk), picked with the chips, A / D and T. Picks are remembered per stage (`Profile.conditions`)
+and `meta::stage_def` applies them to the `StageDef` before loading, so the loading screen, the
+look (sky, sun, fog, rain), wheel spray and ambience all follow. The driver replicates them to the
+guide in `NetStage { weather, time }` (guide panel, guide ambience). Tab opens the stage's
+leaderboard. Dev builds: `--weather rain --time dusk` override the pick.
+
+**Settings** (`src/prefs.rs`): tabs Driving, Co-driver, HUD, Audio, Voice chat, Video,
+Interface, Controls. `prefs::layout` (Startup) re-registers every row (same key, get, set) on its
+rally tab with rally wording, and hides engine rows Pacenote doesn't use (mouse look, music,
+sprint toggle, rumble, generic subtitles, the duplicate "Dialogue" volume). Pacenote's own
+options are `Prefs` (section "prefs"): co-driver voice, volume, reading speed, call timing
+(read-ahead ×1.3 / 1 / 0.75), call order ("left three" / "three left"), subtitles; speed units
+and which HUD readouts show. Side panels preview the HUD and a sample call live.
+
+**Camera view:** Cockpit / Bonnet / Chase, saved in `Profile.camera` (Settings > Game > Camera
+view, the stage picker's View chips or C there). Runs start in it; C in game (or on the pause
+screen, whose footer lists it) changes it and the change is kept (`meta::sync_camera`, which
+also toasts "Chase camera"). A "C · Camera view" hint shows for 5 s at the start of each run.
+
+**Weather and fairness:** each weather / time of day has its own board and ghosts. Records and
+ghosts carry a board hash: the road hash at the stage's default conditions (unchanged, so
+existing times stay where they are), `<road hash>@<weather>-<time>` otherwise
+(`stages::board_hash`). A board lists only its own conditions; "Old road" (stale) means another
+road in the same conditions. Ghost files get a `-<weather>-<time>` suffix off the defaults.
 
 `start_stage(world, id, mode)` sets `StageChoice` and goes to `AppState::InGame`; the game's
 `load_stage` builds it. From a stage straight into another (results → Next) the same state is

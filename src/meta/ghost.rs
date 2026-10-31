@@ -53,16 +53,22 @@ impl Ghost {
     pub fn team(&self) -> String {
         team_key(&self.driver, &self.guide)
     }
-    /// File name inside the ghosts folder: one per stage per team.
+    /// File name inside the ghosts folder: one per stage per team per weather and time.
     pub fn file_name(&self) -> String {
-        ghost_file(self.stage, &self.team())
+        ghost_file(self.stage, &self.team(), super::board::split_hash(&self.stage_hash).1)
     }
 }
 
-pub fn ghost_file(stage: u32, team: &str) -> String {
+/// `conditions`: "" at the stage's default weather and time (the name ghosts always had),
+/// else the key from the board hash ("rain-dusk").
+pub fn ghost_file(stage: u32, team: &str, conditions: &str) -> String {
     let mut h = Hasher::default();
     h.str(team);
-    format!("s{stage:02}-{:012x}.json", h.0 & 0xFFFF_FFFF_FFFF)
+    if conditions.is_empty() {
+        format!("s{stage:02}-{:012x}.json", h.0 & 0xFFFF_FFFF_FFFF)
+    } else {
+        format!("s{stage:02}-{:012x}-{conditions}.json", h.0 & 0xFFFF_FFFF_FFFF)
+    }
 }
 
 /// Hash of everything besides the inputs that decides how a run plays out: the car spec.
@@ -71,8 +77,8 @@ pub fn sim_hash(spec: &Spec, hz: u32) -> String {
     h.str(&format!("{spec:?}"));
     h.u64(hz as u64);
     h.u64(vehicle::SUBSTEPS as u64);
-    // Sim revisions that change how the same inputs drive (2: damage).
-    h.u64(2);
+    // Sim revisions that change how the same inputs drive (2: damage, 3: handling).
+    h.u64(vehicle::REVISION);
     format!("{:016x}", h.0)
 }
 
@@ -266,6 +272,7 @@ mod tests {
         assert_eq!(sim_hash(&a, 60), sim_hash(&Spec::default(), 60));
         assert_ne!(sim_hash(&a, 60), sim_hash(&b, 60));
         assert_ne!(sim_hash(&a, 60), sim_hash(&a, 120));
-        assert_ne!(ghost_file(1, "a|b"), ghost_file(1, "a|c"));
+        assert_ne!(ghost_file(1, "a|b", ""), ghost_file(1, "a|c", ""));
+        assert_ne!(ghost_file(1, "a|b", ""), ghost_file(1, "a|b", "rain-dusk"));
     }
 }

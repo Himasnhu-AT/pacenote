@@ -4,7 +4,7 @@
 //!
 //! | Component | Entity | Bytes (before delta) | Rate |
 //! |---|---|---|---|
-//! | [`NetStage`] `{id, road_hash}` | session entity | ~10 | on change |
+//! | [`NetStage`] `{id, road_hash, weather, time}` | session entity | ~12 | on change |
 //! | [`NetRun`] clock, penalty, progress, splits, finished | session entity | 8–20 | 10 Hz + on events |
 //! | [`NetCar`] pose, velocity, steer, rpm, gear, wheel spin | the car | ~30 | 30 Hz, interpolated |
 //!
@@ -44,6 +44,10 @@ pub const RUN_EVERY: u32 = 6;
 pub struct NetStage {
     pub id: u32,
     pub road_hash: u64,
+    /// Weather and time of day the driver picked (indices into `meta::stages::WEATHERS` /
+    /// `TIMES`): the guide's panel and ambience follow them.
+    pub weather: u8,
+    pub time: u8,
 }
 
 /// The car as the guide sees it.
@@ -258,7 +262,12 @@ fn publish_stage(mut commands: Commands, stage: Option<Res<StageWorld>>, mut q: 
     };
     match stage {
         Some(s) if s.is_changed() || ns.id != s.def.id => {
-            let want = NetStage { id: s.def.id, road_hash: road_hash(&s.road) };
+            let want = NetStage {
+                id: s.def.id,
+                road_hash: road_hash(&s.road),
+                weather: crate::meta::stages::weather_index(s.def.weather),
+                time: crate::meta::stages::time_index(s.def.time),
+            };
             if *ns != want {
                 info!("driver: sharing stage {} (road hash {:016x})", want.id, want.road_hash);
                 *ns = want;

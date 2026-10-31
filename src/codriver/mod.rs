@@ -26,8 +26,14 @@ const SUBTITLE_S: f32 = 3.0;
 /// The co-driver's state.
 #[derive(Resource)]
 pub struct CoDriver {
-    /// The player wants it (toggled with `N`).
+    /// The player wants it (toggled with `N`; Settings > Co-driver > Co-driver voice).
     pub enabled: bool,
+    /// Call timing: read-ahead × this (Settings > Co-driver).
+    pub lead_scale: f32,
+    /// "Three left" rather than "left three".
+    pub grade_first: bool,
+    /// Show what's said at the top of the screen.
+    pub subtitles: bool,
     speech: Speech,
     planner: Option<Planner>,
     /// Which stage the planner is for.
@@ -48,6 +54,9 @@ impl Default for CoDriver {
     fn default() -> Self {
         CoDriver {
             enabled: true,
+            lead_scale: 1.0,
+            grade_first: false,
+            subtitles: true,
             speech: Speech::default(),
             planner: None,
             stage: 0,
@@ -65,6 +74,11 @@ impl Default for CoDriver {
 }
 
 impl CoDriver {
+    /// The co-driver's voice is speaking now (the car audio ducks under it).
+    pub fn speaking(&self) -> bool {
+        self.speech.speaking()
+    }
+
     /// Forget the run (new stage, restart): notes from `s`, nothing pending.
     fn reset(&mut self, s: f32) {
         self.speech.hush();
@@ -83,10 +97,20 @@ impl CoDriver {
     fn say(&mut self, line: Line) {
         self.speech.say(line);
     }
+
+    /// Voice speed (words per minute) and volume (0..1).
+    pub fn set_voice(&mut self, rate: u32, volume: f32) {
+        self.speech.rate = rate;
+        self.speech.volume = volume;
+    }
 }
 
 #[derive(Component)]
 struct Subtitle;
+
+/// The subtitle's plate (shown while a line is up).
+#[derive(Component)]
+struct SubtitlePlate;
 
 pub struct CoDriverPlugin;
 
@@ -148,6 +172,10 @@ fn talk(
         cd.planner = Some(Planner::new(&stage.corners, &stage.crests, stage.road.length()));
         cd.stage = stage.def.id;
         cd.reset(0.0);
+    }
+    if let Some(p) = &mut cd.planner {
+        p.lead_scale = cd.lead_scale;
+        p.grade_first = cd.grade_first;
     }
     if !active(cd, role.as_deref(), session.as_deref()) || paused.is_some_and(|p| p.0) || loading.is_some() {
         cd.speech.hush();
@@ -233,30 +261,51 @@ pub fn spoken_time(t: f32) -> String {
     if m > 0 { format!("{m} minute{} {whole} point {frac}", if m > 1 { "s" } else { "" }) } else { format!("{whole} point {frac} seconds") }
 }
 
-fn subtitle(mut commands: Commands, cd: Res<CoDriver>, mut q: Query<(&mut Text, &mut Visibility), With<Subtitle>>) {
-    let Ok((mut text, mut vis)) = q.single_mut() else {
-        commands.spawn((
-            Subtitle,
-            DespawnOnExit(AppState::InGame),
-            Text::new(""),
-            TextFont { font_size: bevy::text::FontSize::Px(30.0), ..default() },
-            TextColor(Color::srgb(1.0, 0.92, 0.6)),
-            TextShadow::default(),
-            Node { position_type: PositionType::Absolute, top: Val::Px(28.0), width: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() },
-            TextLayout::justify(Justify::Center),
-            Visibility::Hidden,
-        ));
+/// The line being said, top centre in a dark plate (theme fonts, accent "CO-DRIVER" tag).
+fn subtitle(mut commands: Commands, cd: Res<CoDriver>, theme: Option<Res<engine::ui::theme::Theme>>, mut q: Query<&mut Text, With<Subtitle>>, mut plates: Query<&mut Visibility, With<SubtitlePlate>>) {
+    use engine::ui::theme::*;
+    let Ok(mut text) = q.single_mut() else {
+        let Some(t) = theme else { return };
+        commands
+            .spawn((
+                SubtitlePlate,
+                DespawnOnExit(AppState::InGame),
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: px(26),
+                    left: percent(50),
+                    width: px(1100),
+                    margin: UiRect::left(px(-550)),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                Visibility::Hidden,
+                Pickable::IGNORE,
+            ))
+            .with_children(|p| {
+                p.spawn((
+                    Node { column_gap: px(GAP_M), align_items: AlignItems::Baseline, padding: UiRect::axes(px(18), px(8)), border_radius: BorderRadius::all(px(RADIUS)), max_width: px(1100), ..default() },
+                    BackgroundColor(Color::srgba(0.02, 0.03, 0.025, 0.66)),
+                    Pickable::IGNORE,
+                ))
+                .with_children(|r| {
+                    r.spawn((text("CO-DRIVER", label(SIZE_LABEL), t.accent), TextLayout::no_wrap(), Node { flex_shrink: 0.0, ..default() }));
+                    r.spawn((Subtitle, text("", label(30.0), t.text)));
+                });
+            });
         return;
     };
-    match &cd.subtitle {
-        Some((s, _)) => {
-            let up = s.to_uppercase();
-            if text.0 != up {
-                text.0 = up;
-            }
-            *vis = Visibility::Inherited;
+    let show = cd.subtitles && cd.subtitle.is_some();
+    if let Some((s, _)) = &cd.subtitle
+        && !text.0.eq_ignore_ascii_case(s)
+    {
+        text.0 = s.to_uppercase();
+    }
+    for mut v in &mut plates {
+        let want = if show { Visibility::Inherited } else { Visibility::Hidden };
+        if *v != want {
+            *v = want;
         }
-        None => *vis = Visibility::Hidden,
     }
 }
 

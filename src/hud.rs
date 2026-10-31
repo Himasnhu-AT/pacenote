@@ -1,19 +1,65 @@
-//! Driver HUD: speed, gear, rpm bar, stage clock, damage, countdown, result.
+//! Driver HUD in the game's UI theme (Barlow Condensed, map-paper text, rally-plate yellow):
+//!
+//! - bottom right: rev bar (segments light up to the red line), speed in km/h or mph, gear;
+//! - bottom left: stage name, stage clock (+ penalties), progress bar with km done / total;
+//! - top right: damage per part, once the car is hurt;
+//! - centre: countdown, GO, FINISH with the time, and the RETIRED plate.
+//!
+//! Each readout can be turned off in Settings > HUD ([`crate::prefs::Prefs`]). Cheap: values
+//! are cached and text / colours / widths are only written when they change (no per-frame
+//! formatting or allocation while nothing changes).
+
+use std::fmt::Write;
 
 use bevy::prelude::*;
+use engine::ui::theme::*;
 
-use crate::drive::{DrivenCar, StageRun};
+use crate::drive::{CarSpec, DrivenCar, StageRun};
+use crate::prefs::Prefs;
 use crate::world::StageWorld;
 
-#[derive(Component)]
-struct HudText;
+/// Segments in the rev bar.
+pub const REV_SEGMENTS: usize = 24;
 
 #[derive(Component)]
-struct HudCenter;
+struct HudRoot;
 
-/// Damage readout (top right), shown once the car has any.
+/// Which value a text shows.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum HudText {
+    Speed,
+    Unit,
+    Gear,
+    Stage,
+    Clock,
+    Penalty,
+    Progress,
+    CenterBig,
+    CenterSmall,
+}
+
+/// A group hidden by a HUD setting.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum HudGroup {
+    Speed,
+    Revs,
+    Clock,
+    Progress,
+    Damage,
+    Retired,
+}
+
 #[derive(Component)]
-struct HudDamage;
+struct RevSeg(usize);
+
+#[derive(Component)]
+struct ProgressFill;
+
+/// Damage bar fill / percentage of part 0 engine, 1 steering, 2 suspension.
+#[derive(Component)]
+struct DamageFill(usize);
+#[derive(Component)]
+struct DamagePct(usize);
 
 pub struct HudPlugin;
 
@@ -23,110 +69,334 @@ impl Plugin for HudPlugin {
     }
 }
 
-fn spawn_hud(mut commands: Commands, q: Query<(), With<HudText>>) {
-    let font = |px: f32| TextFont { font_size: bevy::text::FontSize::Px(px), ..default() };
+/// Rev bar colours: paper white, then accent, then red near the limiter.
+fn seg_color(t: &Theme, i: usize) -> Color {
+    let f = i as f32 / REV_SEGMENTS as f32;
+    if f < 0.62 {
+        t.text
+    } else if f < 0.86 {
+        t.accent
+    } else {
+        t.bad
+    }
+}
+
+fn seg_off() -> Color {
+    Color::srgba(0.95, 0.93, 0.88, 0.13)
+}
+
+/// The rev bar (for the HUD and the Settings preview), `lit` = 0..1.
+pub fn rev_bar_preview(p: &mut ChildSpawnerCommands, t: &Theme, lit: f32) {
+    let n = (lit * REV_SEGMENTS as f32).round() as usize;
+    p.spawn((Node { column_gap: px(3), ..default() }, Pickable::IGNORE)).with_children(|r| {
+        for i in 0..REV_SEGMENTS {
+            r.spawn((Node { width: px(9), height: px(14), ..default() }, BackgroundColor(if i < n { seg_color(t, i) } else { seg_off() }), Pickable::IGNORE));
+        }
+    });
+}
+
+fn plate() -> BackgroundColor {
+    BackgroundColor(Color::srgba(0.02, 0.03, 0.025, 0.55))
+}
+
+fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoot>>) {
     if !q.is_empty() {
         return;
     }
-    commands.spawn((
-        HudText,
-        DespawnOnExit(engine::flow::AppState::InGame),
-        Text::new(""),
-        TextFont { font_size: bevy::text::FontSize::Px(26.0), ..default() },
-        TextColor(Color::WHITE),
-        Node { position_type: PositionType::Absolute, left: Val::Px(24.0), bottom: Val::Px(20.0), ..default() },
-    ));
-    commands.spawn((
-        HudCenter,
-        DespawnOnExit(engine::flow::AppState::InGame),
-        Text::new(""),
-        TextFont { font_size: bevy::text::FontSize::Px(64.0), ..default() },
-        TextColor(Color::srgb(1.0, 0.85, 0.3)),
-        Node { position_type: PositionType::Absolute, top: Val::Percent(30.0), width: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() },
-        TextLayout::justify(Justify::Center),
-    ));
-    commands.spawn((
-        HudDamage,
-        DespawnOnExit(engine::flow::AppState::InGame),
-        Text::new(""),
-        font(20.0),
-        TextColor(Color::WHITE),
-        Node { position_type: PositionType::Absolute, right: Val::Px(24.0), top: Val::Px(20.0), ..default() },
-        TextLayout::justify(Justify::Right),
-    ));
+    let t = &*theme;
+    commands
+        .spawn((HudRoot, Name::new("HUD"), DespawnOnExit(engine::flow::AppState::InGame), fullscreen(), Pickable::IGNORE))
+        .with_children(|root| {
+            // Bottom right: revs, speed, gear.
+            root.spawn((
+                Node { position_type: PositionType::Absolute, right: px(40), bottom: px(34), flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, row_gap: px(4), padding: UiRect::new(px(18), px(18), px(12), px(8)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
+                plate(),
+                Pickable::IGNORE,
+            ))
+            .with_children(|c| {
+                c.spawn((HudGroup::Revs, Node { column_gap: px(4), margin: UiRect::bottom(px(2)), ..default() }, Pickable::IGNORE)).with_children(|r| {
+                    for i in 0..REV_SEGMENTS {
+                        r.spawn((RevSeg(i), Node { width: px(11), height: px(18), ..default() }, BackgroundColor(seg_off()), Pickable::IGNORE));
+                    }
+                });
+                c.spawn((HudGroup::Speed, Node { column_gap: px(14), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
+                    r.spawn((HudText::Speed, text("0", display(92.0), t.text), Node { min_width: px(150), justify_content: JustifyContent::FlexEnd, ..default() }, TextLayout::justify(Justify::Right)));
+                    r.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(0), ..default() }, Pickable::IGNORE)).with_children(|u| {
+                        u.spawn((HudText::Unit, text("KM/H", label(SIZE_LABEL), t.text_muted)));
+                        u.spawn(text("GEAR", label(SIZE_TINY), t.text_dim));
+                    });
+                    r.spawn((
+                        Node { width: px(78), height: px(92), justify_content: JustifyContent::Center, align_items: AlignItems::Center, border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
+                        BorderColor::all(t.accent),
+                        Pickable::IGNORE,
+                    ))
+                    .with_children(|g| {
+                        g.spawn((HudText::Gear, text("1", display(76.0), t.accent)));
+                    });
+                });
+            });
+            // Bottom left: stage, clock, progress.
+            root.spawn((
+                Node { position_type: PositionType::Absolute, left: px(40), bottom: px(34), flex_direction: FlexDirection::Column, row_gap: px(4), padding: UiRect::new(px(18), px(18), px(12), px(14)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
+                plate(),
+                Pickable::IGNORE,
+            ))
+            .with_children(|c| {
+                c.spawn((HudText::Stage, text("", label(SIZE_LABEL), t.accent)));
+                c.spawn((HudGroup::Clock, Node { column_gap: px(12), align_items: AlignItems::Baseline, ..default() }, Pickable::IGNORE)).with_children(|r| {
+                    r.spawn((HudText::Clock, text("0:00.000", display(56.0), t.text)));
+                    r.spawn((HudText::Penalty, text("", body_bold(SIZE_BODY), t.bad)));
+                });
+                c.spawn((HudGroup::Progress, Node { flex_direction: FlexDirection::Column, row_gap: px(6), margin: UiRect::top(px(2)), ..default() }, Pickable::IGNORE)).with_children(|p| {
+                    p.spawn((Node { width: px(360), height: px(4), ..default() }, BackgroundColor(seg_off()), Pickable::IGNORE)).with_children(|b| {
+                        b.spawn((ProgressFill, Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(t.accent), Pickable::IGNORE));
+                    });
+                    p.spawn((HudText::Progress, text("", label(SIZE_TINY + 1.0), t.text_muted)));
+                });
+            });
+            // Top right: damage.
+            root.spawn((
+                HudGroup::Damage,
+                Node { position_type: PositionType::Absolute, right: px(40), top: px(96), flex_direction: FlexDirection::Column, row_gap: px(6), padding: UiRect::all(px(14)), border: UiRect::left(px(3)), border_radius: BorderRadius::all(px(RADIUS)), display: Display::None, ..default() },
+                plate(),
+                BorderColor::all(t.bad),
+                Pickable::IGNORE,
+            ))
+            .with_children(|c| {
+                c.spawn(text("DAMAGE", label(SIZE_LABEL), t.bad));
+                for (k, name) in ["Engine", "Steering", "Suspension"].into_iter().enumerate() {
+                    c.spawn((Node { column_gap: px(10), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
+                        r.spawn((text(name.to_uppercase(), label(SIZE_TINY + 1.0), t.text_muted), Node { width: px(96), ..default() }));
+                        r.spawn((Node { width: px(150), height: px(6), ..default() }, BackgroundColor(seg_off()), Pickable::IGNORE)).with_children(|b| {
+                            b.spawn((DamageFill(k), Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(t.text), Pickable::IGNORE));
+                        });
+                        r.spawn((DamagePct(k), text("0%", label(SIZE_TINY + 1.0), t.text), Node { width: px(44), ..default() }, TextLayout::justify(Justify::Right)));
+                    });
+                }
+            });
+            // Centre: countdown / GO / FINISH.
+            root.spawn((Node { position_type: PositionType::Absolute, top: percent(24), width: percent(100), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|c| {
+                c.spawn((HudText::CenterSmall, text("", label(SIZE_LABEL + 4.0), t.accent)));
+                c.spawn((HudText::CenterBig, text("", display(150.0), t.accent), TextShadow::default()));
+            });
+            // Centre: retired.
+            root.spawn((
+                HudGroup::Retired,
+                Node { position_type: PositionType::Absolute, top: percent(30), left: percent(50), width: px(560), margin: UiRect::left(px(-280)), display: Display::None, ..default() },
+                Pickable::IGNORE,
+            ))
+            .with_children(|w| {
+                w.spawn(accent_panel(t, t.bad, 26.0, GAP_S)).with_children(|c| {
+                    c.spawn(eyebrow("Stage over", t.bad));
+                    c.spawn(title("Retired", SIZE_H1, t.text));
+                    c.spawn(text("The car is too damaged to continue.", body(SIZE_BODY), t.text_muted));
+                    c.spawn(spacer(GAP_XS));
+                    c.spawn((Node { column_gap: px(GAP_L), ..default() }, Pickable::IGNORE)).with_children(|k| {
+                        key_hint(k, t, "Esc", "Restart or leave");
+                    });
+                });
+            });
+        });
 }
 
-/// `ENGINE  ######....  62%`-style bar for a part.
-fn part(out: &mut String, name: &str, d: f32) {
-    use std::fmt::Write;
-    let n = (d * 10.0).round() as usize;
-    let _ = writeln!(out, "{name:<10} {}{} {:>3.0}%", "#".repeat(n.min(10)), ".".repeat(10 - n.min(10)), d * 100.0);
+/// What the HUD last showed (only changes are written).
+#[derive(Default)]
+struct Shown {
+    speed: Option<i32>,
+    mph: Option<bool>,
+    gear: Option<i8>,
+    lit: Option<usize>,
+    clock_ms: Option<u32>,
+    penalty: Option<u32>,
+    progress: Option<(u32, u32)>,
+    stage: Option<u32>,
+    damage: Option<[u32; 3]>,
+    center: Option<(u8, u32)>,
+    groups: Option<[bool; 6]>,
 }
 
-fn clock(t: f32) -> String {
-    let m = (t / 60.0).floor();
-    format!("{}:{:06.3}", m as u32, t - m * 60.0)
+fn set_text(t: &mut Text, f: impl FnOnce(&mut String)) {
+    t.0.clear();
+    f(&mut t.0);
 }
 
-type Only<A, B, C> = (With<A>, Without<B>, Without<C>);
-
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update_hud(
     run: Res<StageRun>,
     stage: Res<StageWorld>,
+    spec: Res<CarSpec>,
+    prefs: Option<Res<Prefs>>,
+    theme: Res<Theme>,
     cars: Query<&DrivenCar>,
-    mut text: Query<&mut Text, Only<HudText, HudCenter, HudDamage>>,
-    mut center: Query<(&mut Text, &mut TextColor), Only<HudCenter, HudText, HudDamage>>,
-    mut damage: Query<(&mut Text, &mut TextColor), Only<HudDamage, HudText, HudCenter>>,
+    mut texts: Query<(&HudText, &mut Text, &mut TextColor)>,
+    mut groups: Query<(&HudGroup, &mut Node), (Without<RevSeg>, Without<ProgressFill>, Without<DamageFill>)>,
+    mut segs: Query<(&RevSeg, &mut BackgroundColor), Without<DamageFill>>,
+    mut fill: Query<&mut Node, (With<ProgressFill>, Without<HudGroup>, Without<DamageFill>)>,
+    mut dmg: Query<(&DamageFill, &mut Node, &mut BackgroundColor), (Without<HudGroup>, Without<ProgressFill>, Without<RevSeg>)>,
+    mut pct: Query<(&DamagePct, &mut Text), Without<HudText>>,
+    mut shown: Local<Shown>,
 ) {
     let Ok(c) = cars.single() else { return };
     let car = &c.car;
-    let kmh = (car.speed() * 3.6).abs();
-    let gear = if car.gear < 0 { "R".into() } else { car.gear.to_string() };
-    let rpm_bar = {
-        let n = ((car.rpm / 7600.0) * 20.0).round() as usize;
-        format!("{}{}", "|".repeat(n.min(20)), ".".repeat(20 - n.min(20)))
-    };
-    let total = run.time + run.penalty;
-    let pen = if run.penalty > 0.0 { format!("  (+{:.0} s)", run.penalty) } else { String::new() };
-    let km = run.progress / 1000.0;
-    if let Ok(mut t) = text.single_mut() {
-        t.0 = format!(
-            "{kmh:>3.0} km/h   gear {gear}\n{rpm_bar} {:>4.0} rpm\n{}   {}{pen}   {:.2} / {:.2} km",
-            car.rpm,
-            stage.def.name,
-            clock(total),
-            km,
-            stage.road.length() / 1000.0
-        );
-    }
+    let t = &*theme;
+    let prefs = prefs.map(|p| p.clone()).unwrap_or_default();
     let d = car.damage;
-    if let Ok((mut t, mut col)) = damage.single_mut() {
-        let mut s = String::new();
-        if d.worst() > 0.02 {
-            s.push_str("DAMAGE\n");
-            part(&mut s, "ENGINE", d.engine);
-            part(&mut s, "STEERING", d.steering);
-            part(&mut s, "SUSPENSION", d.suspension);
+    let damaged = d.worst() > 0.02;
+
+    // Groups on / off (settings, damage, retired).
+    let want = [prefs.hud_speed, prefs.hud_revs, prefs.hud_clock, prefs.hud_progress, prefs.hud_damage && damaged, run.retired];
+    if shown.groups != Some(want) {
+        shown.groups = Some(want);
+        for (g, mut n) in &mut groups {
+            let on = want[*g as usize];
+            n.display = if on { Display::Flex } else { Display::None };
         }
-        if t.0 != s {
-            t.0 = s;
-        }
-        // White → amber → red with the worst part.
-        let w = d.worst();
-        col.0 = if w < 0.35 { Color::WHITE } else if w < 0.7 { Color::srgb(1.0, 0.75, 0.25) } else { Color::srgb(1.0, 0.3, 0.25) };
     }
-    if let Ok((mut t, mut col)) = center.single_mut() {
-        col.0 = if run.retired { Color::srgb(1.0, 0.3, 0.25) } else { Color::srgb(1.0, 0.85, 0.3) };
-        t.0 = if run.retired {
-            "RETIRED\nThe car is too damaged to continue\nEsc: restart or leave".into()
-        } else if run.countdown > 0.0 {
-            format!("{}", run.countdown.ceil() as u32)
-        } else if let Some(f) = run.finished {
-            format!("FINISH  {}", clock(f))
-        } else if run.time < 1.0 {
-            "GO".into()
-        } else {
-            String::new()
-        };
+
+    // Speed, units, gear.
+    let (v, unit) = prefs.speed(car.speed());
+    let v = v.round() as i32;
+    let changed_units = shown.mph != Some(prefs.mph);
+    let speed_changed = shown.speed != Some(v);
+    let gear_changed = shown.gear != Some(car.gear);
+    // Revs.
+    let span = (spec.0.redline - spec.0.idle_rpm).max(1.0);
+    let lit = (((car.rpm - spec.0.idle_rpm) / span).clamp(0.0, 1.0) * REV_SEGMENTS as f32).round() as usize;
+    if shown.lit != Some(lit) {
+        shown.lit = Some(lit);
+        for (s, mut bg) in &mut segs {
+            let c = if s.0 < lit { seg_color(t, s.0) } else { seg_off() };
+            if bg.0 != c {
+                bg.0 = c;
+            }
+        }
+    }
+    // Clock (ms), penalty, progress.
+    let total = run.time + run.penalty;
+    let ms = (total.max(0.0) * 1000.0).round() as u32;
+    let pen = run.penalty.round() as u32;
+    let len = stage.road.length();
+    let prog = ((run.progress / 10.0).round() as u32, (len / 10.0).round() as u32);
+    let prog_changed = shown.progress != Some(prog);
+    if prog_changed {
+        shown.progress = Some(prog);
+        for mut n in &mut fill {
+            n.width = percent((run.progress / len.max(1.0) * 100.0).clamp(0.0, 100.0));
+        }
+    }
+    // Damage.
+    let parts = [d.engine, d.steering, d.suspension];
+    let pcts = parts.map(|x| (x * 100.0).round() as u32);
+    if shown.damage != Some(pcts) {
+        shown.damage = Some(pcts);
+        for (f, mut n, mut bg) in &mut dmg {
+            let x = parts[f.0];
+            n.width = percent(x * 100.0);
+            bg.0 = if x < 0.35 { t.text } else if x < 0.7 { t.accent } else { t.bad };
+        }
+        for (p, mut txt) in &mut pct {
+            set_text(&mut txt, |s| {
+                let _ = write!(s, "{}%", pcts[p.0]);
+            });
+        }
+    }
+    // Centre: 1 countdown, 2 GO, 3 finish; 0 nothing.
+    let center = if run.retired {
+        (0, 0)
+    } else if run.countdown > 0.0 {
+        (1, run.countdown.ceil() as u32)
+    } else if let Some(f) = run.finished {
+        (3, (f * 1000.0).round() as u32)
+    } else if run.time < 1.0 {
+        (2, 0)
+    } else {
+        (0, 0)
+    };
+    let center_changed = shown.center != Some(center);
+    let clock_changed = shown.clock_ms != Some(ms) || shown.penalty != Some(pen);
+    let stage_changed = shown.stage != Some(stage.def.id);
+
+    for (kind, mut txt, mut col) in &mut texts {
+        match kind {
+            HudText::Speed if speed_changed => set_text(&mut txt, |s| {
+                let _ = write!(s, "{v}");
+            }),
+            HudText::Unit if changed_units => set_text(&mut txt, |s| s.push_str(unit)),
+            HudText::Gear if gear_changed => set_text(&mut txt, |s| {
+                if car.gear < 0 {
+                    s.push('R');
+                } else if car.gear == 0 {
+                    s.push('N');
+                } else {
+                    let _ = write!(s, "{}", car.gear);
+                }
+            }),
+            HudText::Stage if stage_changed => set_text(&mut txt, |s| {
+                let _ = write!(s, "{:02}  {}", stage.def.id, stage.def.name.to_uppercase());
+            }),
+            HudText::Clock if clock_changed => set_text(&mut txt, |s| clock_into(s, total)),
+            HudText::Penalty if clock_changed => set_text(&mut txt, |s| {
+                if pen > 0 {
+                    let _ = write!(s, "+{pen} s");
+                }
+            }),
+            HudText::Progress if prog_changed => set_text(&mut txt, |s| {
+                let _ = write!(s, "{:.2} / {:.2} KM", prog.0 as f32 / 100.0, prog.1 as f32 / 100.0);
+            }),
+            HudText::CenterBig if center_changed => {
+                col.0 = t.accent;
+                set_text(&mut txt, |s| match center.0 {
+                    1 => {
+                        let _ = write!(s, "{}", center.1);
+                    }
+                    2 => s.push_str("GO"),
+                    3 => clock_into(s, center.1 as f32 / 1000.0),
+                    _ => {}
+                });
+            }
+            HudText::CenterSmall if center_changed => set_text(&mut txt, |s| {
+                if center.0 == 3 {
+                    s.push_str("FINISH");
+                }
+            }),
+            _ => {}
+        }
+    }
+    shown.speed = Some(v);
+    shown.mph = Some(prefs.mph);
+    shown.gear = Some(car.gear);
+    shown.clock_ms = Some(ms);
+    shown.penalty = Some(pen);
+    shown.stage = Some(stage.def.id);
+    shown.center = Some(center);
+}
+
+/// `83.4` → "1:23.400".
+fn clock_into(s: &mut String, t: f32) {
+    let t = t.max(0.0);
+    let m = (t / 60.0).floor();
+    let _ = write!(s, "{}:{:06.3}", m as u32, t - m * 60.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clock_format() {
+        let mut s = String::new();
+        clock_into(&mut s, 83.4);
+        assert_eq!(s, "1:23.400");
+        s.clear();
+        clock_into(&mut s, 5.05);
+        assert_eq!(s, "0:05.050");
+    }
+
+    #[test]
+    fn rev_bar_colours_run_white_amber_red() {
+        let t = crate::meta::screens::theme();
+        assert_eq!(seg_color(&t, 0), t.text);
+        assert_eq!(seg_color(&t, REV_SEGMENTS * 3 / 4), t.accent);
+        assert_eq!(seg_color(&t, REV_SEGMENTS - 1), t.bad);
     }
 }

@@ -111,7 +111,7 @@ def simulate(n_installs, stages, seed=7):
                                  "hits": hits, "engine_pct": int(min(dmg, 1) * 60), "steering_pct": int(min(dmg, 1) * 40),
                                  "suspension_pct": int(min(dmg, 1) * 30), "recovers": recovers, "codriver": codriver, "mode": "solo", "demo": True}})
         if rnd.random() < 0.25:
-            ev.append({"install": inst, "session": f"{inst}-0", "ts": ts + 1, "version": "0.1.0", "name": "demo.wishlist", "props": {"where": "end"}})
+            ev.append({"install": inst, "session": f"{inst}-0", "ts": ts + 1, "version": "0.1.0", "name": "demo.store_click", "props": {"where": "end", "store": "itch"}})
     return ev
 
 
@@ -181,7 +181,7 @@ def analyze(events, stages, min_runs):
     extra = {
         "codriver_runs": [len(on), len(off)],
         "recovers": sum(p.get("recovers", 0) for p in allp),
-        "wishlist_clicks": sum(e["name"] == "demo.wishlist" for e in events),
+        "wishlist_clicks": sum(e["name"] in ("demo.store_click", "demo.wishlist") for e in events),
         "grade_crash_share": dict(sorted(Counter(p.get("grade", 0) for e in crashes for p in [e["props"]] if p.get("corner", -1) >= 0).items())),
         "first_ts": min((e["ts"] for e in events), default=None), "last_ts": max((e["ts"] for e in events), default=None),
     }
@@ -339,7 +339,7 @@ def report(stats, extra, sample, stages):
           f"- Runs finished: {t['finishes']} of {t['runs']} ({t['finishes'] / max(t['runs'], 1) * 100:.0f}%). Retired (car wrecked): {t['retirements']}.",
           f"- Recovers used (R, +5 s): {extra['recovers']}.",
           f"- Co-driver on: {stats['codriver']['on_finish_rate'] * 100:.0f}% finish ({extra['codriver_runs'][0]} runs); off: {stats['codriver']['off_finish_rate'] * 100:.0f}% ({extra['codriver_runs'][1]} runs). Correlation only.",
-          f"- Wishlist clicks from inside the demo: {extra['wishlist_clicks']}.", "",
+          f"- Store button clicks from inside the demo: {extra['wishlist_clicks']}.", "",
           "## Stages", "", "| Stage | Runs | Finish | Retired | Median time | Best | Worst corner |", "|---|---:|---:|---:|---:|---:|---|"]
     for s in sorted(stats["stages"], key=lambda s: -s["runs"]):
         if not s["runs"]:

@@ -171,24 +171,28 @@ export const privacy = {
   title: 'Privacy',
   lead: 'What the Pacenote demo and game send, and how to turn it off. This site itself sets no cookies and loads no trackers.',
   summary: [
-    'Gameplay stats are anonymous and on by default. The first launch says so on the main menu.',
-    'Turn them off in Settings, Profile, “Share anonymous stats”.',
-    'No names, no chat, no voice, no location from your IP address.',
+    'Gameplay stats and crash reports are anonymous and on by default. The first launch explains them, and nothing is sent until you close that notice.',
+    'Turn them off in Settings, Privacy: “Share anonymous stats” and “Send crash reports”. “Forget me” there deletes what was collected.',
+    'Setting DO_NOT_TRACK=1 or TRACER_DISABLED=1 in your environment turns it all off: nothing is written or sent.',
+    'No names, no chat, no voice, no addresses or lobby codes, no location from your IP address.',
   ],
   ids: 'The only ids are a random install id and a random session id, made on your machine. Neither is linked to your name or your Steam account.',
-  device: 'Device info: operating system, CPU architecture, CPU and GPU name, memory size and locale. Crash, hang and performance reports carry the same.',
+  device: 'Device info: operating system, CPU architecture, CPU name and core count, memory size and locale. Crash and freeze reports add where in the code it happened and the last lines of the game’s log; performance reports carry frame times, loading time and memory use.',
   where: 'Data goes to our own server at api.marlstudio.com. A build without the server address compiled in sends nothing.',
   use: 'We use it to balance the stages, fix crashes, and publish totals like “stage 7’s hairpin ended 1 in 3 runs”. We publish totals only, never single runs.',
   events: [
-    { name: 'run.start', when: 'The countdown ends', props: 'Stage, solo or team, co-driver on or off, camera, demo or full game' },
+    { name: 'session.settings', when: 'Once per session', props: 'Camera view, speed units, steering speed, traction control and ABS on or off, co-driver options, graphics quality, demo or full game' },
+    { name: 'run.start', when: 'The countdown ends', props: 'Stage, solo or team, co-driver on or off, camera, weather, time of day, traction control and ABS on or off, demo or full game' },
     { name: 'run.end', when: 'The run ends', props: 'Stage, result (finish, retired, quit, restart), time with penalties, penalty seconds, metres driven, number of hits, engine, steering and suspension damage, recovers, co-driver on or off, demo or full game' },
     { name: 'run.crash', when: 'A hit hard enough to matter', props: 'Stage, metres along the road, which corner and its grade, how hard, speed, which side of the car, whether it ended the run' },
     { name: 'run.recover', when: 'You press recover', props: 'Stage, metres along the road' },
-    { name: 'demo.wishlist', when: 'You press a wishlist button in the demo', props: 'Which button (main menu or end of a run)' },
+    { name: 'play_together.connect', when: 'Hosting or joining a Play together session', props: 'Host or join, whether it connected (or timed out, was refused, failed), the round-trip time in ms' },
+    { name: 'play_together.end', when: 'A Play together session ends', props: 'Host or join, how long it lasted, why it ended (left, partner left, timeout, error)' },
+    { name: 'demo.store_click', when: 'You press the store button in the demo', props: 'Which button (main menu or end of a run), which store (itch.io or Steam)' },
   ],
   // PLACEHOLDER contact.
   contact: 'Questions or a deletion request: write to us at',
-  updated: '30 October 2026',
+  updated: '31 October 2026',
 } as const;
 
 // ---------- Images (in-game captures, src/assets/shots; raw PNGs in _source-shots) ----------

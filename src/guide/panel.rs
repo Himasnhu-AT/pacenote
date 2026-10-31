@@ -247,7 +247,7 @@ fn update(
         match *tag {
             T::Stage => match &stage {
                 Some(g) => {
-                    let _ = write!(s, "STAGE {}  {}  {:.1} KM  {:?}", g.def.id, g.def.name.to_uppercase(), g.road.length() / 1000.0, g.def.surface);
+                    let _ = write!(s, "STAGE {}  {}  {:.1} KM  {:?}  {:?} {:?}", g.def.id, g.def.name.to_uppercase(), g.road.length() / 1000.0, g.def.surface, g.def.weather, g.def.time);
                     s.make_ascii_uppercase();
                 }
                 None => s.push_str("GUIDE"),

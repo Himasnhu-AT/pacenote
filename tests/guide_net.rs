@@ -47,7 +47,9 @@ impl Pair {
         let mut driver = app("driver");
         driver.world_mut().resource_mut::<Session>().name = "Ana".into();
         net_session::host_with(driver.world_mut(), lo.bind(7777));
+        // Driven in non-default weather and time: the guide has to follow them.
         let def = stage::stages().into_iter().find(|d| d.id == stage_id).unwrap();
+        let def = pacenote::meta::stages::with_conditions(def, stage::Weather::Fog, stage::TimeOfDay::Dusk);
         let s = pworld::generate(&def);
         let (pos, heading) = s.road.start();
         driver.world_mut().insert_resource(s);
@@ -128,6 +130,7 @@ fn guide_receives_stage_car_and_run_and_never_simulates() {
     let g = p.guide.world().resource::<GuideStage>().clone();
     let s = p.driver.world().resource::<StageWorld>().clone();
     assert_eq!(g.def.id, 3);
+    assert_eq!((g.def.weather, g.def.time), (stage::Weather::Fog, stage::TimeOfDay::Dusk), "guide sees the driver's weather and time");
     assert_eq!(g.road_hash, road_hash(&s.road), "guide road differs from the driver's");
     assert!(g.hash_ok);
     assert_eq!(g.corners.len(), s.corners.len());

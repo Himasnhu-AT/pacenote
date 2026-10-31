@@ -2,6 +2,10 @@
 
 pub mod art;
 pub mod audio;
+#[cfg(feature = "dev")]
+pub mod autopilot;
+#[cfg(feature = "dev")]
+pub mod capture;
 pub mod codriver;
 pub mod demo;
 pub mod drive;
@@ -10,6 +14,7 @@ pub mod hud;
 pub mod loading;
 pub mod meta;
 pub mod net_session;
+pub mod prefs;
 pub mod stage;
 pub mod telemetry;
 pub mod vehicle;
@@ -21,7 +26,13 @@ use engine::prelude::*;
 
 pub fn info() -> GameInfo {
     // Our own assets/ wins over ./assets when run from another folder (the engine's scripts).
-    let info = GameInfo::new("pacenote", if demo::ACTIVE { "Pacenote Demo" } else { "Pacenote" }).tagline("One drives. One reads the road.");
+    // The telemetry envelope: app "pacenote", this crate's version, and the git sha only in
+    // packaged builds (packaging/common.sh sets PACENOTE_BUILD_SHA; dev builds send none, so
+    // the server files them as test data).
+    let info = GameInfo::new("pacenote", if demo::ACTIVE { "Pacenote Demo" } else { "Pacenote" })
+        .tagline("One drives. One reads the road.")
+        .version(env!("CARGO_PKG_VERSION"))
+        .build(option_env!("PACENOTE_BUILD_SHA"));
     // Dev builds only: shipped builds must not carry a path into the source tree.
     #[cfg(feature = "dev")]
     let info = info.assets_fallback(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"));
@@ -42,14 +53,53 @@ impl Plugin for Pacenote {
             .add_plugins((drive::DrivePlugin, hud::HudPlugin, guide::GuidePlugin))
             .add_plugins(audio::RallyAudioPlugin)
             .add_plugins(meta::MetaPlugin)
+            .add_plugins(prefs::PrefsPlugin)
             .add_plugins(voice::VoicePlugin)
             .add_plugins(art::ArtPlugin)
             .add_plugins(loading::LoadingPlugin)
             .add_plugins(codriver::CoDriverPlugin)
             .add_plugins(telemetry::TelemetryPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
+        fullscreen_on_first_run(app);
         #[cfg(feature = "dev")]
-        app.add_systems(Update, keep_game_focused);
+        app.add_plugins(capture::CapturePlugin);
+        #[cfg(feature = "dev")]
+        app.add_plugins(autopilot::AutopilotPlugin);
+        #[cfg(feature = "dev")]
+        app.add_systems(Update, keep_game_focused.run_if(resource_exists::<Messages<bevy::window::WindowFocused>>));
+    }
+}
+
+/// A fresh install starts in borderless fullscreen (the engine's default is a window). Only when
+/// the settings file has never stored a window mode, so the player's choice in Settings > Video
+/// sticks. The engine never applies the window mode in test-driven runs (play.py, control port).
+fn fullscreen_on_first_run(app: &mut App) {
+    use engine::settings::{CoreSettings, SettingsStore, WindowModeSetting};
+    let Some(path) = app.world().get_resource::<SettingsStore>().map(|s| s.path.clone()) else { return };
+    if !window_mode_saved(std::fs::read_to_string(path).ok().as_deref())
+        && let Some(mut core) = app.world_mut().get_resource_mut::<CoreSettings>()
+    {
+        core.window_mode = WindowModeSetting::Borderless;
+    }
+}
+
+/// Does this settings file (its text, if any) hold a window mode?
+fn window_mode_saved(file: Option<&str>) -> bool {
+    file.and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
+        .is_some_and(|v| v.get("core").and_then(|c| c.get("window_mode")).is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::window_mode_saved;
+
+    #[test]
+    fn fullscreen_only_without_a_saved_window_mode() {
+        assert!(!window_mode_saved(None), "fresh install");
+        assert!(!window_mode_saved(Some("not json")));
+        assert!(!window_mode_saved(Some(r#"{"game": {}}"#)));
+        assert!(!window_mode_saved(Some(r#"{"core": {"vsync": true}}"#)));
+        assert!(window_mode_saved(Some(r#"{"core": {"window_mode": "Windowed"}}"#)), "the player's choice wins");
     }
 }
 
@@ -78,7 +128,8 @@ fn load_stage(world: &mut World) {
         return;
     }
     let n = world.resource::<StageChoice>().0;
-    let def = stage::stages().into_iter().find(|d| d.id == n).expect("stage");
+    // With the weather and time of day picked for it (meta::stage_def).
+    let def = meta::stage_def(world, n).expect("stage");
     // Generation, terrain, road, dressing, trees, sky, camera and car, behind the loading screen.
     loading::begin(world, def);
 }

@@ -45,18 +45,28 @@ pub struct Planner {
     /// Next note to call.
     next: usize,
     finish_called: bool,
+    /// Call timing (Settings > Co-driver): read-ahead × this (1 normal, more = earlier).
+    pub lead_scale: f32,
+    /// "Three left" instead of "left three" (Settings > Co-driver > Call order).
+    pub grade_first: bool,
 }
 
 impl Planner {
     pub fn new(corners: &[Corner], crests: &[f32], length: f32) -> Planner {
         let mut notes = Vec::new();
         upcoming_in(corners, crests, 0.0, usize::MAX, &mut notes);
-        Planner { notes, corners: corners.to_vec(), length, next: 0, finish_called: false }
+        Planner { notes, corners: corners.to_vec(), length, next: 0, finish_called: false, lead_scale: 1.0, grade_first: false }
     }
 
-    /// How far ahead notes are called at `speed` (m/s).
+    /// How far ahead notes are called at `speed` (m/s), at normal timing.
     pub fn lead(speed: f32) -> f32 {
         (speed.abs() * LEAD_S).clamp(LEAD_MIN, LEAD_MAX)
+    }
+
+    /// [`Self::lead`] with this planner's timing.
+    pub fn lead_scaled(&self, speed: f32) -> f32 {
+        let k = self.lead_scale.clamp(0.5, 2.0);
+        (speed.abs() * LEAD_S * k).clamp(LEAD_MIN * k, LEAD_MAX * k)
     }
 
     /// Back to note `s` (after a restart or recover): notes behind `s` won't be called.
@@ -67,7 +77,7 @@ impl Planner {
 
     /// The lines due with the car at `s` metres doing `speed` m/s.
     pub fn update(&mut self, s: f32, speed: f32, out: &mut Vec<Line>) {
-        let lead = Self::lead(speed);
+        let lead = self.lead_scaled(speed);
         // Notes the car already passed (a recover forward, a fast stretch) go unsaid.
         while self.notes.get(self.next).is_some_and(|n| n.end < s) {
             self.next += 1;
@@ -109,8 +119,16 @@ impl Planner {
         match n.corner {
             Some(k) => {
                 let c = &self.corners[k];
-                out.push_str(if c.turn == Turn::Left { "left " } else { "right " });
-                out.push_str(grade_word(c.grade));
+                let side = if c.turn == Turn::Left { "left" } else { "right" };
+                if self.grade_first {
+                    out.push_str(grade_word(c.grade));
+                    out.push(' ');
+                    out.push_str(side);
+                } else {
+                    out.push_str(side);
+                    out.push(' ');
+                    out.push_str(grade_word(c.grade));
+                }
                 if c.end - c.start > 70.0 {
                     out.push_str(" long");
                 }
@@ -202,6 +220,23 @@ fn worst_part(d: &crate::vehicle::Damage) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn call_order_and_timing() {
+        let cs = [corner(300.0, 340.0, Turn::Left, 3)];
+        let mut p = Planner::new(&cs, &[], 1000.0);
+        p.grade_first = true;
+        let mut out = Vec::new();
+        p.update(260.0, 20.0, &mut out);
+        assert!(out[0].text.contains("three left"), "{}", out[0].text);
+        // Earlier calls read further ahead.
+        let mut early = Planner::new(&cs, &[], 1000.0);
+        early.lead_scale = 1.3;
+        assert!(early.lead_scaled(30.0) > Planner::lead(30.0));
+        let mut late = Planner::new(&cs, &[], 1000.0);
+        late.lead_scale = 0.75;
+        assert!(late.lead_scaled(30.0) < Planner::lead(30.0));
+    }
     use crate::vehicle::Damage;
 
     fn corner(start: f32, end: f32, turn: Turn, grade: u8) -> Corner {

@@ -41,11 +41,14 @@ pub struct Speech {
     pub rate: u32,
     /// Speak at all (false: subtitles only, e.g. muted runs).
     pub audible: bool,
+    /// 0..1 (Settings > Co-driver > Voice volume). The OS voice skips the engine mixer, so
+    /// each backend gets it its own way.
+    pub volume: f32,
 }
 
 impl Default for Speech {
     fn default() -> Self {
-        Speech { backend: None, queue: VecDeque::new(), current: None, rate: 230, audible: true }
+        Speech { backend: None, queue: VecDeque::new(), current: None, rate: 230, audible: true, volume: 1.0 }
     }
 }
 
@@ -73,6 +76,11 @@ impl Speech {
         }
     }
 
+    /// A line is being spoken (as of the last `busy`/`pump` check).
+    pub fn speaking(&self) -> bool {
+        self.current.is_some()
+    }
+
     pub fn busy(&mut self) -> bool {
         if let Some((c, _)) = &mut self.current {
             match c.try_wait() {
@@ -95,9 +103,9 @@ impl Speech {
                 break l;
             }
         };
-        if self.audible {
+        if self.audible && self.volume > 0.01 {
             let backend = *self.backend.get_or_insert_with(detect);
-            if let Some(child) = spawn(backend, &line.text, self.rate) {
+            if let Some(child) = spawn(backend, &line.text, self.rate, self.volume) {
                 self.current = Some((child, line.priority));
             }
         }
@@ -122,27 +130,32 @@ pub fn no_window(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
-fn spawn(b: Backend, text: &str, rate: u32) -> Option<Child> {
+fn spawn(b: Backend, text: &str, rate: u32, volume: f32) -> Option<Child> {
+    let vol = volume.clamp(0.0, 1.0);
     let mut cmd = match b {
         Backend::Say => {
+            // `say` has no volume flag; its embedded `[[volm x]]` command sets it.
             let mut c = Command::new("say");
-            c.arg("-r").arg(rate.to_string()).arg("--").arg(text);
+            c.arg("-r").arg(rate.to_string()).arg("--").arg(format!("[[volm {vol:.2}]] {text}"));
             c
         }
         Backend::Espeak(e) => {
             let mut c = Command::new(e);
-            c.arg("-s").arg(rate.to_string()).arg("--").arg(text);
+            c.arg("-s").arg(rate.to_string()).arg("-a").arg(((vol * 100.0).round() as u32).to_string()).arg("--").arg(text);
             c
         }
         Backend::SpdSay => {
             let mut c = Command::new("spd-say");
-            c.arg("-w").arg("-r").arg("40").arg("--").arg(text);
+            let r = ((rate as i32 - 150) / 2).clamp(-100, 100);
+            c.arg("-w").arg("-r").arg(r.to_string()).arg("-i").arg(((vol * 200.0) as i32 - 100).to_string()).arg("--").arg(text);
             c
         }
         Backend::PowerShell => {
             let safe = text.replace('\'', "''");
             let script = format!(
-                "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = 3; $s.Speak('{safe}')"
+                "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = {}; $s.Volume = {}; $s.Speak('{safe}')",
+                ((rate as i32 - 170) / 20).clamp(-10, 10),
+                (vol * 100.0).round() as u32
             );
             let mut c = Command::new("powershell");
             c.args(["-NoProfile", "-NonInteractive", "-Command", &script]);

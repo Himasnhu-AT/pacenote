@@ -13,7 +13,7 @@ use bevy::math::{Vec2, Vec3};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
-use crate::stage::{self, Road, StageDef, Surface};
+use crate::stage::{self, Road, StageDef, Surface, TimeOfDay, Weather};
 
 use super::board::Hasher;
 
@@ -208,6 +208,32 @@ pub fn preview(info: &StageInfo, size: u32) -> Raster {
 /// The menu backdrop: terrain contours of the whole stage map with the road on top.
 /// `ink` is the contour colour (alpha = strength of the index contours).
 pub fn contour_map(def: &StageDef, road: &Road, size: u32, ink: [f32; 3]) -> Raster {
+    let mut r = contours(def, size, ink, 1.0);
+    let half = stage::half_size(def);
+    let s = size as f32;
+    // The road, in map space (same square as the contours).
+    let to_px = |p: Vec3| Vec2::new((p.x + half) / (2.0 * half) * s, (p.z + half) / (2.0 * half) * s);
+    let pts: Vec<Vec2> = road.pts.iter().step_by(3).map(|p| to_px(*p)).collect();
+    let w = (s / 260.0).max(2.0);
+    r.polyline(&pts, w * 3.0, [0.03, 0.05, 0.04, 0.55]);
+    r.polyline(&pts, w, PAPER);
+    if let (Some(a), Some(b)) = (pts.first(), pts.last()) {
+        r.dot(*a, w * 2.8, START);
+        r.dot(*b, w * 2.8, FINISH);
+    }
+    r
+}
+
+/// The main menu's backdrop: terrain contours of no stage in particular (no road), in `ink`.
+pub fn neutral_contours(size: u32, ink: [f32; 3]) -> Raster {
+    let mut def = stage::stages().into_iter().next().expect("stages");
+    def.seed = 0x5eed_c0de_2026;
+    def.biome = stage::Biome::BirchHills;
+    contours(&def, size, ink, 0.55)
+}
+
+/// Terrain contour lines of a stage's map square; `strength` scales the line alpha.
+fn contours(def: &StageDef, size: u32, ink: [f32; 3], strength: f32) -> Raster {
     let half = stage::half_size(def);
     let n = 160usize;
     let cell = 2.0 * half / (n - 1) as f32;
@@ -245,7 +271,7 @@ pub fn contour_map(def: &StageDef, road: &Road, size: u32, ink: [f32; 3]) -> Ras
             let g = (gx * gx + gy * gy).sqrt().max(1e-5);
             let d = (b - b.round()).abs() / g;
             let index = (b.round() as i32).rem_euclid(5) == 0;
-            let (w, a) = if index { (1.1, 0.55) } else { (0.6, 0.28) };
+            let (w, a) = if index { (1.1, 0.55 * strength) } else { (0.6, 0.28 * strength) };
             // Fade out towards the picture's edges (it sits behind the menu, edges unseen).
             let e = ((x.min(size - 1 - x).min(y).min(size - 1 - y)) as f32 / (s * 0.14)).min(1.0);
             let cov = (w - d + 0.5).clamp(0.0, 1.0) * e * e * (3.0 - 2.0 * e);
@@ -253,16 +279,6 @@ pub fn contour_map(def: &StageDef, road: &Road, size: u32, ink: [f32; 3]) -> Ras
                 r.blend(x as i32, y as i32, [ink[0], ink[1], ink[2], a], cov);
             }
         }
-    }
-    // The road, in map space (same square as the contours).
-    let to_px = |p: Vec3| Vec2::new((p.x + half) / (2.0 * half) * s, (p.z + half) / (2.0 * half) * s);
-    let pts: Vec<Vec2> = road.pts.iter().step_by(3).map(|p| to_px(*p)).collect();
-    let w = (s / 260.0).max(2.0);
-    r.polyline(&pts, w * 3.0, [0.03, 0.05, 0.04, 0.55]);
-    r.polyline(&pts, w, PAPER);
-    if let (Some(a), Some(b)) = (pts.first(), pts.last()) {
-        r.dot(*a, w * 2.8, START);
-        r.dot(*b, w * 2.8, FINISH);
     }
     r
 }
@@ -277,6 +293,7 @@ pub const MAP_PX: u32 = 1100;
 struct Pending {
     infos: Vec<Option<(StageInfo, Raster)>>,
     map: Option<Raster>,
+    backdrop: Option<Raster>,
 }
 
 /// Every stage's [`StageInfo`] and preview image, built in a background thread.
@@ -284,8 +301,10 @@ struct Pending {
 pub struct StageCatalog {
     pub infos: Vec<Option<StageInfo>>,
     pub previews: Vec<Option<Handle<Image>>>,
-    /// The backdrop contour map (stage 1).
+    /// Stage 1's contour map with its road (the loading screen's picture for stage 1).
     pub map: Option<Handle<Image>>,
+    /// The main menu's backdrop: contours of no stage, no road.
+    pub backdrop: Option<Handle<Image>>,
     pending: Option<Arc<Mutex<Pending>>>,
     /// Seconds the background generation took (for the docs / logs).
     pub build_secs: Option<f32>,
@@ -302,14 +321,16 @@ impl StageCatalog {
         !self.infos.is_empty() && self.infos.iter().all(|i| i.is_some())
     }
     /// Starts the background build (map first, then stages in order).
-    pub fn start(&mut self, ink: [f32; 3]) {
+    pub fn start(&mut self, ink: [f32; 3], backdrop_ink: [f32; 3]) {
         let defs = stage::stages();
         self.infos = vec![None; defs.len()];
         self.previews = vec![None; defs.len()];
-        let pending = Arc::new(Mutex::new(Pending { infos: vec![None; defs.len()], map: None }));
+        let pending = Arc::new(Mutex::new(Pending { infos: vec![None; defs.len()], map: None, backdrop: None }));
         self.pending = Some(pending.clone());
         let spawn = std::thread::Builder::new().name("stage-catalog".into()).spawn(move || {
             let t0 = std::time::Instant::now();
+            let backdrop = neutral_contours(MAP_PX, backdrop_ink);
+            pending.lock().unwrap().backdrop = Some(backdrop);
             for (k, def) in defs.iter().enumerate() {
                 let road = stage::generate_road(def);
                 let info = StageInfo::from_road(def, &road);
@@ -333,6 +354,12 @@ impl StageCatalog {
         let mut p = p.lock().unwrap();
         let mut got = false;
         let mut images = images;
+        if let Some(b) = p.backdrop.take() {
+            if let Some(imgs) = images.as_deref_mut() {
+                self.backdrop = Some(imgs.add(b.image()));
+            }
+            got = true;
+        }
         if let Some(map) = p.map.take() {
             if let Some(imgs) = images.as_deref_mut() {
                 self.map = Some(imgs.add(map.image()));
@@ -362,9 +389,108 @@ impl StageCatalog {
     }
 }
 
+// ---------------------------------------------------------------- conditions
+
+/// Weathers the picker offers, in order.
+pub const WEATHERS: [Weather; 4] = [Weather::Clear, Weather::Overcast, Weather::Fog, Weather::Rain];
+/// Times of day the picker offers, in order.
+pub const TIMES: [TimeOfDay; 4] = [TimeOfDay::Morning, TimeOfDay::Noon, TimeOfDay::Afternoon, TimeOfDay::Dusk];
+
+/// The weathers a stage can be driven in: all of them, except rain on the snow stages (rain
+/// falling on snow-covered ground reads wrong).
+pub fn weathers_for(def: &StageDef) -> Vec<Weather> {
+    WEATHERS.into_iter().filter(|w| !(*w == Weather::Rain && def.biome == stage::Biome::SnowForest)).collect()
+}
+
+/// `def` with this weather and time of day (the road and terrain don't depend on either).
+pub fn with_conditions(mut def: StageDef, weather: Weather, time: TimeOfDay) -> StageDef {
+    def.weather = weather;
+    def.time = time;
+    def
+}
+
+/// The published stage `id` as defined (its default weather and time).
+pub fn base_def(id: u32) -> Option<StageDef> {
+    stage::stages().into_iter().find(|d| d.id == id)
+}
+
+/// Short key of non-default conditions ("rain-dusk"), `None` at the stage's defaults.
+pub fn conditions_key(def: &StageDef) -> Option<String> {
+    let base = base_def(def.id)?;
+    if base.weather == def.weather && base.time == def.time {
+        return None;
+    }
+    Some(format!("{:?}-{:?}", def.weather, def.time).to_lowercase())
+}
+
+/// Driving assists a run is driven with (Settings > Driving). Both on by default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Assists {
+    pub abs: bool,
+    pub traction_control: bool,
+}
+
+impl Default for Assists {
+    fn default() -> Self {
+        Assists { abs: true, traction_control: true }
+    }
+}
+
+impl Assists {
+    /// "noabs" / "notc" parts for the board key (none with both on).
+    fn key_parts(self) -> impl Iterator<Item = &'static str> {
+        [(!self.abs).then_some("noabs"), (!self.traction_control).then_some("notc")].into_iter().flatten()
+    }
+    /// "ABS off, traction control off" (empty with both on).
+    pub fn label(self) -> String {
+        let mut v = Vec::new();
+        if !self.traction_control {
+            v.push("traction control off");
+        }
+        if !self.abs {
+            v.push("ABS off");
+        }
+        v.join(", ")
+    }
+}
+
+/// The hash records and ghosts are filed under: the road's hash, plus `@<key>` when the weather
+/// or time isn't the stage's default or an assist is off ("rain-dusk", "noabs",
+/// "fog-noon-notc"). So each weather, time and assist setting has its own board and ghosts, and
+/// times at the defaults keep the hash they always had.
+pub fn board_hash(road_hash: &str, def: &StageDef, assists: Assists) -> String {
+    let parts: Vec<String> = conditions_key(def).into_iter().chain(assists.key_parts().map(String::from)).collect();
+    if parts.is_empty() { road_hash.to_string() } else { format!("{road_hash}@{}", parts.join("-")) }
+}
+
+/// Weather / time index in [`WEATHERS`] / [`TIMES`] (for the wire).
+pub fn weather_index(w: Weather) -> u8 {
+    WEATHERS.iter().position(|x| *x == w).unwrap_or(0) as u8
+}
+pub fn time_index(t: TimeOfDay) -> u8 {
+    TIMES.iter().position(|x| *x == t).unwrap_or(0) as u8
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditions_file_separately_and_defaults_keep_their_hash() {
+        let def = base_def(3).unwrap();
+        assert_eq!(board_hash("abc", &def, Assists::default()), "abc", "defaults: the hash records always had");
+        assert_eq!(conditions_key(&def), None);
+        let wet = with_conditions(def.clone(), Weather::Rain, TimeOfDay::Dusk);
+        assert_eq!(board_hash("abc", &wet, Assists::default()), "abc@rain-dusk");
+        assert_ne!(board_hash("abc", &wet, Assists::default()), board_hash("abc", &with_conditions(def.clone(), Weather::Fog, TimeOfDay::Dusk), Assists::default()));
+        let off = Assists { abs: false, traction_control: true };
+        assert_eq!(board_hash("abc", &def, off), "abc@noabs", "an assist off: its own board");
+        assert_eq!(board_hash("abc", &wet, Assists { abs: false, traction_control: false }), "abc@rain-dusk-noabs-notc");
+        assert_eq!(stage::generate_road(&wet).pts, stage::generate_road(&def).pts, "weather never changes the road");
+        let snow = stage::stages().into_iter().find(|d| d.biome == stage::Biome::SnowForest).unwrap();
+        assert!(!weathers_for(&snow).contains(&Weather::Rain));
+        assert_eq!(weathers_for(&def).len(), 4);
+    }
 
     #[test]
     fn hash_is_stable_and_tracks_the_road() {

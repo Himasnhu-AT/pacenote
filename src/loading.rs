@@ -46,6 +46,9 @@ pub struct Loading {
     shown: f32,
     /// Dressing cells within [`NEAR_SCENERY`] of the start: the ones to wait for.
     near_cells: u32,
+    /// The stage's contour map for the screen, drawn on a worker (none for stage 1: the
+    /// catalog already has it).
+    map: Option<Task<crate::meta::stages::Raster>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,10 +80,23 @@ struct LoadingLabel;
 #[derive(Component)]
 struct LoadingBar;
 
+/// The contour map picture (its image is swapped in when the worker finishes).
+#[derive(Component)]
+struct LoadingMap {
+    /// Real time the picture last changed (it fades in from there).
+    since: f32,
+}
+
+/// Size of the loading screen's contour map (px). The menu's is 1100; this one is drawn
+/// while the stage loads, so a little smaller.
+const MAP_PX: u32 = 900;
+
 /// Frames under this long count as settled.
 const CALM_MS: f32 = 40.0;
 /// Settled frames needed in a row.
 const CALM_FRAMES: u32 = 30;
+/// Longest the settle phase waits for them (s).
+const SETTLE_MAX_S: f32 = 2.5;
 /// Give up waiting (and let the player drive) after this long.
 const TIMEOUT_S: f32 = 60.0;
 /// Scenery within this of the start line is in before the screen goes (m). The rest of the
@@ -130,36 +146,164 @@ pub fn begin(world: &mut World, def: StageDef) {
             s
         })
     };
+    // The picture for the screen, alongside the generation (stage 1's is the menu backdrop).
+    let have_map = def.id == 1 && world.resource::<crate::meta::stages::StageCatalog>().map.is_some();
+    let map = (!have_map).then(|| {
+        let def = def.clone();
+        let a = world.resource::<engine::ui::theme::Theme>().accent.to_srgba();
+        AsyncComputeTaskPool::get().spawn(async move { crate::meta::stages::contour_map(&def, &crate::stage::generate_road(&def), MAP_PX, [a.red, a.green, a.blue]) })
+    });
     let now = Instant::now();
-    world.insert_resource(Loading { phase: Phase::Generate, started: now, phase_at: now, def: def.clone(), task: Some(task), calm: 0, pcg: None, shown: 0.0, near_cells: 0 });
+    world.insert_resource(Loading { phase: Phase::Generate, started: now, phase_at: now, def: def.clone(), task: Some(task), calm: 0, pcg: None, shown: 0.0, near_cells: 0, map });
     world.insert_resource(PauseAllowed(false));
+    // Long frames are the point of this screen: no hitch / hang reports while it's up.
+    #[cfg(feature = "telemetry")]
+    world.insert_resource(engine::trace::TraceQuiet);
     spawn_screen(world, &def);
 }
 
+/// The screen: the stage's contour map on the right (as on the main menu), its name and
+/// facts, your best and the stage record, progress, and a tip. Everything here is already
+/// known (catalog, board, profile); only the map is drawn on a worker.
 fn spawn_screen(world: &mut World, def: &StageDef) {
+    use crate::meta::screens::{biome_name, stat, surface_name, time_name, weather_name};
+    use crate::meta::{Boards, Profile, RunMode, board};
+    use engine::ui::prelude::*;
+
+    let t = world.resource::<Theme>().clone();
     let tip = TIPS[(def.seed as usize) % TIPS.len()];
-    let title = format!("STAGE {}  -  {}", def.id, def.name.to_uppercase());
-    let sub = format!("{:?}   /   {:?}   /   {:?}", def.surface, def.biome, def.weather).to_uppercase();
-    let font = |px: f32| TextFont { font_size: bevy::text::FontSize::Px(px), ..default() };
+    let cat = world.resource::<crate::meta::stages::StageCatalog>();
+    let info = cat.info(def.id).cloned();
+    // Until the worker's map is in: stage 1's backdrop, else the catalog's road sketch.
+    let (picture, is_map) = match (def.id == 1).then(|| cat.map.clone()).flatten() {
+        Some(m) => (Some(m), true),
+        None => (cat.preview(def.id), false),
+    };
+    let mode = world.get_resource::<RunMode>().copied().unwrap_or_default();
+    let p = world.resource::<Profile>().clone();
+    let b = &world.resource::<Boards>().0;
+    let team = board::team_key(&p.driver_name, if mode == RunMode::Team { &p.guide_name } else { "" });
+    // This weather and time of day's board (crate::meta::stages::board_hash).
+    let (best, leader) = match &info {
+        Some(i) => {
+            let h = crate::meta::stages::board_hash(&i.hash, def, crate::meta::picked_assists(world));
+            (b.best_of(def.id, &h, &team).cloned(), b.leader(def.id, &h).cloned())
+        }
+        None => (None, None),
+    };
+    let surf = match &info {
+        Some(i) => i
+            .surfaces
+            .iter()
+            .filter(|(s, f)| *f >= 0.02 && !matches!(s, crate::stage::Surface::Verge | crate::stage::Surface::Rough))
+            .map(|(s, f)| format!("{} {:.0}%", surface_name(*s), f * 100.0))
+            .collect::<Vec<_>>()
+            .join(", "),
+        None => surface_name(def.surface).to_string(),
+    };
+    let facts = format!("{} \u{b7} {} \u{b7} {}, {}", biome_name(def.biome), surf, time_name(def.time), weather_name(def.weather));
+    let mut kicker = format!("Stage {:02} \u{b7} {}", def.id, if mode == RunMode::Team { "Team run" } else { "Practice" });
+    if crate::meta::stages::conditions_key(def).is_some() {
+        kicker.push_str(&format!(" \u{b7} {} {}", time_name(def.time), weather_name(def.weather)));
+    }
+    let now = world.resource::<Time<Real>>().elapsed_secs();
+    let name_size = if def.name.chars().count() > 12 { 96.0 } else { 120.0 };
     world
+        .commands()
         .spawn((
             LoadingRoot,
+            Name::new("Loading screen"),
             DespawnOnExit(AppState::InGame),
             GlobalZIndex(1000),
-            Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, align_items: AlignItems::Center, row_gap: Val::Px(18.0), ..default() },
-            BackgroundColor(Color::srgb(0.035, 0.04, 0.045)),
+            fullscreen(),
+            BackgroundColor(t.bg),
         ))
-        .with_children(|p| {
-            p.spawn((Text::new("PACENOTE"), font(18.0), TextColor(Color::srgba(1.0, 0.85, 0.3, 0.9))));
-            p.spawn((Text::new(title), font(44.0), TextColor(Color::WHITE)));
-            p.spawn((Text::new(sub), font(16.0), TextColor(Color::srgba(1.0, 1.0, 1.0, 0.55))));
-            // Progress bar.
-            p.spawn((Node { width: Val::Px(520.0), height: Val::Px(6.0), margin: UiRect::top(Val::Px(28.0)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.12)))).with_children(|b| {
-                b.spawn((LoadingBar, Node { width: Val::Percent(0.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(Color::srgb(1.0, 0.85, 0.3))));
+        .with_children(|root| {
+            // The map, right, bleeding off the edges like the menu backdrop; the menu scrim
+            // keeps the text side readable.
+            let mut pic = root.spawn((
+                LoadingMap { since: now },
+                ImageNode { color: Color::NONE, ..default() },
+                Node { position_type: PositionType::Absolute, right: px(-140), top: percent(-14), height: percent(128), aspect_ratio: Some(1.0), ..default() },
+                Pickable::IGNORE,
+            ));
+            if let Some(h) = picture {
+                pic.insert(ImageNode { image: h, color: Color::NONE, ..default() });
+                if !is_map {
+                    // The small road sketch: centred and smaller than the full map.
+                    pic.insert(Node { position_type: PositionType::Absolute, right: percent(8), top: percent(18), height: percent(64), aspect_ratio: Some(1.0), ..default() });
+                }
+            }
+            menu_backdrop(root, &t, 0.0, 1.0);
+            root.spawn(menu_column(GAP_S)).with_children(|c| {
+                eyebrow_bar(c, &kicker, t.accent);
+                c.spawn(title(&def.name, name_size, t.text));
+                c.spawn((text(facts, body(SIZE_BODY + 2.0), t.text_muted), Node { max_width: px(760), ..default() }));
+                c.spawn((Node { column_gap: px(GAP_L), margin: UiRect::vertical(px(GAP_M)), ..default() }, Pickable::IGNORE)).with_children(|r| {
+                    let len = info.as_ref().map_or(def.length, |i| i.length);
+                    stat(r, &t, format!("{:.2}", len / 1000.0), "km", t.text, 44.0);
+                    if let Some(i) = &info {
+                        stat(r, &t, i.corners.to_string(), "Corners", t.text, 44.0);
+                        stat(r, &t, i.tight.to_string(), "Hairpins & 2s", t.text, 44.0);
+                        if i.crests > 0 {
+                            stat(r, &t, i.crests.to_string(), "Crests", t.text, 44.0);
+                        }
+                        stat(r, &t, format!("{:.0}", i.climb), "m climb", t.text, 44.0);
+                    }
+                });
+                c.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(GAP_XS + 2.0), width: px(560), ..default() }, Pickable::IGNORE)).with_children(|l| {
+                    let line = |l: &mut ChildSpawnerCommands, name: &str, r: Option<&board::Record>, color: Color| {
+                        l.spawn((Node { justify_content: JustifyContent::SpaceBetween, ..default() }, Pickable::IGNORE)).with_children(|row| {
+                            row.spawn(text(name, body(SIZE_BODY), t.text_muted));
+                            match r {
+                                Some(r) => row.spawn(text(format!("{}   {}", board::clock(r.total()), r.team_label()), body_bold(SIZE_BODY), color)),
+                                None => row.spawn(text("no time yet", body(SIZE_BODY), t.text_dim)),
+                            };
+                        });
+                    };
+                    line(l, if mode == RunMode::Team { "Team best" } else { "Your best" }, best.as_ref(), t.text);
+                    line(l, "Stage record", leader.as_ref(), t.accent);
+                });
+                c.spawn(spacer(GAP_L));
+                // Progress.
+                c.spawn((Node { width: px(560), height: px(4), ..default() }, BackgroundColor(t.line), Pickable::IGNORE)).with_children(|b| {
+                    b.spawn((LoadingBar, Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(t.accent), Pickable::IGNORE));
+                });
+                c.spawn((LoadingLabel, text(Phase::Generate.label().to_uppercase(), label(SIZE_LABEL), t.text_muted)));
             });
-            p.spawn((LoadingLabel, Text::new(Phase::Generate.label()), font(16.0), TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7))));
-            p.spawn((Text::new(tip), font(16.0), TextColor(Color::srgba(1.0, 1.0, 1.0, 0.45)), Node { margin: UiRect::top(Val::Px(40.0)), max_width: Val::Px(640.0), ..default() }, TextLayout::justify(Justify::Center)));
+            // Tip, bottom left where the menus keep their key hints.
+            root.spawn((Node { position_type: PositionType::Absolute, left: px(EDGE), bottom: px(FOOTER_BOTTOM), width: px(620), ..default() }, Pickable::IGNORE)).with_children(|w| {
+                w.spawn(accent_panel(&t, t.accent, 18.0, GAP_XS + 2.0)).with_children(|card| {
+                    card.spawn(eyebrow("Pace note", t.accent));
+                    card.spawn(text(tip, body(SIZE_BODY), t.text));
+                });
+            });
         });
+    world.flush();
+}
+
+/// The worker's contour map is in: show it in place of the sketch.
+fn take_map(world: &mut World) {
+    let done = {
+        let Some(mut l) = world.get_resource_mut::<Loading>() else { return };
+        let Some(task) = l.map.as_mut() else { return };
+        let r = block_on(future::poll_once(task));
+        if r.is_some() {
+            l.map = None;
+        }
+        r
+    };
+    let Some(raster) = done else { return };
+    let Some(mut images) = world.get_resource_mut::<Assets<Image>>() else { return };
+    let h = images.add(raster.image());
+    let now = world.resource::<Time<Real>>().elapsed_secs();
+    let mut q = world.query::<(&mut ImageNode, &mut Node, &mut LoadingMap)>();
+    for (mut img, mut node, mut m) in q.iter_mut(world) {
+        img.image = h.clone();
+        img.color = Color::NONE;
+        *node = Node { position_type: PositionType::Absolute, right: px(-140), top: percent(-14), height: percent(128), aspect_ratio: Some(1.0), ..default() };
+        m.since = now;
+    }
 }
 
 /// Steps the load along. Exclusive: building the stage needs the whole world.
@@ -234,7 +378,9 @@ fn advance(world: &mut World) {
             let ms = world.resource::<Time<Real>>().delta_secs() * 1000.0;
             let mut l = world.resource_mut::<Loading>();
             l.calm = if ms < CALM_MS { l.calm + 1 } else { 0 };
-            if l.calm >= CALM_FRAMES {
+            // A slow or busy GPU may never give 30 calm frames in a row (frames around
+            // 30-50 ms): don't hold the player on "Final checks" for long because of it.
+            if l.calm >= CALM_FRAMES || l.phase_at.elapsed().as_secs_f32() > SETTLE_MAX_S {
                 finish(world);
                 return;
             }
@@ -318,12 +464,16 @@ fn finish(world: &mut World) {
         world.entity_mut(e).despawn();
     }
     world.insert_resource(PauseAllowed(true));
+    #[cfg(feature = "telemetry")]
+    world.remove_resource::<engine::trace::TraceQuiet>();
     info!("loading: stage {} ready in {:.2} s", l.def.id, l.started.elapsed().as_secs_f32());
 }
 
 /// Left the stage while it was loading: drop the work (and restore the PCG limits).
 fn abandon(world: &mut World) {
     world.remove_resource::<Pending>();
+    #[cfg(feature = "telemetry")]
+    world.remove_resource::<engine::trace::TraceQuiet>();
     if let Some(l) = world.remove_resource::<Loading>()
         && let Some(old) = l.pcg
     {
@@ -351,10 +501,19 @@ fn draw(world: &mut World) {
     for mut n in bars.iter_mut(world) {
         n.width = Val::Percent(shown * 100.0);
     }
+    take_map(world);
+    let now = world.resource::<Time<Real>>().elapsed_secs();
+    let mut maps = world.query::<(&mut ImageNode, &LoadingMap)>();
+    for (mut img, m) in maps.iter_mut(world) {
+        let a = ((now - m.since) / 0.6).clamp(0.0, 1.0) * 0.85;
+        if img.image != Handle::default() && (img.color.alpha() - a).abs() > 0.004 {
+            img.color = Color::srgba(1.0, 1.0, 1.0, a);
+        }
+    }
     let mut labels = world.query_filtered::<&mut Text, With<LoadingLabel>>();
     for mut t in labels.iter_mut(world) {
-        if t.0 != phase.label() {
-            t.0 = phase.label().to_string();
+        if !t.0.eq_ignore_ascii_case(phase.label()) {
+            t.0 = phase.label().to_uppercase();
         }
     }
 }
