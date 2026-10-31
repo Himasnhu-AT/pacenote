@@ -162,6 +162,16 @@ impl Biquad {
         self.z1 = 0.0;
         self.z2 = 0.0;
     }
+
+    /// Zeroes a state that has decayed to nothing, so a filter whose input went silent never
+    /// sits in denormal floats (slow on x86).
+    #[inline]
+    pub fn settle(&mut self) {
+        if self.z1.abs() < 1e-12 && self.z2.abs() < 1e-12 {
+            self.z1 = 0.0;
+            self.z2 = 0.0;
+        }
+    }
 }
 
 /// Exponential approach to a target (parameter smoothing, envelopes with attack/release).
@@ -253,6 +263,17 @@ impl Ring {
         self.y1 = 0.0;
         self.y2 = 0.0;
     }
+
+    /// The next sample, or 0 (and the state cleared) once it has died away.
+    #[inline]
+    pub fn tick(&mut self) -> f32 {
+        if self.active() {
+            self.next()
+        } else {
+            self.stop();
+            0.0
+        }
+    }
 }
 
 /// Sine of a phase in turns (0..1), parabolic approximation (error < 0.1 %).
@@ -278,6 +299,146 @@ impl Osc {
             self.phase -= 1.0;
         }
         s
+    }
+}
+
+/// Band-limited sawtooth (PolyBLEP): no aliasing fold-back from the wrap, for harsh tones
+/// (tyre squeal, rattle buzz).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Saw {
+    pub phase: f32,
+}
+
+#[inline]
+fn poly_blep(t: f32, dt: f32) -> f32 {
+    if t < dt {
+        let t = t / dt;
+        t + t - t * t - 1.0
+    } else if t > 1.0 - dt {
+        let t = (t - 1.0) / dt;
+        t * t + t + t + 1.0
+    } else {
+        0.0
+    }
+}
+
+impl Saw {
+    /// Next sample in −1..1 at `hz`.
+    #[inline]
+    pub fn next(&mut self, hz: f32) -> f32 {
+        let dt = (hz / RATE).clamp(1e-6, 0.45);
+        let t = self.phase;
+        let y = 2.0 * t - 1.0 - poly_blep(t, dt);
+        self.phase += dt;
+        if self.phase >= 1.0 {
+            self.phase -= 1.0;
+        }
+        y
+    }
+}
+
+/// Fixed-size delay line (power-of-two length, no allocation): exhaust pipe waveguides.
+#[derive(Clone, Debug)]
+pub struct Delay<const N: usize> {
+    buf: [f32; N],
+    w: usize,
+}
+
+impl<const N: usize> Default for Delay<N> {
+    fn default() -> Self {
+        Delay { buf: [0.0; N], w: 0 }
+    }
+}
+
+impl<const N: usize> Delay<N> {
+    /// The sample written `d` samples ago (1 ≤ d < N), linearly interpolated.
+    #[inline]
+    pub fn read(&self, d: f32) -> f32 {
+        let d = d.clamp(1.0, (N - 2) as f32);
+        let i = d as usize;
+        let f = d - i as f32;
+        let a = self.buf[(self.w + N - i) & (N - 1)];
+        let b = self.buf[(self.w + N - i - 1) & (N - 1)];
+        a + (b - a) * f
+    }
+
+    #[inline]
+    pub fn write(&mut self, x: f32) {
+        self.w = (self.w + 1) & (N - 1);
+        self.buf[self.w] = x;
+    }
+}
+
+/// Master dynamics for the rally stream: a gentle RMS-ish compressor (glue, so impacts don't
+/// jump out) into a brick-wall peak limiter with a short look-ahead, so nothing clips.
+#[derive(Clone, Debug)]
+pub struct Dynamics {
+    env: f32,
+    comp_gain: f32,
+    peak: f32,
+    lim_gain: f32,
+    look: [[f32; 2]; LOOK],
+    w: usize,
+    att: f32,
+    rel: f32,
+    lim_att: f32,
+    lim_rel: f32,
+    /// Gain reduction now (dB, ≥ 0), for meters and tests.
+    pub reduction_db: f32,
+}
+
+const LOOK: usize = 48;
+
+impl Default for Dynamics {
+    fn default() -> Self {
+        let k = |secs: f32| 1.0 - (-1.0 / (secs * RATE)).exp();
+        Dynamics {
+            env: 0.0,
+            comp_gain: 1.0,
+            peak: 0.0,
+            lim_gain: 1.0,
+            look: [[0.0; 2]; LOOK],
+            w: 0,
+            att: k(0.004),
+            rel: k(0.18),
+            lim_att: k(0.0003),
+            lim_rel: k(0.08),
+            reduction_db: 0.0,
+        }
+    }
+}
+
+impl Dynamics {
+    /// Compressor threshold (linear, ≈ −7 dBFS: driving stays below it, hits go over) and
+    /// ratio above it.
+    const THRESH: f32 = 0.45;
+    const RATIO: f32 = 3.0;
+    /// Limiter ceiling (≈ −1 dBFS).
+    const CEIL: f32 = 0.89;
+
+    /// Processes one stereo frame; output is delayed by the look-ahead (1 ms).
+    #[inline]
+    pub fn run(&mut self, l: f32, r: f32) -> (f32, f32) {
+        // Compressor: smoothed level, gain from a power law above the threshold.
+        let lvl = l.abs().max(r.abs());
+        let k = if lvl > self.env { self.att } else { self.rel };
+        self.env += k * (lvl - self.env);
+        let want = if self.env > Self::THRESH { (self.env / Self::THRESH).powf(1.0 / Self::RATIO - 1.0) } else { 1.0 };
+        self.comp_gain += 0.02 * (want - self.comp_gain);
+        let (l, r) = (l * self.comp_gain, r * self.comp_gain);
+        // Limiter: peak of the incoming (not yet delayed) signal sets the gain the delayed
+        // signal gets, so the gain is already down when the peak comes out.
+        let p = l.abs().max(r.abs());
+        self.peak = if p > self.peak { p } else { self.peak + self.lim_rel * (p - self.peak) };
+        let want = if self.peak > Self::CEIL { Self::CEIL / self.peak } else { 1.0 };
+        let k = if want < self.lim_gain { self.lim_att } else { self.lim_rel };
+        self.lim_gain += k * (want - self.lim_gain);
+        let out = self.look[self.w];
+        self.look[self.w] = [l, r];
+        self.w = (self.w + 1) % LOOK;
+        let g = self.lim_gain;
+        self.reduction_db = -20.0 * (self.comp_gain * g).max(1e-6).log10();
+        (out[0] * g, out[1] * g)
     }
 }
 
@@ -443,6 +604,44 @@ mod tests {
         assert!(v.iter().all(|x| (-1.0..=1.0).contains(x)));
         let r = rms(&v);
         assert!(r > 0.15 && r < 0.9, "{r}");
+    }
+
+    #[test]
+    fn saw_is_band_limited() {
+        // A 3.1 kHz naive saw folds partials back below it; the PolyBLEP one keeps them weak.
+        let mut s = Saw::default();
+        let x: Vec<f32> = (0..48_000).map(|_| s.next(3100.0)).collect();
+        let fund = goertzel(&x, 3100.0);
+        // 16th partial (49.6 kHz) folds to 48 000 − 49 600 → 1.6 kHz.
+        let alias = goertzel(&x, 1600.0);
+        assert!(fund > 3000.0 * alias, "fund {fund} alias {alias}");
+        assert!(x.iter().all(|v| v.abs() < 1.2));
+    }
+
+    #[test]
+    fn delay_reads_back_with_fractions() {
+        let mut d = Delay::<64>::default();
+        for i in 0..40 {
+            d.write(i as f32);
+        }
+        assert_eq!(d.read(1.0), 38.0);
+        assert!((d.read(10.5) - 28.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn dynamics_hold_the_ceiling_and_leave_quiet_alone() {
+        let mut d = Dynamics::default();
+        let mut o = Osc::default();
+        let quiet: Vec<f32> = (0..9600).map(|_| d.run(o.next(200.0) * 0.1, 0.0).0).collect();
+        assert!((rms(&quiet[4800..]) - 0.1 * std::f32::consts::FRAC_1_SQRT_2).abs() < 0.005);
+        // A sudden full-scale hit (×4 over) never exceeds the ceiling.
+        let mut peak = 0.0f32;
+        for i in 0..9600 {
+            let x = if i < 2400 { 4.0 * o.next(80.0) } else { 0.0 };
+            let (l, r) = d.run(x, -x);
+            peak = peak.max(l.abs()).max(r.abs());
+        }
+        assert!(peak <= 0.9, "peak {peak}");
     }
 
     #[test]

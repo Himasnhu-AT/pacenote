@@ -16,7 +16,7 @@ use bevy::reflect::TypePath;
 
 use super::ambience::{AmbParams, AmbienceSynth};
 use super::car::{CarEvent, CarParams, CarSynth};
-use super::dsp::{OnePole, RATE, Smooth, finite, soft_clip};
+use super::dsp::{Biquad, Dynamics, OnePole, RATE, Smooth, finite, soft_clip};
 
 pub const BLOCK: usize = 256;
 pub const MAX_EVENTS: usize = 16;
@@ -29,13 +29,19 @@ pub struct Mix {
     /// Lowest low-pass on the bus chain (Hz; ≥ 19 kHz = off), e.g. the pause snapshot.
     pub car_lp: f32,
     pub amb_lp: f32,
+    /// Someone is talking that the engine mixer doesn't know about (the co-driver's system
+    /// voice): the car ducks a little so the words stay clear.
+    pub talk: bool,
 }
 
 impl Default for Mix {
     fn default() -> Self {
-        Mix { car: 1.0, amb: 1.0, car_lp: 20_000.0, amb_lp: 20_000.0 }
+        Mix { car: 1.0, amb: 1.0, car_lp: 20_000.0, amb_lp: 20_000.0, talk: false }
     }
 }
+
+/// Car gain while [`Mix::talk`] (≈ −4 dB).
+pub const TALK_DUCK: f32 = 0.63;
 
 /// Everything the synth needs for the next stretch of audio.
 #[derive(Clone, Copy, Debug)]
@@ -49,7 +55,7 @@ pub struct Frame {
 
 impl Default for Frame {
     fn default() -> Self {
-        Frame { car: CarParams::default(), amb: AmbParams::default(), mix: Mix::default(), events: [CarEvent::Shift; MAX_EVENTS], n_events: 0 }
+        Frame { car: CarParams::default(), amb: AmbParams::default(), mix: Mix::default(), events: [CarEvent::Shift(true); MAX_EVENTS], n_events: 0 }
     }
 }
 
@@ -63,7 +69,8 @@ impl Frame {
     }
 }
 
-/// Car + ambience + bus processing. Renders whole blocks of interleaved stereo.
+/// Car + ambience + bus processing (gains, low-pass, DC blocker, compressor and look-ahead
+/// limiter, a soft clip as the last guard). Renders whole blocks of interleaved stereo.
 #[derive(Clone, Debug)]
 pub struct RallySynth {
     pub car: CarSynth,
@@ -73,6 +80,8 @@ pub struct RallySynth {
     amb_gain: Smooth,
     car_lp: [OnePole; 2],
     amb_lp: [OnePole; 2],
+    dc: [Biquad; 2],
+    pub dynamics: Dynamics,
     car_buf: [f32; BLOCK * 2],
     amb_buf: [f32; BLOCK * 2],
     out: [f32; BLOCK * 2],
@@ -88,6 +97,8 @@ impl RallySynth {
             amb_gain: Smooth::new(1.0, 0.01, 0.01, RATE),
             car_lp: [OnePole::new(20_000.0); 2],
             amb_lp: [OnePole::new(20_000.0); 2],
+            dc: [Biquad::highpass(22.0, 0.7); 2],
+            dynamics: Dynamics::default(),
             car_buf: [0.0; BLOCK * 2],
             amb_buf: [0.0; BLOCK * 2],
             out: [0.0; BLOCK * 2],
@@ -101,7 +112,8 @@ impl RallySynth {
             self.car.event(*e);
         }
         let g = |v: f32| if v.is_finite() { v.clamp(0.0, 4.0) } else { 0.0 };
-        self.mix = Mix { car: g(f.mix.car), amb: g(f.mix.amb), car_lp: f.mix.car_lp, amb_lp: f.mix.amb_lp };
+        let duck = if f.mix.talk { TALK_DUCK } else { 1.0 };
+        self.mix = Mix { car: g(f.mix.car) * duck, amb: g(f.mix.amb), car_lp: f.mix.car_lp, amb_lp: f.mix.amb_lp, talk: f.mix.talk };
         for lp in &mut self.car_lp {
             lp.set(self.mix.car_lp.min(20_000.0));
         }
@@ -121,8 +133,10 @@ impl RallySynth {
         for i in 0..BLOCK {
             let gc = self.car_gain.next(self.mix.car);
             let ga = self.amb_gain.next(self.mix.amb);
-            for ch in 0..2 {
-                let mut c = self.car_buf[i * 2 + ch];
+            let mut lr = [0.0; 2];
+            for (ch, out) in lr.iter_mut().enumerate() {
+                // DC blocker on the car before its gain, so a mute is silent at once.
+                let mut c = self.dc[ch].run(self.car_buf[i * 2 + ch]);
                 let mut a = self.amb_buf[i * 2 + ch];
                 if car_filtered {
                     c = self.car_lp[ch].lp(c);
@@ -130,8 +144,14 @@ impl RallySynth {
                 if amb_filtered {
                     a = self.amb_lp[ch].lp(a);
                 }
-                self.out[i * 2 + ch] = finite(soft_clip(c * gc + a * ga));
+                *out = finite(c * gc + a * ga);
             }
+            let (l, r) = self.dynamics.run(lr[0], lr[1]);
+            self.out[i * 2] = soft_clip(l);
+            self.out[i * 2 + 1] = soft_clip(r);
+        }
+        for f in &mut self.dc {
+            f.settle();
         }
         &self.out
     }
@@ -283,21 +303,36 @@ mod tests {
         assert!(quiet < loud * 0.4 && quiet > loud * 0.1, "{quiet} vs {loud}");
         f.mix.car = 0.0;
         shared.publish(&f);
-        rms(&mut src, 4800);
+        rms(&mut src, 9600); // the 10 ms gain ramp settles
         assert!(rms(&mut src, 4800) < 1e-4, "muted bus");
         assert!(shared.rendered.load(Ordering::Relaxed) > 50_000);
+    }
+
+    #[test]
+    fn co_driver_talk_ducks_the_car_only() {
+        let render = |talk: bool| {
+            let mut s = RallySynth::new(2);
+            let mut f = Frame { car: CarParams { active: true, rpm: 4000.0, throttle: 0.5, ..CarParams::default() }, ..Frame::default() };
+            f.mix.talk = talk;
+            s.apply(&f);
+            let mut out = Vec::new();
+            s.render_into(48_000, &mut out);
+            (out[48_000..].iter().map(|v| v * v).sum::<f32>() / 48_000.0).sqrt()
+        };
+        let ratio = render(true) / render(false);
+        assert!((ratio - TALK_DUCK).abs() < 0.08, "duck ratio {ratio}");
     }
 
     #[test]
     fn event_queue_keeps_untaken_events() {
         let shared = Shared::default();
         let mut f = Frame::default();
-        f.push(CarEvent::Shift);
+        f.push(CarEvent::Shift(true));
         shared.publish(&f);
         shared.publish(&f);
         assert_eq!(shared.frame.lock().unwrap().n_events, 2);
         for _ in 0..40 {
-            f.push(CarEvent::Shift);
+            f.push(CarEvent::Shift(true));
         }
         shared.publish(&f);
         assert_eq!(shared.frame.lock().unwrap().n_events, MAX_EVENTS);

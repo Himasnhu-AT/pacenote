@@ -12,9 +12,14 @@
 //! same synth on the main thread and writes a WAV, so muted/offscreen runs can be checked.
 
 pub mod ambience;
+pub mod body;
 pub mod car;
 pub mod dsp;
+pub mod powertrain;
+#[cfg(test)]
+mod scenes;
 pub mod stream;
+pub mod tyres;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -28,7 +33,7 @@ use crate::drive::{CameraView, CarSpec, DrivenCar, StageRun};
 use crate::guide::GuideStage;
 use crate::guide::sync::NetCar;
 use crate::stage::Surface;
-use crate::vehicle::{Car, Spec};
+use crate::vehicle::{self, Car, Spec};
 use crate::world::StageWorld;
 use ambience::AmbParams;
 use car::{CarEvent, CarParams, Contact};
@@ -93,6 +98,7 @@ pub fn remote_params(r: &RemoteCarSound, spec: &Spec) -> CarParams {
         speed: r.speed,
         surfaces: [Contact::default(); car::SURFACES],
         interior: 0.0,
+        ..CarParams::default()
     }
 }
 
@@ -203,10 +209,13 @@ pub fn car_params(car: &Car, spec: &Spec, throttle: f32, interior: f32) -> CarPa
         let share = 0.25 * (w.load / nominal).clamp(0.0, 2.5).sqrt();
         let wheel_v = (w.spin * spec.wheel_radius).abs();
         let roll_v = speed.max(wheel_v);
-        // Slip speed (m/s): longitudinal from the slip ratio, lateral from the slip angle.
-        let slip_v = w.slip_ratio.abs() * roll_v.max(1.0) + w.slip_angle.sin().abs() * speed.max(1.5);
+        // Slip speeds (m/s): longitudinal from the slip ratio (wheelspin, locked wheels),
+        // lateral from the slip angle. Sideways the whole tread ploughs, so a slide sounds
+        // bigger than wheelspin at the same slip speed.
+        let long_v = w.slip_ratio.abs() * roll_v.max(1.0);
+        let lat_v = w.slip_angle.sin().abs() * speed.max(1.5);
         surfaces[k].roll += share * (roll_v / 25.0).min(1.6);
-        surfaces[k].slide += share * 2.0 * dsp::smoothstep(0.3, 7.0, slip_v);
+        surfaces[k].slide += share * (1.1 * dsp::smoothstep(0.3, 7.0, long_v) + 2.4 * dsp::smoothstep(0.3, 6.0, lat_v)).min(3.0);
     }
     CarParams {
         active: true,
@@ -219,11 +228,17 @@ pub fn car_params(car: &Car, spec: &Spec, throttle: f32, interior: f32) -> CarPa
         speed,
         surfaces,
         interior,
+        engine_damage: car.damage.engine,
+        susp_damage: car.damage.suspension,
+        // The body sliding on the ground (on its roof, side, or grounded on a crest).
+        scrape: if car.body_contact { Vec3::new(car.vel.x, 0.0, car.vel.z).length().max(car.vel.length() * 0.5) } else { 0.0 },
+        // Set by `Tracker::detect` (needs the last state).
+        rough: 0.0,
     }
 }
 
-/// Finds one-shots in state changes between sim steps: impacts, suspension slams and
-/// landings, gear changes.
+/// Finds one-shots in state changes between sim steps: impacts, the body hitting the ground,
+/// suspension slams, landings and bottoming out, gear changes; and how rough the ground is.
 #[derive(Default, Clone, Debug)]
 pub struct Tracker {
     seen: bool,
@@ -234,6 +249,9 @@ pub struct Tracker {
     rate: [f32; 4],
     contact: [bool; 4],
     cooldown: [f32; 4],
+    bottomed: [bool; 4],
+    hits: u32,
+    body: bool,
     stats_t: f32,
     last_ns: u64,
     last_frames: u64,
@@ -241,13 +259,16 @@ pub struct Tracker {
 
 impl Tracker {
     /// Compares `car` with the last state (`dt` seconds of sim later; 0 = no step, nothing
-    /// happens) and queues events into `f`. Returns counts (impacts, thumps, shifts).
-    pub fn detect(&mut self, car: &Car, dt: f32, f: &mut Frame) -> [u32; 3] {
+    /// happens), queues events into `f` and sets `f.car.rough`. Returns counts (impacts and
+    /// ground hits, thumps and bottoming, shifts).
+    pub fn detect(&mut self, car: &Car, spec: &Spec, dt: f32, f: &mut Frame) -> [u32; 3] {
         let mut n = [0; 3];
         if !self.seen {
             self.seen = true;
             self.impacts = car.impacts;
             self.gear = car.gear;
+            self.hits = car.damage.hits;
+            self.body = car.body_contact;
             for i in 0..4 {
                 self.comp[i] = car.wheels[i].compression;
                 self.contact[i] = car.wheels[i].contact;
@@ -255,6 +276,7 @@ impl Tracker {
             return n;
         }
         if dt <= 0.0 {
+            f.car.rough = 0.0;
             return n;
         }
         let speed = car.vel.length();
@@ -262,11 +284,22 @@ impl Tracker {
         if hit > 0.4 {
             f.push(CarEvent::Impact(hit));
             n[0] += 1;
+        } else if car.damage.hits > self.hits {
+            // A damaging hit that wasn't an obstacle: the body hit the ground. Closing speed
+            // back from the severity (see `Damage::severity`; ground hits count 0.6×).
+            let x = (car.damage.last / 0.6).max(0.0).sqrt();
+            f.push(CarEvent::Ground(vehicle::DAMAGE_FROM + x * (vehicle::DAMAGE_FATAL - vehicle::DAMAGE_FROM)));
+            n[0] += 1;
+        } else if car.body_contact && !self.body && speed > 2.0 {
+            // A touch that did no damage (grounding on a crest, a bank).
+            f.push(CarEvent::Ground(2.0 + speed * 0.1));
+            n[0] += 1;
         }
         if car.gear != self.gear && car.gear > 0 && self.gear > 0 {
-            f.push(CarEvent::Shift);
+            f.push(CarEvent::Shift(car.gear > self.gear));
             n[2] += 1;
         }
+        let mut rough = 0.0;
         for i in 0..4 {
             let w = &car.wheels[i];
             let rate = (w.compression - self.comp[i]) / dt;
@@ -279,12 +312,25 @@ impl Tracker {
                 self.cooldown[i] = 0.25;
                 n[1] += 1;
             }
+            // Bump stop: full travel reached while still compressing.
+            let full = w.contact && w.compression >= spec.travel - 0.004;
+            if full && !self.bottomed[i] && rate > 0.4 && speed > 1.0 {
+                f.push(CarEvent::Bottom(((rate - 0.4) / 2.0).clamp(0.25, 1.0), if i % 2 == 0 { -0.6 } else { 0.6 }));
+                n[1] += 1;
+            }
+            self.bottomed[i] = full;
+            if w.contact {
+                rough += rate.abs() * 0.25;
+            }
             self.rate[i] = rate;
             self.comp[i] = w.compression;
             self.contact[i] = w.contact;
         }
+        f.car.rough = rough;
         self.impacts = car.impacts;
         self.gear = car.gear;
+        self.hits = car.damage.hits;
+        self.body = car.body_contact;
         n
     }
 }
@@ -302,6 +348,7 @@ fn gather(
     cars: Query<&DrivenCar>,
     remote: Res<RemoteCarSound>,
     mixer: Res<Mixer>,
+    codriver: Option<Res<crate::codriver::CoDriver>>,
     mut link: ResMut<Link>,
     mut tr: Local<Tracker>,
     mut stats: ResMut<RallyAudioStats>,
@@ -328,7 +375,7 @@ fn gather(
             let dt = ft - tr.fixed_t;
             tr.fixed_t = ft;
             f.car = car_params(car, &spec, throttle, interior);
-            let counts = tr.detect(car, dt, f);
+            let counts = tr.detect(car, &spec, dt, f);
             stats.impacts += counts[0];
             stats.thumps += counts[1];
             stats.shifts += counts[2];
@@ -355,6 +402,7 @@ fn gather(
         amb: mixer.effective_gain(BusId::AMBIENCE),
         car_lp: chain_lowpass(&mixer, car_bus),
         amb_lp: chain_lowpass(&mixer, BusId::AMBIENCE),
+        talk: codriver.is_some_and(|c| c.speaking()),
     };
     stats.car_gain = f.mix.car;
     stats.amb_gain = f.mix.amb;
@@ -443,7 +491,7 @@ mod tests {
             vehicle::step(&mut car, &spec, input, &ground, dt);
             frame.n_events = 0;
             frame.car = car_params(&car, &spec, input.throttle, 0.0);
-            let c = tr.detect(&car, dt, &mut frame);
+            let c = tr.detect(&car, &spec, dt, &mut frame);
             for k in 0..3 {
                 counts[k] += c[k];
             }

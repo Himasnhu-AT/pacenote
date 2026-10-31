@@ -1,9 +1,19 @@
-//! The car, synthesised: engine (pulse train through exhaust formants), turbo (whistle,
-//! blow-off, flutter), backfire pops, rev limiter, gear whine and clunk, tyres per surface,
-//! stones, wind, suspension thumps and impacts. Runs on the audio thread; parameters arrive
-//! once per block (see [`CarParams`]) and are smoothed per sample.
+//! The car, synthesised, and its inside/outside mix. The parts:
+//! - [`super::powertrain`]: engine (per-cylinder exhaust pulses through pipe waveguides), intake,
+//!   pops, limiter, misfires and knock when damaged; turbo whistle, blow-off and flutter.
+//! - [`super::tyres`]: rolling and sliding per surface, stones on the arches and floor.
+//! - [`super::body`]: impacts, ground hits, suspension thumps and bottoming, scrapes,
+//!   rattles, gear clunks.
+//! - here: gear whine, wind, and the mix for the chase camera (outside) or the bonnet camera
+//!   (inside: exhaust through the bulkhead, tyres muffled, intake/whine/stones/rattles up).
+//!
+//! Runs on the audio thread; parameters arrive once per block (see [`CarParams`]) and are
+//! smoothed per sample.
 
-use super::dsp::{Biquad, Decay, Noise, OnePole, Osc, RATE, Ring, Smooth, Wander, pan, smoothstep};
+use super::body::Body;
+use super::dsp::{Biquad, Noise, Osc, RATE, Smooth, Wander, smoothstep};
+use super::powertrain::{Engine, Turbo};
+use super::tyres::Tyres;
 
 /// Surface classes the tyres sound different on.
 pub const SURFACES: usize = 5;
@@ -41,6 +51,13 @@ pub struct CarParams {
     pub surfaces: [Contact; SURFACES],
     /// 0 = outside (chase camera) .. 1 = inside (bonnet camera).
     pub interior: f32,
+    /// Engine and suspension damage 0..1 (misfires and knock; loose rattles).
+    pub engine_damage: f32,
+    pub susp_damage: f32,
+    /// Speed (m/s) of the body sliding on the ground (0 when it isn't touching).
+    pub scrape: f32,
+    /// How hard the suspension is working (mean |compression speed| m/s over the wheels).
+    pub rough: f32,
 }
 
 impl Default for CarParams {
@@ -56,6 +73,10 @@ impl Default for CarParams {
             speed: 0.0,
             surfaces: [Contact::default(); SURFACES],
             interior: 0.0,
+            engine_damage: 0.0,
+            susp_damage: 0.0,
+            scrape: 0.0,
+            rough: 0.0,
         }
     }
 }
@@ -63,97 +84,16 @@ impl Default for CarParams {
 /// One-shot car events (detected on the main thread from state changes).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CarEvent {
-    /// Hit a tree/rock/post: impact speed m/s.
+    /// Hit a tree/rock/post: closing speed m/s.
     Impact(f32),
+    /// The body hit the ground (a roll, nosing into a bank, a heavy landing): m/s.
+    Ground(f32),
     /// Suspension slam: strength 0..1, pan −1..1.
     Thump(f32, f32),
-    /// Gear change (clunk).
-    Shift,
-}
-
-const CYL_GAIN: [f32; 4] = [1.0, 0.84, 0.95, 0.89];
-
-/// Engine: four cylinders, 2 firings per revolution, each an impulse shaped into a pulse
-/// (brighter with load) plus combustion noise, through exhaust/intake formants.
-#[derive(Clone, Debug)]
-struct Engine {
-    n: Noise,
-    phase: f32,
-    rpm: Smooth,
-    load: Smooth,
-    level: Smooth,
-    shape_a: OnePole,
-    shape_b: OnePole,
-    burst: Decay,
-    body: Biquad,
-    mid: Biquad,
-    rasp: Biquad,
-    intake: Biquad,
-    tone: Biquad,
-    dc: OnePole,
-    wobble: Wander,
-    limiter: f32,
-    /// 1 right after a lift (pops are likely), decays.
-    crackle: f32,
-    last_throttle: f32,
-    pops: [Pop; 3],
-    next_pop: usize,
-    coef_timer: u32,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct Pop {
-    noise: Decay,
-    boom: Ring,
-    crack: Biquad,
-}
-
-#[derive(Clone, Debug)]
-struct Turbo {
-    n: Noise,
-    boost: f32,
-    shaft: Smooth,
-    whistle: Osc,
-    hiss: Biquad,
-    bov: Decay,
-    bov_f: f32,
-    bov_bp: Biquad,
-    flutter: Decay,
-    flutter_osc: Osc,
-}
-
-#[derive(Clone, Debug)]
-struct Tyres {
-    n: Noise,
-    roll: [Smooth; SURFACES],
-    slide: [Smooth; SURFACES],
-    gravel_bp: Biquad,
-    gravel_lo: Biquad,
-    grain: Decay,
-    grain_f: Biquad,
-    slide_bp: Biquad,
-    tarmac_lo: Biquad,
-    squeal: Osc,
-    squeal_bp: Biquad,
-    squeal_wander: Wander,
-    mud_lo: Biquad,
-    mud_slurp: Biquad,
-    mud_wander: Wander,
-    snow_bp: Biquad,
-    snow_grain: Decay,
-    grass_hp: Biquad,
-    rumble: Biquad,
-    rumble_wander: Wander,
-    pings: [(Ring, f32); 8],
-    next_ping: usize,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct Hit {
-    thud: Ring,
-    metal: [Ring; 3],
-    noise: Decay,
-    pan: f32,
+    /// The suspension ran out of travel: strength 0..1, pan −1..1.
+    Bottom(f32, f32),
+    /// Gear change (`true` = up).
+    Shift(bool),
 }
 
 /// The whole car sound. `render` writes stereo frames.
@@ -161,24 +101,28 @@ struct Hit {
 pub struct CarSynth {
     p: CarParams,
     n: Noise,
-    engine: Engine,
-    turbo: Turbo,
-    tyres: Tyres,
+    pub engine: Engine,
+    pub turbo: Turbo,
+    pub tyres: Tyres,
+    pub body: Body,
     whine: Osc,
+    whine2: Osc,
     whine_lvl: Smooth,
     wind_lp: Biquad,
     wind_hiss: Biquad,
+    buffet: Biquad,
+    seal: Biquad,
     gust: Wander,
     speed: Smooth,
     interior: Smooth,
-    cabin: OnePole,
+    /// Inside: the exhaust through the body (low-passed, with the cabin's boom).
+    cabin_eng: Biquad,
+    cabin_boom: Biquad,
+    /// Inside: the tyres and the world outside, muffled.
+    cabin_l: Biquad,
+    cabin_r: Biquad,
     active: Smooth,
-    hits: [Hit; 3],
-    next_hit: usize,
-    thumps: [(Ring, Decay, f32); 4],
-    next_thump: usize,
-    clunk: Ring,
-    clunk_tick: Ring,
+    coef_timer: u32,
 }
 
 impl CarSynth {
@@ -187,80 +131,26 @@ impl CarSynth {
         CarSynth {
             p: CarParams::default(),
             n: Noise::new(seed),
-            engine: Engine {
-                n: Noise::new(seed ^ 0x1111),
-                phase: 0.0,
-                rpm: Smooth::new(950.0, 0.02, 0.03, RATE),
-                load: sm(0.03, 0.06),
-                level: sm(0.05, 0.2),
-                shape_a: OnePole::new(1500.0),
-                shape_b: OnePole::new(1500.0),
-                burst: Decay::default(),
-                body: Biquad::bandpass(115.0, 1.1),
-                mid: Biquad::bandpass(430.0, 2.2),
-                rasp: Biquad::bandpass(1350.0, 1.8),
-                intake: Biquad::bandpass(820.0, 0.9),
-                tone: Biquad::lowpass(3000.0, 0.7),
-                dc: OnePole::new(28.0),
-                wobble: Wander::new(3.0),
-                limiter: 0.0,
-                crackle: 0.0,
-                last_throttle: 0.0,
-                pops: [Pop::default(); 3],
-                next_pop: 0,
-                coef_timer: 0,
-            },
-            turbo: Turbo {
-                n: Noise::new(seed ^ 0x2222),
-                boost: 0.0,
-                shaft: sm(0.5, 0.9),
-                whistle: Osc::default(),
-                hiss: Biquad::bandpass(5000.0, 6.0),
-                bov: Decay::default(),
-                bov_f: 3500.0,
-                bov_bp: Biquad::bandpass(3500.0, 1.2),
-                flutter: Decay::default(),
-                flutter_osc: Osc::default(),
-            },
-            tyres: Tyres {
-                n: Noise::new(seed ^ 0x3333),
-                roll: [sm(0.05, 0.08); SURFACES],
-                slide: [sm(0.04, 0.1); SURFACES],
-                gravel_bp: Biquad::bandpass(1900.0, 0.8),
-                gravel_lo: Biquad::lowpass(240.0, 0.7),
-                grain: Decay::default(),
-                grain_f: Biquad::bandpass(2600.0, 1.4),
-                slide_bp: Biquad::bandpass(3200.0, 0.7),
-                tarmac_lo: Biquad::lowpass(480.0, 0.7),
-                squeal: Osc::default(),
-                squeal_bp: Biquad::bandpass(1000.0, 8.0),
-                squeal_wander: Wander::new(5.0),
-                mud_lo: Biquad::lowpass(380.0, 0.9),
-                mud_slurp: Biquad::bandpass(420.0, 3.0),
-                mud_wander: Wander::new(4.0),
-                snow_bp: Biquad::bandpass(3600.0, 1.6),
-                snow_grain: Decay::default(),
-                grass_hp: Biquad::highpass(3500.0, 0.7),
-                rumble: Biquad::lowpass(110.0, 0.8),
-                rumble_wander: Wander::new(6.0),
-                pings: [(Ring::default(), 0.0); 8],
-                next_ping: 0,
-            },
+            engine: Engine::new(seed),
+            turbo: Turbo::new(seed),
+            tyres: Tyres::new(seed),
+            body: Body::new(seed),
             whine: Osc::default(),
+            whine2: Osc::default(),
             whine_lvl: sm(0.1, 0.1),
             wind_lp: Biquad::lowpass(600.0, 0.6),
             wind_hiss: Biquad::bandpass(2500.0, 0.6),
+            buffet: Biquad::lowpass(160.0, 0.9),
+            seal: Biquad::bandpass(3300.0, 5.0),
             gust: Wander::new(0.4),
             speed: sm(0.1, 0.1),
             interior: sm(0.05, 0.05),
-            cabin: OnePole::new(20_000.0),
+            cabin_eng: Biquad::lowpass(750.0, 0.6),
+            cabin_boom: Biquad::bandpass(118.0, 2.2),
+            cabin_l: Biquad::lowpass(1700.0, 0.6),
+            cabin_r: Biquad::lowpass(1700.0, 0.6),
             active: sm(0.05, 0.3),
-            hits: [Hit::default(); 3],
-            next_hit: 0,
-            thumps: [(Ring::default(), Decay::default(), 0.0); 4],
-            next_thump: 0,
-            clunk: Ring::default(),
-            clunk_tick: Ring::default(),
+            coef_timer: 0,
         }
     }
 
@@ -278,78 +168,44 @@ impl CarSynth {
         p.throttle = ok(p.throttle, 0.0, 1.0, 0.0);
         p.speed = ok(p.speed, 0.0, 120.0, 0.0);
         p.interior = ok(p.interior, 0.0, 1.0, 0.0);
+        p.engine_damage = ok(p.engine_damage, 0.0, 1.0, 0.0);
+        p.susp_damage = ok(p.susp_damage, 0.0, 1.0, 0.0);
+        p.scrape = ok(p.scrape, 0.0, 60.0, 0.0);
+        p.rough = ok(p.rough, 0.0, 10.0, 0.0);
         for c in &mut p.surfaces {
             c.roll = ok(c.roll, 0.0, 3.0, 0.0);
             c.slide = ok(c.slide, 0.0, 4.0, 0.0);
         }
-        // Throttle lift at high rpm: crackle window and blow-off.
-        let e = &mut self.engine;
-        if p.throttle < 0.25 && e.last_throttle >= 0.5 {
-            if p.rpm > 3200.0 {
-                e.crackle = 1.0;
-            }
-            let b = self.turbo.boost;
-            if b > 0.3 {
-                self.turbo.bov.trigger(b * 0.22, 0.45);
-                self.turbo.bov_f = 4200.0;
-                self.turbo.flutter.trigger(b * 0.12, 0.35);
-            }
-        }
-        e.last_throttle = p.throttle;
+        self.engine.set(&p);
+        self.turbo.set(&p);
         self.p = p;
     }
 
     pub fn event(&mut self, ev: CarEvent) {
         match ev {
-            CarEvent::Impact(v) => {
-                let a = (v / 8.0).clamp(0.05, 1.0);
-                let h = &mut self.hits[self.next_hit];
-                self.next_hit = (self.next_hit + 1) % 3;
-                let n = &mut self.n;
-                h.thud.trigger(n.range(42.0, 58.0), 0.35 + 0.3 * a, 0.35 * a);
-                for (m, f) in h.metal.iter_mut().zip([1130.0, 2370.0, 3710.0]) {
-                    m.trigger(f * n.range(0.9, 1.1), n.range(0.25, 0.5), 0.05 * a * n.range(0.5, 1.0));
-                }
-                h.noise.trigger(0.3 * a, 0.18 + 0.15 * a);
-                h.pan = n.range(-0.4, 0.4);
-            }
-            CarEvent::Thump(s, p) => {
-                let s = s.clamp(0.0, 1.0);
-                let t = &mut self.thumps[self.next_thump];
-                self.next_thump = (self.next_thump + 1) % 4;
-                t.0.trigger(self.n.range(55.0, 80.0), 0.18, 0.4 * s);
-                t.1.trigger(0.12 * s, 0.02);
-                t.2 = p.clamp(-1.0, 1.0) * 0.5;
-            }
-            CarEvent::Shift => {
-                self.clunk.trigger(self.n.range(150.0, 190.0), 0.08, 0.06);
-                self.clunk_tick.trigger(self.n.range(2600.0, 3100.0), 0.03, 0.025);
+            CarEvent::Impact(v) => self.body.impact(v, true),
+            CarEvent::Ground(v) => self.body.impact(v * 0.8, false),
+            CarEvent::Thump(s, p) => self.body.thump(s, p),
+            CarEvent::Bottom(s, p) => self.body.bottom(s, p),
+            CarEvent::Shift(up) => {
+                self.body.shift();
+                self.engine.shift(up, &self.p);
+                self.turbo.shift(up);
             }
         }
     }
 
-    /// Updates filter coefficients from the smoothed state (every 64 samples).
+    /// Updates filter coefficients from the smoothed state (every 32 samples: small enough
+    /// steps that sweeps don't zipper).
     fn update_coeffs(&mut self) {
-        let e = &mut self.engine;
-        let load = e.load.v;
-        let rpm_n = ((e.rpm.v - self.p.idle_rpm) / (self.p.redline - self.p.idle_rpm)).clamp(0.0, 1.0);
-        // Pulse width: soft on overrun, sharp under load and at high rpm.
-        let shape = 500.0 + 1700.0 * load + 900.0 * rpm_n;
-        e.shape_a.set(shape);
-        e.shape_b.set(shape);
-        e.tone.set_lowpass(1100.0 + 3600.0 * load + 1800.0 * rpm_n, 0.75);
-        e.rasp.set_bandpass(1250.0 + 500.0 * rpm_n, 1.8);
-        let t = &mut self.turbo;
-        t.hiss.set_bandpass(2400.0 + 5200.0 * t.shaft.v, 7.0);
-        t.bov_bp.set_bandpass(t.bov_f, 1.3);
+        let p = self.p;
+        self.engine.update_coeffs(&p);
+        self.turbo.update_coeffs();
+        self.tyres.update_coeffs();
         let speed = self.speed.v;
         self.wind_lp.set_lowpass(180.0 + 28.0 * speed, 0.6);
         self.wind_hiss.set_bandpass(1500.0 + 40.0 * speed, 0.5);
-        let ty = &mut self.tyres;
-        let sq = 820.0 + 260.0 * ty.slide[TARMAC].v.min(2.0);
-        ty.squeal_bp.set_bandpass(sq, 9.0);
-        // Inside the car: the outside world (tyres, wind) is muffled.
-        self.cabin.set(20_000.0 - 17_500.0 * self.interior.v);
+        self.seal.set_bandpass(2900.0 + 12.0 * speed, 5.0);
     }
 
     /// Renders `frames` stereo frames, adding into `out` (interleaved L R).
@@ -364,241 +220,47 @@ impl CarSynth {
     #[inline]
     fn sample(&mut self) -> (f32, f32) {
         let p = self.p;
-        if self.engine.coef_timer == 0 {
+        if self.coef_timer == 0 {
             self.update_coeffs();
-            self.engine.coef_timer = 64;
+            self.coef_timer = 32;
         }
-        self.engine.coef_timer -= 1;
+        self.coef_timer -= 1;
         let act = self.active.next(if p.active { 1.0 } else { 0.0 });
         let speed = self.speed.next(p.speed);
-        let interior = self.interior.next(p.interior);
-        let (eng, pops) = self.engine_sample(p);
-        let (tl, tr) = self.tyre_sample(speed);
-        let turbo = self.turbo_sample(p);
-        // Gear whine: straight-cut gears, pitch from the input shaft and gear.
+        let inside = self.interior.next(p.interior);
+        let out = 1.0 - inside;
+        let eng = self.engine.sample(&p);
+        let ty = self.tyres.sample(&p, speed);
+        let body = self.body.sample(&p);
+        let turbo = self.turbo.sample(self.engine.load.v, self.engine.rpm.v);
+        // Gear whine: straight-cut gears; the input shaft mesh and the final drive, louder
+        // under load and on the overrun, much louder inside.
         let e = &self.engine;
         let shaft = e.rpm.v / 60.0;
-        let wf = shaft * (17.0 + 2.0 * p.gear.max(1) as f32);
-        let wl = self.whine_lvl.next(if p.gear != 0 { (0.25 + e.load.v) * smoothstep(2.0, 12.0, speed) } else { 0.0 });
-        let whine = self.whine.next(wf) * wl * (0.006 + 0.01 * interior);
-        // Wind.
+        let g = p.gear.max(1) as f32;
+        let wf = shaft * (17.0 + 2.0 * g);
+        let wl = self.whine_lvl.next(if p.gear != 0 { (0.3 + 0.7 * e.load.v) * smoothstep(2.0, 12.0, speed) } else { 0.0 });
+        let whine = (self.whine.next(wf) + 0.35 * self.whine2.next(wf * 2.0)) * wl * (0.004 + 0.012 * inside);
+        // Wind. Outside: rushing air. Inside: low buffeting and a door-seal whistle.
         let gust = 0.8 + 0.2 * self.gust.next(&mut self.n);
         let wn = self.n.white();
-        let w = self.wind_lp.run(wn) * 1.4 + self.wind_hiss.run(wn) * 0.35;
-        let wind = w * (speed / 40.0).powi(2).min(1.5) * 0.22 * gust;
-        // One-shots.
-        let mut hl = 0.0;
-        let mut hr = 0.0;
-        for h in &mut self.hits {
-            if h.noise.active() || h.thud.active() {
-                let nz = self.n.white() * h.noise.next();
-                let m: f32 = h.metal.iter_mut().map(|m| m.next()).sum();
-                let s = h.thud.next() + nz * 0.6 + m;
-                let (a, b) = pan(h.pan);
-                hl += s * a;
-                hr += s * b;
-            }
-        }
-        for t in &mut self.thumps {
-            if t.0.active() || t.1.active() {
-                let s = t.0.next() + self.n.white() * t.1.next();
-                let (a, b) = pan(t.2);
-                hl += s * a;
-                hr += s * b;
-            }
-        }
-        let clunk = self.clunk.next() + self.clunk_tick.next();
-        // Outside sounds through the cabin filter.
-        let outside_l = self.cabin.lp(tl + wind * (1.0 - 0.5 * interior));
-        let outside_r = outside_l + (tr - tl) * (1.0 - interior);
-        // The engine is louder/boomier from the bonnet camera, pops louder outside.
-        let eng = eng * (1.0 + 0.3 * interior) + pops * (1.0 - 0.4 * interior);
-        let mono = eng + turbo + whine + clunk;
-        let l = (mono + outside_l + hl) * act;
-        let r = (mono + outside_r + hr) * act;
-        (l, r)
-    }
-
-    #[inline]
-    fn engine_sample(&mut self, p: CarParams) -> (f32, f32) {
-        let e = &mut self.engine;
-        let n = &mut e.n;
-        let redline = p.redline;
-        let at_limit = p.rpm >= redline - 80.0 && p.throttle > 0.5;
-        // Limiter bounce: cut ignition about half of each ~70 ms cycle.
-        let mut cut = p.shifting;
-        let mut lim_cut = false;
-        if at_limit {
-            e.limiter += 14.0 / RATE;
-            if e.limiter >= 1.0 {
-                e.limiter -= 1.0;
-            }
-            lim_cut = e.limiter < 0.45;
-            cut |= lim_cut;
-        } else {
-            e.limiter = 0.5;
-        }
-        let load = e.load.next(if cut { 0.0 } else { p.throttle });
-        let level = e.level.next(if p.active { 1.0 } else { 0.0 });
-        let idle_factor = 1.0 - smoothstep(p.idle_rpm, p.idle_rpm + 1500.0, p.rpm);
-        let wob = e.wobble.next(n);
-        let dip = if at_limit && cut { 0.97 } else { 1.0 };
-        let rpm = e.rpm.next(p.rpm * dip) * (1.0 + 0.008 * wob * idle_factor);
-        let rpm_n = ((rpm - p.idle_rpm) / (redline - p.idle_rpm)).clamp(0.0, 1.0);
-        let overrun = (1.0 - load) * smoothstep(2200.0, 4500.0, rpm);
-        e.crackle *= 1.0 - 1.0 / (1.4 * RATE);
-        // Fire at quarter-cycle boundaries (one cycle = two revolutions).
-        let prev = (e.phase * 4.0) as u32;
-        e.phase += rpm / 120.0 / RATE;
-        if e.phase >= 1.0 {
-            e.phase -= 1.0;
-        }
-        let cyl = (e.phase * 4.0) as u32;
-        let mut impulse = 0.0;
-        let mut pops = 0.0;
-        if cyl != prev {
-            let jitter = 1.0 + (0.18 * idle_factor + 0.05) * n.white();
-            // Cylinder-to-cylinder differences: a lumpy burble at idle, evened out higher up.
-            let cg = 1.0 + (CYL_GAIN[cyl as usize & 3] - 1.0) * (0.25 + 0.75 * idle_factor);
-            let base = (0.3 + 0.7 * load) * (0.55 + 0.45 * rpm_n) * cg * jitter;
-            // A gear change drops to an overrun burble; the limiter cuts harder.
-            let fired = if lim_cut { 0.1 } else if cut { 0.45 } else { 1.0 - 0.55 * overrun };
-            impulse = base * fired;
-            e.burst.trigger(base * fired * (0.15 + 0.5 * load), 0.006 + 0.01 * (1.0 - rpm_n));
-            // Backfire: unburnt fuel lighting in the exhaust on overrun and on the limiter.
-            let chance = if lim_cut { 0.22 } else { 0.07 * overrun * e.crackle };
-            if p.active && n.chance(chance) {
-                let pop = &mut e.pops[e.next_pop];
-                e.next_pop = (e.next_pop + 1) % 3;
-                let a = n.range(0.5, 1.0);
-                pop.noise.trigger(0.6 * a, n.range(0.02, 0.05));
-                pop.boom.trigger(n.range(65.0, 95.0), 0.12, 0.5 * a);
-                pop.crack.set_bandpass(n.range(1800.0, 3200.0), 0.9);
-            }
-        }
-        // Pulse shaping: impulse → two one-poles (normalised to ~unit peak per firing).
-        let k = e.shape_a.coeff().max(1e-4);
-        let x = e.shape_a.lp(impulse * std::f32::consts::E / k);
-        let pulse = e.shape_b.lp(x);
-        let comb = n.white() * e.burst.next();
-        let src = pulse + comb;
-        let body = e.body.run(src) * 1.1;
-        let mid = e.mid.run(src) * 0.6;
-        let rasp = e.rasp.run(src) * (0.15 + 0.4 * load);
-        let intake = e.intake.run(n.white() * (0.2 + pulse.abs())) * 0.12 * load * (0.3 + rpm_n);
-        let raw = e.tone.run(pulse * 0.35 + body + mid + rasp) + intake;
-        let eng = e.dc.hp(raw) * 1.1 * level;
-        for pop in &mut e.pops {
-            if pop.noise.active() || pop.boom.active() {
-                let nz = n.white() * pop.noise.next();
-                pops += pop.crack.run(nz) * 1.4 + nz * 0.3 + pop.boom.next();
-            }
-        }
-        (eng, pops * 0.5 * level)
-    }
-
-    #[inline]
-    fn turbo_sample(&mut self, p: CarParams) -> f32 {
-        let t = &mut self.turbo;
-        let e = &self.engine;
-        // Boost builds with load above ~2500 rpm (lag), bleeds off on lift.
-        let target = e.load.v * smoothstep(2400.0, 5200.0, e.rpm.v);
-        let rate = if target > t.boost { 1.3 } else { 4.0 };
-        t.boost += (target - t.boost) * rate / RATE;
-        let shaft = t.shaft.next(t.boost.max(smoothstep(1500.0, 7000.0, e.rpm.v) * 0.25));
-        let wf = 2400.0 + 5200.0 * shaft;
-        let n = &mut t.n;
-        let whistle = t.whistle.next(wf) * shaft * shaft * 0.012 + t.hiss.run(n.white()) * shaft * 0.05;
-        let mut bov = 0.0;
-        if t.bov.active() {
-            t.bov_f = (t.bov_f * (1.0 - 1.6 / RATE)).max(1200.0);
-            bov = t.bov_bp.run(n.white()) * t.bov.next();
-        }
-        if t.flutter.active() {
-            // Compressor surge "stu-tu-tu".
-            let am = 0.5 + 0.5 * t.flutter_osc.next(22.0);
-            bov += t.bov_bp.run(n.white()) * t.flutter.next() * am * am;
-        }
-        let _ = p;
-        whistle + bov
-    }
-
-    #[inline]
-    fn tyre_sample(&mut self, speed: f32) -> (f32, f32) {
-        let p = self.p;
-        let t = &mut self.tyres;
-        let n = &mut t.n;
-        let mut roll = [0.0f32; SURFACES];
-        let mut slide = [0.0f32; SURFACES];
-        for i in 0..SURFACES {
-            roll[i] = t.roll[i].next(p.surfaces[i].roll);
-            slide[i] = t.slide[i].next(p.surfaces[i].slide);
-        }
-        let wn = n.white();
-        let mut mono = 0.0;
-        // Gravel: crunch grains + low rumble, a broadband hiss when sliding, stones.
-        let (gr, gs) = (roll[GRAVEL], slide[GRAVEL]);
-        // Snow: denser, higher, squeakier grains.
-        let (sr, ss) = (roll[SNOW], slide[SNOW]);
-        if gr + gs + sr + ss > 1e-4 {
-            let rate = (gr * 70.0 + gs * 160.0) / RATE;
-            if n.chance(rate) {
-                t.grain.trigger(n.range(0.3, 1.0), n.range(0.003, 0.009));
-            }
-            let srate = (sr * 110.0 + ss * 200.0) / RATE;
-            if n.chance(srate) {
-                t.snow_grain.trigger(n.range(0.3, 1.0), n.range(0.002, 0.005));
-            }
-            let g = t.gravel_bp.run(wn) * (gr * 0.05 + gs * 0.045)
-                + t.grain_f.run(wn * t.grain.next()) * (0.16 + 0.1 * gs) * (gr + gs).min(1.5)
-                + t.gravel_lo.run(wn) * gr * 0.25
-                + t.slide_bp.run(wn) * gs * 0.045;
-            let s = t.snow_bp.run(wn * (0.12 + t.snow_grain.next())) * (sr * 0.25 + ss * 0.35);
-            mono += g + s;
-        }
-        // Tarmac: low road roar; squeal when slip goes past the peak.
-        let (tr, ts) = (roll[TARMAC], slide[TARMAC]);
-        if tr + ts > 1e-4 {
-            mono += t.tarmac_lo.run(wn) * tr * 0.12;
-            let sq = smoothstep(0.25, 0.9, ts);
-            if sq > 1e-4 {
-                let v = t.squeal_wander.next(n);
-                let f = (820.0 + 260.0 * ts.min(2.0)) * (1.0 + 0.04 * v);
-                let tone = t.squeal.next(f) * 0.6 + t.squeal_bp.run(wn) * 2.0;
-                mono += tone * sq * 0.07 * (0.7 + 0.3 * v.abs());
-            }
-        }
-        // Mud: low squelch with a wet resonance that wanders.
-        let (mr, ms) = (roll[MUD], slide[MUD]);
-        if mr + ms > 1e-4 {
-            let v = t.mud_wander.next(n);
-            let am = (0.6 + 0.4 * v).max(0.0);
-            mono += t.mud_lo.run(wn) * (mr * 0.3 + ms * 0.25) * am + t.mud_slurp.run(wn) * (ms * 0.12 + mr * 0.04) * am * am;
-        }
-        // Off the road: grass swish and bumps.
-        let (or, os) = (roll[OFFROAD], slide[OFFROAD]);
-        if or + os > 1e-4 {
-            let b = t.rumble_wander.next(n).abs();
-            mono += t.grass_hp.run(wn) * (or * 0.03 + os * 0.04) + t.rumble.run(wn) * or * (0.18 + 0.45 * b);
-        }
-        // Stones flicked into the arches (gravel mostly, some off-road).
-        let stone_rate = ((gr + or * 0.4) * 2.5 + (gs + os * 0.3) * 6.0) * smoothstep(3.0, 15.0, speed) / RATE;
-        if n.chance(stone_rate) {
-            let (ring, pan_x) = &mut t.pings[t.next_ping];
-            t.next_ping = (t.next_ping + 1) % 8;
-            ring.trigger(n.range(1800.0, 6500.0), n.range(0.02, 0.07), n.range(0.015, 0.06));
-            *pan_x = n.range(-0.8, 0.8);
-        }
-        let mut l = mono;
-        let mut r = mono;
-        for (ring, px) in &mut t.pings {
-            if ring.active() {
-                let s = ring.next();
-                let (a, b) = pan(*px);
-                l += s * a;
-                r += s * b;
-            }
-        }
+        let v2 = (speed / 40.0).powi(2).min(1.5) * gust;
+        let rush = (self.wind_lp.run(wn) * 1.4 + self.wind_hiss.run(wn) * 0.35) * v2 * 0.22;
+        let cabin_wind = (self.buffet.run(wn) * 2.2 + self.seal.run(wn) * 0.08) * v2 * 0.2;
+        // Exhaust: direct outside; through the bulkhead inside (dark, boomy).
+        let ex_out = eng.exhaust + eng.pops;
+        let ex_in = self.cabin_eng.run(eng.exhaust + 0.5 * eng.pops);
+        let boom = self.cabin_boom.run(eng.exhaust);
+        let exhaust = ex_out * out + (ex_in * 1.25 + boom * 0.7) * inside;
+        let mech = eng.mech * (0.6 + 0.9 * inside);
+        // Tyres: full band outside, muffled inside; stones on the floor are louder inside.
+        let tl = ty.l * out + self.cabin_l.run(ty.l + rush) * 0.6 * inside;
+        let tr = ty.r * out + self.cabin_r.run(ty.r + rush) * 0.6 * inside;
+        let floor = 0.65 + 0.7 * inside;
+        let shell = body.shell * (0.6 * inside);
+        let mono = exhaust + mech + turbo * (0.9 + 0.2 * inside) + whine + rush * out + cabin_wind * inside + shell;
+        let l = (mono + tl + ty.floor_l * floor + body.l) * act;
+        let r = (mono + tr + ty.floor_r * floor + body.r) * act;
         (l, r)
     }
 }
@@ -622,6 +284,10 @@ mod tests {
         (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt()
     }
 
+    fn peak(x: &[f32]) -> f32 {
+        x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+    }
+
     fn driving(rpm: f32, throttle: f32) -> CarParams {
         CarParams { active: true, rpm, throttle, gear: 3, speed: 20.0, ..default() }
     }
@@ -632,8 +298,23 @@ mod tests {
 
     fn check(out: &[f32], max: f32) {
         assert!(out.iter().all(|v| v.is_finite()), "NaN/inf");
-        let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        let peak = peak(out);
         assert!(peak < max, "peak {peak}");
+    }
+
+    /// Energy above `hz` over total (Goertzel probes on a log grid).
+    fn brightness(x: &[f32], hz: f32) -> f32 {
+        let (mut hi, mut all) = (0.0, 0.0);
+        let mut f = 60.0;
+        while f < 12_000.0 {
+            let e = goertzel(x, f);
+            all += e;
+            if f > hz {
+                hi += e;
+            }
+            f *= 1.12;
+        }
+        hi / all.max(1e-20)
     }
 
     #[test]
@@ -668,20 +349,28 @@ mod tests {
                 p.surfaces[GRAVEL] = Contact { roll: 1.4, slide: 2.0 };
                 p.surfaces[TARMAC] = Contact { roll: 0.5, slide: 2.0 };
                 p.surfaces[OFFROAD] = Contact { roll: 1.0, slide: 1.0 };
+                p.surfaces[MUD] = Contact { roll: 1.0, slide: 1.0 };
+                p.surfaces[SNOW] = Contact { roll: 1.0, slide: 1.0 };
+                p.engine_damage = 1.0;
+                p.susp_damage = 1.0;
+                p.scrape = 30.0;
+                p.rough = 3.0;
                 s.set(p);
                 let out = run(&mut s, 0.25);
-                check(&out, 1.6);
+                check(&out, 2.0);
             }
         }
         for _ in 0..3 {
             s.event(CarEvent::Impact(30.0));
+            s.event(CarEvent::Ground(20.0));
             s.event(CarEvent::Thump(1.0, -1.0));
-            s.event(CarEvent::Shift);
+            s.event(CarEvent::Bottom(1.0, 1.0));
+            s.event(CarEvent::Shift(true));
         }
         let ev = run(&mut s, 0.5);
-        check(&ev, 3.5); // nine stacked worst-case one-shots; the stream soft-clips
+        check(&ev, 6.0); // 15 stacked worst-case one-shots; the stream's dynamics catch them
         // Garbage in, silence-or-sound out but never NaN.
-        s.set(CarParams { active: true, rpm: f32::NAN, throttle: f32::INFINITY, speed: -5.0, interior: 7.0, ..default() });
+        s.set(CarParams { active: true, rpm: f32::NAN, throttle: f32::INFINITY, speed: -5.0, interior: 7.0, engine_damage: f32::NAN, scrape: f32::INFINITY, ..default() });
         let g = run(&mut s, 0.2);
         check(&g, 2.0);
     }
@@ -704,6 +393,10 @@ mod tests {
             // Wrong rpm's harmonics are weak.
             let wrong: f32 = (1..=3).map(|k| goertzel(x, f * 1.37 * k as f32)).sum();
             assert!(on > 4.0 * wrong, "rpm {rpm}: on {on} wrong {wrong}");
+            // Uneven cylinders: some half-order (rpm/60 multiples) content, well below the
+            // firing harmonics.
+            let half: f32 = (0..6).map(|k| goertzel(x, f * (k as f32 + 0.5))).sum();
+            assert!(half > on * 1e-4 && half < on * 0.5, "rpm {rpm}: half-orders {half} vs {on}");
         }
     }
 
@@ -725,6 +418,27 @@ mod tests {
         assert!(bright > dull * 2.0, "{bright} vs {dull}");
     }
 
+    /// At low rpm the firings are pulses with the pipe ringing between them, not isolated
+    /// clicks in silence.
+    #[test]
+    fn low_rpm_is_pulses_not_clicks() {
+        let mut s = CarSynth::new(4);
+        let mut p = driving(1300.0, 1.0);
+        p.speed = 0.0;
+        s.set(p);
+        let x = mono(&run(&mut s, 1.0));
+        let x = &x[24_000..];
+        // Over one firing period (rpm/30 Hz → 1100 samples), the share of samples within
+        // 5 % of the peak level must not be tiny (a click train sits near zero most of the
+        // time).
+        let pk = peak(x);
+        let busy = x.iter().filter(|v| v.abs() > pk * 0.05).count() as f32 / x.len() as f32;
+        assert!(busy > 0.3, "busy {busy}");
+        // Crest factor of a click train is huge; pulses with ringing are moderate.
+        let crest = pk / rms(x);
+        assert!(crest < 8.0, "crest {crest}");
+    }
+
     #[test]
     fn lift_off_pops_and_blow_off() {
         let mut s = CarSynth::new(11);
@@ -737,9 +451,32 @@ mod tests {
         let mut pops = 0;
         for _ in 0..40 {
             run(&mut s, 0.02);
-            pops += s.engine.pops.iter().filter(|p| p.noise.active()).count().min(1);
+            pops += s.engine.popping() as u32;
         }
         assert!(pops > 0, "some backfire pops in the first 0.8 s of overrun");
+    }
+
+    #[test]
+    fn upshift_under_power_bangs_and_downshift_blips() {
+        let mut bangs = 0;
+        for seed in 0..8 {
+            let mut s = CarSynth::new(seed);
+            s.set(driving(7000.0, 1.0));
+            run(&mut s, 0.3);
+            s.event(CarEvent::Shift(true));
+            bangs += s.engine.popping() as u32;
+        }
+        assert!(bangs >= 4, "upshift bangs {bangs}/8");
+        // Downshift: a short blip of load on the overrun.
+        let mut s = CarSynth::new(1);
+        s.set(driving(4000.0, 0.0));
+        run(&mut s, 0.5);
+        let before = s.engine.load.v;
+        s.event(CarEvent::Shift(false));
+        run(&mut s, 0.05);
+        assert!(s.engine.load.v > before + 0.3, "blip {} → {}", before, s.engine.load.v);
+        run(&mut s, 0.4);
+        assert!(s.engine.load.v < 0.1, "blip ends");
     }
 
     #[test]
@@ -755,70 +492,160 @@ mod tests {
         assert!(hi > lo * 2.5, "lo {lo} hi {hi}");
     }
 
-    #[test]
-    fn tyres_by_surface_and_slip() {
-        let level = |surface: usize, roll: f32, slide: f32| {
-            let mut s = CarSynth::new(8);
-            let mut p = CarParams { active: true, rpm: 0.0, speed: 20.0, ..default() };
-            p.surfaces[surface] = Contact { roll, slide };
-            s.set(p);
-            // Subtract the engine/wind-only reference.
-            let out = mono(&run(&mut s, 0.6));
-            let mut r = CarSynth::new(8);
-            r.set(CarParams { active: true, rpm: 0.0, speed: 20.0, ..default() });
-            let base = mono(&run(&mut r, 0.6));
-            let d: Vec<f32> = out.iter().zip(&base).map(|(a, b)| a - b).collect();
-            rms(&d[9600..])
-        };
-        for surf in [GRAVEL, TARMAC, MUD, SNOW, OFFROAD] {
-            let roll = level(surf, 1.0, 0.0);
-            let slide = level(surf, 1.0, 1.5);
-            assert!(roll > 1e-3 || surf == TARMAC && roll > 3e-4, "surface {surf} rolls: {roll}");
-            assert!(slide > roll * 1.2, "surface {surf}: slide {slide} vs roll {roll}");
-            assert!(slide < 0.5);
-        }
-        // Squeal is tonal on tarmac.
-        let mut s = CarSynth::new(1);
+    /// The tyre part alone: the car with and without the contact, same seed, subtracted.
+    fn tyre_level(surface: usize, roll: f32, slide: f32) -> (f32, Vec<f32>) {
+        let mut s = CarSynth::new(8);
         let mut p = CarParams { active: true, rpm: 0.0, speed: 20.0, ..default() };
-        p.surfaces[TARMAC] = Contact { roll: 1.0, slide: 1.5 };
+        p.surfaces[surface] = Contact { roll, slide };
         s.set(p);
-        let out = mono(&run(&mut s, 0.6));
-        let f = 820.0 + 260.0 * 1.5;
-        let near: f32 = [-30.0, -15.0, 0.0, 15.0, 30.0].iter().map(|d| goertzel(&out[9600..], f + d)).sum();
-        let far: f32 = [-30.0, -15.0, 0.0, 15.0, 30.0].iter().map(|d| goertzel(&out[9600..], 2.6 * f + d)).sum();
-        assert!(near > 4.0 * far, "near {near} far {far}");
+        let out = mono(&run(&mut s, 0.8));
+        let mut r = CarSynth::new(8);
+        r.set(CarParams { active: true, rpm: 0.0, speed: 20.0, ..default() });
+        let base = mono(&run(&mut r, 0.8));
+        let d: Vec<f32> = out.iter().zip(&base).map(|(a, b)| a - b).collect();
+        (rms(&d[9600..]), d[9600..].to_vec())
     }
 
-    /// `cargo test --lib report_levels -- --ignored --nocapture`: peak/RMS per scenario.
+    #[test]
+    fn tyres_by_surface_and_slip() {
+        for surf in [GRAVEL, TARMAC, MUD, SNOW, OFFROAD] {
+            let (roll, _) = tyre_level(surf, 1.0, 0.0);
+            let (slide, _) = tyre_level(surf, 1.0, 1.5);
+            assert!(roll > 3e-3, "surface {surf} rolls: {roll}");
+            assert!(slide > roll * 1.4, "surface {surf}: slide {slide} vs roll {roll}");
+            assert!(slide < 0.5);
+        }
+        // Squeal is tonal on tarmac: the saw's harmonics stand out of the scrub around them.
+        let (_, d) = tyre_level(TARMAC, 1.0, 1.5);
+        let f0 = 420.0 + 90.0 * 1.5;
+        let on: f32 = (1..=5).map(|k| goertzel(&d, f0 * k as f32)).sum();
+        let off: f32 = (1..=5).map(|k| goertzel(&d, f0 * (k as f32 + 0.5))).sum();
+        assert!(on > 3.0 * off, "on {on} off {off}");
+        // Surfaces sound different: their spectra (brightness above 1.5 kHz) differ.
+        let b: Vec<f32> = [GRAVEL, TARMAC, MUD, SNOW].iter().map(|&s| brightness(&tyre_level(s, 1.0, 0.0).1, 1500.0)).collect();
+        assert!(b[MUD] < b[GRAVEL] && b[MUD] < b[SNOW], "mud is the darkest: {b:?}");
+        assert!(b[SNOW] > b[TARMAC], "snow squeaks above tarmac hum: {b:?}");
+    }
+
+    #[test]
+    fn wind_grows_with_speed() {
+        let level = |speed: f32| {
+            let mut s = CarSynth::new(6);
+            s.set(CarParams { active: true, rpm: 0.0, speed, ..default() });
+            let out = mono(&run(&mut s, 0.5));
+            rms(&out[12_000..])
+        };
+        let (slow, fast) = (level(5.0), level(40.0));
+        assert!(fast > slow * 10.0, "{slow} {fast}");
+        assert!(fast < 0.5);
+    }
+
+    #[test]
+    fn damaged_engine_misfires_and_knocks() {
+        // Engine alone: per-firing energy varies far more when damaged (misfires), and the
+        // mechanical output (intake, valve train, knock) gains a knock band.
+        let measure = |dmg: f32| {
+            let mut e = crate::audio::powertrain::Engine::new(3);
+            let mut p = driving(3000.0, 1.0);
+            p.engine_damage = dmg;
+            e.set(&p);
+            let (mut ex, mut mech) = (Vec::new(), Vec::new());
+            for i in 0..144_000 {
+                if i % 32 == 0 {
+                    e.update_coeffs(&p);
+                }
+                let o = e.sample(&p);
+                ex.push(o.exhaust);
+                mech.push(o.mech);
+            }
+            // 100 Hz firing → 480 samples per firing.
+            let fe: Vec<f32> = ex[48_000..].chunks(480).map(rms).collect();
+            let mean = fe.iter().sum::<f32>() / fe.len() as f32;
+            let var = fe.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / fe.len() as f32;
+            let knock: f32 = (0..10).map(|k| goertzel(&mech[48_000..], 1100.0 + 80.0 * k as f32)).sum();
+            (var.sqrt() / mean, knock)
+        };
+        let (ok, ok_k) = measure(0.0);
+        let (bad, bad_k) = measure(0.85);
+        assert!(bad > ok * 2.0, "firing spread healthy {ok} damaged {bad}");
+        assert!(bad_k > ok_k * 3.0, "knock {ok_k} → {bad_k}");
+    }
+
+    #[test]
+    fn scrape_rattle_and_hits_are_heard() {
+        let lvl = |p: CarParams, ev: Option<CarEvent>| {
+            let mut s = CarSynth::new(2);
+            s.set(p);
+            run(&mut s, 0.2);
+            if let Some(e) = ev {
+                s.event(e);
+            }
+            let x = mono(&run(&mut s, 0.6));
+            (rms(&x), peak(&x))
+        };
+        let quiet = CarParams { active: true, rpm: 0.0, speed: 8.0, ..default() };
+        let (base, _) = lvl(quiet, None);
+        let (scrape, _) = lvl(CarParams { scrape: 8.0, ..quiet }, None);
+        assert!(scrape > base * 3.0, "scrape {scrape} vs {base}");
+        let rough = CarParams { rough: 1.5, ..quiet };
+        let (tight, _) = lvl(rough, None);
+        let (loose, _) = lvl(CarParams { susp_damage: 0.8, ..rough }, None);
+        assert!(loose > tight * 1.5, "rattles with damage {loose} vs {tight}");
+        let (_, small) = lvl(quiet, Some(CarEvent::Impact(4.0)));
+        let (_, big) = lvl(quiet, Some(CarEvent::Impact(20.0)));
+        assert!(big > small * 1.8, "impact scales: {small} → {big}");
+        let (_, bottom) = lvl(quiet, Some(CarEvent::Bottom(1.0, 0.0)));
+        assert!(bottom > 0.1, "bottoming out {bottom}");
+    }
+
+    #[test]
+    fn inside_is_darker_with_more_mechanism() {
+        let render = |interior: f32| {
+            let mut s = CarSynth::new(5);
+            let mut p = driving(5000.0, 1.0);
+            p.speed = 25.0;
+            p.surfaces[GRAVEL] = Contact { roll: 1.0, slide: 0.3 };
+            p.interior = interior;
+            s.set(p);
+            run(&mut s, 0.5);
+            mono(&run(&mut s, 1.0))
+        };
+        let (outside, inside) = (render(0.0), render(1.0));
+        let (bo, bi) = (brightness(&outside, 2000.0), brightness(&inside, 2000.0));
+        assert!(bi < bo * 0.7, "inside is muffled: {bi} vs {bo}");
+        // Gear whine (input shaft × 23 at 3rd) is louder inside.
+        let wf = 5000.0 / 60.0 * 23.0;
+        assert!(goertzel(&inside, wf) > goertzel(&outside, wf) * 2.0);
+    }
+
+    /// No discontinuities: a long rpm sweep with throttle stabs never jumps sample to sample
+    /// more than the signal's own movement allows, and the output never sits in denormals.
+    #[test]
+    fn sweeps_are_smooth_and_never_denormal() {
+        let mut s = CarSynth::new(12);
+        let mut out = Vec::new();
+        for i in 0..300 {
+            let t = i as f32 / 100.0;
+            let mut p = driving(1000.0 + 2000.0 * t, if (i / 40) % 2 == 0 { 1.0 } else { 0.0 });
+            p.speed = 10.0 + 5.0 * t;
+            p.surfaces[TARMAC] = Contact { roll: 0.8, slide: if (i / 70) % 2 == 0 { 0.0 } else { 1.2 } };
+            s.set(p);
+            out.extend(mono(&run(&mut s, 0.01)));
+        }
+        let d2: Vec<f32> = out.windows(3).map(|w| (w[2] - 2.0 * w[1] + w[0]).abs()).collect();
+        let typical = rms(&d2);
+        let worst = d2.iter().fold(0.0f32, |m, v| m.max(*v));
+        assert!(worst < typical * 40.0, "worst step {worst} vs typical {typical}");
+        // Silence after: decays to exact zeros, not denormals.
+        s.set(CarParams { active: false, ..default() });
+        let tail = run(&mut s, 3.0);
+        assert!(tail.iter().all(|v| *v == 0.0 || v.abs() > 1e-30), "denormal output");
+    }
+
+    /// `cargo test --lib report_levels -- --ignored --nocapture`: levels per scenario.
     #[test]
     #[ignore]
     fn report_levels() {
-        let parts = |s: &mut CarSynth| {
-            let mut o = [0.0f32; 4];
-            for _ in 0..4800 {
-                let p = s.p;
-                let (e, pops) = s.engine_sample(p);
-                let t = s.turbo_sample(p);
-                let (tl, _) = s.tyre_sample(p.speed);
-                for (i, v) in [e, pops, t, tl].into_iter().enumerate() {
-                    o[i] = o[i].max(v.abs());
-                }
-            }
-            o
-        };
-        for rpm in [950.0, 2500.0, 5000.0, 7600.0, 8200.0] {
-            for th in [0.0, 1.0] {
-                let mut s = CarSynth::new(9);
-                let mut p = driving(rpm, th);
-                p.speed = 35.0;
-                p.surfaces[GRAVEL] = Contact { roll: 1.4, slide: 2.0 };
-                s.set(p);
-                run(&mut s, 0.5);
-                let out = mono(&run(&mut s, 0.5));
-                let pk = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-                println!("rpm {rpm:5} th {th}: rms {:.3} peak {pk:.3} parts(eng,pops,turbo,tyre) {:?}", rms(&out), parts(&mut s));
-            }
-        }
         let lvl = |p: CarParams| {
             let mut s = CarSynth::new(9);
             s.set(p);
@@ -852,26 +679,13 @@ mod tests {
                 println!("surface {surf} roll {r} slide {sl}: rms {:.4}", lvl(p));
             }
         }
-        for (name, ev) in [("impact", CarEvent::Impact(30.0)), ("impact5", CarEvent::Impact(5.0)), ("thump", CarEvent::Thump(1.0, 0.0)), ("shift", CarEvent::Shift)] {
+        for (name, ev) in [("impact", CarEvent::Impact(30.0)), ("impact5", CarEvent::Impact(5.0)), ("thump", CarEvent::Thump(1.0, 0.0)), ("bottom", CarEvent::Bottom(1.0, 0.0)), ("shift", CarEvent::Shift(true))] {
             let mut s = CarSynth::new(9);
             s.set(CarParams { active: true, rpm: 0.0, ..default() });
             run(&mut s, 0.2);
             s.event(ev);
             let out = run(&mut s, 0.5);
-            println!("{name}: peak {:.3}", out.iter().fold(0.0f32, |m, v| m.max(v.abs())));
+            println!("{name}: peak {:.3}", peak(&out));
         }
-    }
-
-    #[test]
-    fn wind_grows_with_speed() {
-        let level = |speed: f32| {
-            let mut s = CarSynth::new(6);
-            s.set(CarParams { active: true, rpm: 0.0, speed, ..default() });
-            let out = mono(&run(&mut s, 0.5));
-            rms(&out[12_000..])
-        };
-        let (slow, fast) = (level(5.0), level(40.0));
-        assert!(fast > slow * 10.0, "{slow} {fast}");
-        assert!(fast < 0.5);
     }
 }
