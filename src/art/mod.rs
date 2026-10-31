@@ -10,6 +10,7 @@
 pub mod car;
 pub mod dressing;
 pub mod ground;
+pub mod hands;
 pub mod look;
 pub mod meshfile;
 pub mod spray;

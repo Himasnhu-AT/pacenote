@@ -6,7 +6,9 @@ Every file under `assets_src/` is listed here. Only CC0 and CC BY licences are u
 
 ## Credits that must appear in the game (CC BY)
 
-- None at the moment. (The CC BY Car Concept below is no longer shipped: the game's car is an original procedural model, `tools/art/build_rallycar.py`. Restore its credit line if it is ever used again.)
+- "Milano '95 - Low poly model" by Daniel Zhabotinsky, CC BY 4.0 (car body; see models/sketchfab below).
+- "First Person arms" by DJMaesen (bumstrum), CC BY 4.0 (driver's arms; see models/sketchfab below).
+- Both lines are in `assets/credits.txt`. (The CC BY Car Concept below is no longer shipped. Restore its credit line if it is ever used again.)
 
 CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and models from Poly Haven (polyhaven.com) and ambientCG (ambientcg.com), CC0. Smoke sprites by Kenney (kenney.nl), CC0. Hay bale and fence by carlosjorgereis (OpenGameArt), CC0."
 
@@ -24,6 +26,35 @@ CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and mo
 - **Size:** 11.8 MB
 - **Resolution / polys:** 213,347 tris, 14 embedded textures, GLB
 - **Credit line:** REQUIRED: "Car Concept" by Eric Chadwick, © 2024 Darmstadt Graphics Group GmbH, based on a CC0 model by Unity Fan. Licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Modified.
+
+
+## models/sketchfab
+
+Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; converted by `tools/art/import_sketchfab.py`. Licence facts read from the Sketchfab API (`https://api.sketchfab.com/v3/models/<uid>`) on 2026-10-31.
+
+### Milano '95 - Low poly model (`milano_95`)
+
+- **Use:** Car body (exterior, glass, wheels). Its own interior is dropped; the cockpit is ours (`tools/art/cockpit.py`).
+- **Path:** `assets_src/sketchfab/` (as downloaded)
+- **Source page:** https://sketchfab.com/3d-models/milano-95-low-poly-model-122a22d210234596ad23623588d0d166
+- **Download:** Sketchfab download dialog (login required), by the owner
+- **Author:** Daniel Zhabotinsky (https://sketchfab.com/DanielZhabotinsky)
+- **Licence:** CC BY 4.0 (Sketchfab "CC Attribution": "Author must be credited. Commercial use is allowed.", http://creativecommons.org/licenses/by/4.0/). The description adds: "I unconditionally give you permission to use this model at your discretion, modify it or implement it into a digital product."
+- **Size:** not known until downloaded
+- **Resolution / polys:** 18,064 faces, 11,130 vertices; 8 materials, 20 textures (Sketchfab API)
+- **Credit line:** REQUIRED: "Milano '95 - Low poly model" by Daniel Zhabotinsky (sketchfab.com/DanielZhabotinsky), licensed under CC BY 4.0. Modified: scaled, wheels split, interior replaced.
+
+### First Person arms (`first_person_arms`)
+
+- **Use:** The driver's arms and gloved hands in the cockpit view, posed by `src/art/hands.rs`.
+- **Path:** `assets_src/sketchfab/` (as downloaded)
+- **Source page:** https://sketchfab.com/3d-models/first-person-arms-e3c42c05b22944e5839deb8e003f0987
+- **Download:** Sketchfab download dialog (login required), by the owner
+- **Author:** DJMaesen (Sketchfab user bumstrum, https://sketchfab.com/bumstrum)
+- **Licence:** CC BY 4.0 (Sketchfab "CC Attribution", http://creativecommons.org/licenses/by/4.0/)
+- **Size:** not known until downloaded
+- **Resolution / polys:** 7,240 faces, 3,624 vertices; "rigged low poly first person arms 2k maps" (Sketchfab API)
+- **Credit line:** REQUIRED: "First Person arms" by DJMaesen (sketchfab.com/bumstrum), licensed under CC BY 4.0. Modified: rigged to the cockpit, recoloured.
 
 
 ## textures/ground

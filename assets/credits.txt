@@ -5,7 +5,11 @@ Pacenote:
 An original two-person rally game.
 
 Car:
-The rally car and its livery are original, modelled for Pacenote.
+Body: "Milano '95 - Low poly model" by Daniel Zhabotinsky (sketchfab.com/DanielZhabotinsky), licensed under CC BY 4.0 (creativecommons.org/licenses/by/4.0). Modified: scaled, wheels split, interior replaced.
+The cockpit, livery and wheels are original, modelled for Pacenote.
+
+Driver:
+Arms: "First Person arms" by DJMaesen (sketchfab.com/bumstrum), licensed under CC BY 4.0 (creativecommons.org/licenses/by/4.0). Modified: rigged to the cockpit, recoloured.
 
 Textures, models and foliage (CC0, with thanks):
 Poly Haven (polyhaven.com): Rob Tuytel, Rico Cilliers, Amal Kumar, Dario Barresi, Dimitrios Savva, Charlotte Baglioni, Jenelle van Heerden, James Ray Cock, Kless Gyzen, eye-candy.xyz.

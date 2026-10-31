@@ -15,3 +15,4 @@
 # Packaging output (Steam folders, zips, steamcmd logs) and local Steam ids.
 /dist/
 /packaging/steam/ids.env
+__pycache__/

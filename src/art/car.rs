@@ -8,7 +8,8 @@
 //!
 //! Cockpit: the steering wheel turns with the road wheels (`STEERING_RATIO`), the tacho and
 //! speedo needles follow the engine and road speed, and the bonnet lamp pod is hidden in the
-//! cockpit and bonnet views (it would block the road). The body shell is single-sided, so
+//! cockpit and bonnet views (it would block the road). The driver's hands, arms and the gear
+//! and handbrake levers are animated in `hands.rs`. The body shell is single-sided, so
 //! from the driver's eye only the interior's own skin, dash and cage show.
 
 use bevy::prelude::*;
@@ -20,7 +21,7 @@ pub struct CarArtPlugin;
 
 impl Plugin for CarArtPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (rig, wheels, cockpit).chain());
+        app.add_systems(Update, (rig, wheels, cockpit, super::hands::find_levers, super::hands::find_arms, super::hands::animate).chain());
     }
 }
 
@@ -34,12 +35,23 @@ const COCKPIT_EYE_MODEL: Vec3 = Vec3::new(-0.37, 0.795, 0.60);
 
 /// Bonnet camera position in the car body's frame.
 pub fn bonnet_cam(s: &crate::vehicle::Spec) -> Vec3 {
-    BONNET_CAM_MODEL + Vec3::Y * model_height(s)
+    BONNET_CAM_MODEL + model_offset(s)
 }
 
 /// Driver's eye in the car body's frame.
 pub fn cockpit_eye(s: &crate::vehicle::Spec) -> Vec3 {
-    COCKPIT_EYE_MODEL + Vec3::Y * model_height(s)
+    COCKPIT_EYE_MODEL + model_offset(s)
+}
+
+/// The model's wheel centres (`build_rallycar.py` `HUB`): half track and half wheelbase, about
+/// the model origin. They match the sim's mounts (tested), so drawn and simulated wheels agree.
+pub const MODEL_HALF_TRACK: f32 = 0.78;
+pub const MODEL_HALF_WHEELBASE: f32 = 1.275;
+
+/// Where the model's origin sits in the body frame: at hub height (static load), midway between
+/// the axles (the centre of mass is nearer the front axle).
+pub fn model_offset(s: &crate::vehicle::Spec) -> Vec3 {
+    Vec3::new(0.0, model_height(s), (s.mounts[0].z + s.mounts[2].z) * 0.5)
 }
 
 /// Model tyre radius (m), from the prepared model.
@@ -82,9 +94,10 @@ pub fn spawn(world: &mut World, car: Entity) {
     }
     let spec = world.get_resource::<CarSpec>().map(|s| s.0.clone()).unwrap_or_default();
     let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset("models/rallycar.glb"));
-    let tf = Transform::from_xyz(0.0, model_height(&spec), 0.0);
+    let tf = Transform::from_translation(model_offset(&spec));
     let model = world.spawn((Name::new("car model"), CarModel, WorldAssetRoot(scene), tf, Visibility::default(), Actor)).id();
     world.entity_mut(car).add_child(model);
+    super::hands::spawn(world, car, model);
 }
 
 /// Finds the hub/spin nodes once the scene is in, tags every part as an `Actor` and gives the
@@ -210,10 +223,23 @@ mod tests {
     fn model_sits_on_its_wheels() {
         let s = crate::vehicle::Spec::default();
         let h = model_height(&s);
-        // Hubs ~0.5 m below the centre of mass; tyre bottoms reach the ground the sim uses.
-        assert!((-0.6..-0.45).contains(&h), "{h}");
+        // Hubs ~0.15 m below the centre of mass (which sits ~0.48 m off the ground); tyre
+        // bottoms reach the ground the sim uses.
+        assert!((-0.25..-0.08).contains(&h), "{h}");
         let ground = s.mounts[0].y - s.rest + (s.mass * 9.81 / 4.0 / s.spring) - s.wheel_radius;
         assert!((h - MODEL_WHEEL_RADIUS - ground).abs() < 1e-4);
+    }
+
+    #[test]
+    fn model_wheels_match_the_sim_mounts() {
+        let s = crate::vehicle::Spec::default();
+        let off = model_offset(&s);
+        let model = [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
+        for (m, (sx, sz)) in s.mounts.iter().zip(model) {
+            let x = sx * MODEL_HALF_TRACK + off.x;
+            let z = sz * MODEL_HALF_WHEELBASE + off.z;
+            assert!((m.x - x).abs() < 0.005 && (m.z - z).abs() < 0.005, "mount {m} vs model ({x}, {z})");
+        }
     }
 
     #[test]
