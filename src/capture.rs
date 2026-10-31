@@ -50,7 +50,7 @@ impl Plugin for CapturePlugin {
             .add_systems(
                 Last,
                 (
-                    grab.run_if(resource_exists::<FrameCount>),
+                    (log_text, grab).chain().run_if(resource_exists::<FrameCount>),
                     answer_waits.run_if(resource_exists::<PendingReplies>.and_then(resource_exists::<FrameCount>)),
                 ),
             )
@@ -80,6 +80,8 @@ struct Recorder {
     first_frame: u32,
     writer: Option<Writer>,
     csv: Option<std::io::BufWriter<std::fs::File>>,
+    /// `<path>.text.csv`: on-screen text that changed (co-driver subtitles, cards), by frame.
+    texts: Option<std::io::BufWriter<std::fs::File>>,
 }
 
 /// See `--capture-gate` in the module docs.
@@ -207,9 +209,10 @@ fn start(world: &mut World, p: Value) -> Result<Value, String> {
         dn.store(true, Ordering::Release);
     });
     let csv = std::fs::File::create(format!("{path}.csv")).ok().map(std::io::BufWriter::new);
+    let texts = std::fs::File::create(format!("{path}.text.csv")).ok().map(std::io::BufWriter::new);
     let f = frame(world) + 1;
     let mut r = world.resource_mut::<Recorder>();
-    *r = Recorder { on: true, requested: 0, first_frame: f, writer: Some(Writer { tx, written, done, expected }), csv };
+    *r = Recorder { on: true, requested: 0, first_frame: f, writer: Some(Writer { tx, written, done, expected }), csv, texts };
     if let Some(c) = r.csv.as_mut() {
         let _ = writeln!(c, "i,frame,clock,progress,kmh,rpm,gear,throttle,brake,handbrake,steer,impacts,retired,x,z,wall,vt");
     }
@@ -227,6 +230,10 @@ fn stop(world: &mut World, _: Value) -> Result<Value, String> {
         let _ = c.flush();
     }
     r.csv = None;
+    if let Some(c) = r.texts.as_mut() {
+        let _ = c.flush();
+    }
+    r.texts = None;
     Ok(json!({"requested": n}))
 }
 
@@ -257,6 +264,22 @@ fn answer_waits(frames: Res<FrameCount>, mut waits: ResMut<Waits>, mut pending: 
             true
         }
     });
+}
+
+/// Last, before `grab`: log on-screen text that changed this frame (words, not numbers), so
+/// co-driver lines can be voiced in the edit at the frame they appeared.
+fn log_text(mut rec: ResMut<Recorder>, time: Res<Time<Virtual>>, texts: Query<&Text, Changed<Text>>) {
+    if !rec.on || time.delta_secs() <= 0.0 {
+        return;
+    }
+    let i = rec.requested;
+    let Some(out) = rec.texts.as_mut() else { return };
+    for t in &texts {
+        let words = t.0.split_whitespace().filter(|w| w.chars().filter(|c| c.is_alphabetic()).count() >= 2).count();
+        if words >= 2 {
+            let _ = writeln!(out, "{i}\t{}", t.0.replace(['\n', '\t'], " "));
+        }
+    }
 }
 
 /// Last: ask for this frame's image and log the car.
