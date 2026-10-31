@@ -46,7 +46,14 @@ impl Plugin for CapturePlugin {
         }
         app.init_resource::<Recorder>()
             .init_resource::<Waits>()
-            .add_systems(Last, (grab, answer_waits))
+            // Headless test apps have no control port or frame counter: run only where they exist.
+            .add_systems(
+                Last,
+                (
+                    grab.run_if(resource_exists::<FrameCount>),
+                    answer_waits.run_if(resource_exists::<PendingReplies>.and_then(resource_exists::<FrameCount>)),
+                ),
+            )
             .add_control_command(
                 "capture.start",
                 "Record every frame of the offscreen image to an H.264 file through ffmpeg (use with --capture-hz 60)",
@@ -253,6 +260,7 @@ fn answer_waits(frames: Res<FrameCount>, mut waits: ResMut<Waits>, mut pending: 
 }
 
 /// Last: ask for this frame's image and log the car.
+#[allow(clippy::too_many_arguments)] // a Bevy system: one param per resource it reads
 fn grab(
     mut commands: Commands,
     mut rec: ResMut<Recorder>,
