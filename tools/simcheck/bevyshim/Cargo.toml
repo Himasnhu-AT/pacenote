@@ -1,0 +1,10 @@
+[package]
+name = "bevy"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Just bevy::math (glam, as Bevy 0.19 uses it) so the car sim and stage generator compile
+# without Bevy.
+[dependencies]
+glam = { version = "=0.32.1", features = ["serde"] }

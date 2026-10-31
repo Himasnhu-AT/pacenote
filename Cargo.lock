@@ -4226,6 +4226,7 @@ dependencies = [
  "bevy",
  "cpal",
  "engine",
+ "libm",
  "pcg-core",
  "ron",
  "serde",
@@ -4299,6 +4300,7 @@ name = "pcg-core"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "libm",
  "ron",
  "serde",
 ]

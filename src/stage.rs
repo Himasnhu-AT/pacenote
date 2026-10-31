@@ -143,6 +143,13 @@ pub fn stages() -> Vec<StageDef> {
     ]
 }
 
+/// The angle of `v` (as glam's `to_angle`), with libm's atan2: std's sin / cos / atan2 / powf
+/// differ between platforms (Apple arm64, x86_64, Windows), and a stage must grow the same
+/// road on every machine, or boards and ghosts split by CPU.
+fn angle_of(v: Vec2) -> f32 {
+    libm::atan2f(v.y, v.x)
+}
+
 /// Deterministic random numbers from a seed.
 #[derive(Clone, Debug)]
 pub struct Rng(u64);
@@ -299,7 +306,7 @@ impl Road {
     /// Start position and heading (radians, about Y, 0 = +Z).
     pub fn start(&self) -> (Vec3, f32) {
         let d = self.dir[0];
-        (self.pts[0], d.x.atan2(d.y))
+        (self.pts[0], libm::atan2f(d.x, d.y))
     }
 }
 
@@ -367,8 +374,8 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
     // Start near a map edge, heading inwards.
     let a = rng.range(0.0, std::f32::consts::TAU);
     let half = half_size(def);
-    let start = Vec2::new(a.cos(), a.sin()) * (half - MARGIN - 80.0);
-    let mut heading = (-start).to_angle() + rng.range(-0.5, 0.5);
+    let start = Vec2::new(libm::cosf(a), libm::sinf(a)) * (half - MARGIN - 80.0);
+    let mut heading = angle_of(-start) + rng.range(-0.5, 0.5);
     let mut pos = start;
     let mut pts2 = vec![pos];
     let mut curv = vec![0.0f32];
@@ -399,7 +406,7 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
         if pos.distance(waypoints[target]) < 160.0 && target + 1 < waypoints.len() {
             target += 1;
         }
-        let toward = angle_diff((waypoints[target] - pos).to_angle(), heading);
+        let toward = angle_diff(angle_of(waypoints[target] - pos), heading);
         // Plan the next feature (a straight or a corner); try a few variants and take the
         // first that stays inside the map and clear of the road so far.
         let mut chosen: Option<Vec<(Vec2, f32, f32)>> = None;
@@ -407,7 +414,7 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
         for attempt in 0..8 {
             let corner = attempt > 0 || rng.chance(0.55 + def.twist * 0.35);
             let (target_k, len) = if corner {
-                let tight = rng.f().powf(1.5 - def.twist);
+                let tight = libm::powf(rng.f(), 1.5 - def.twist);
                 let radius = 170.0 - 156.0 * tight;
                 let angle = rng.range(15.0, 80.0 + 100.0 * tight).to_radians();
                 // Mostly towards the next waypoint (the more off-course, the surer). A target at
@@ -415,7 +422,7 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
                 let p_left = 0.5 - (toward / std::f32::consts::FRAC_PI_2).clamp(-1.0, 1.0) * 0.4;
                 let mut left = rng.chance(p_left);
                 if attempt == 0 && pos.length() > half - MARGIN - 220.0 {
-                    left = angle_diff((-pos).to_angle(), heading) < 0.0;
+                    left = angle_diff(angle_of(-pos), heading) < 0.0;
                 }
                 let sign = if left { 1.0 } else { -1.0 };
                 (sign / radius, angle * radius)
@@ -437,7 +444,7 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
             None => {
                 // Boxed in: a tight turn towards open space (the centre).
                 // Larger angle = right turn = negative curvature.
-                let toward = -angle_diff((-pos).to_angle(), heading).signum();
+                let toward = -angle_diff(angle_of(-pos), heading).signum();
                 let t = trace(pos, heading, k, toward / 18.0, 60.0, &pts2, &occupied, half);
                 if t.is_empty() {
                     // Backtrack: drop the last 120 m and grow again with other choices.
@@ -501,7 +508,10 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
         Surface::Snow => 6.0,
         _ => 6.4,
     };
-    let width: Vec<f32> = (0..pts.len()).map(|i| base_w - 1.2 * (noise(Vec2::splat(i as f32 * STEP / 160.0), def.seed ^ 11) * 0.5 + 0.5).powf(3.0)).collect();
+    let width: Vec<f32> = (0..pts.len()).map(|i| base_w - 1.2 * {
+        let w = noise(Vec2::splat(i as f32 * STEP / 160.0), def.seed ^ 11) * 0.5 + 0.5;
+        w * w * w
+    }).collect();
     let second = match def.surface {
         Surface::Gravel => Surface::Mud,
         Surface::Tarmac => Surface::Gravel,
@@ -531,7 +541,7 @@ fn trace(mut p: Vec2, mut h: f32, mut kk: f32, target_k: f32, len: f32, pts: &[V
         // +k turns left: seen from above (+Y), heading angles grow from +X towards +Z, which
         // is a right turn, so left curvature decreases the angle.
         h -= kk * STEP;
-        p += Vec2::from_angle(h) * STEP;
+        p += Vec2::new(libm::cosf(h), libm::sinf(h)) * STEP;
         if p.abs().max_element() > half - MARGIN {
             break;
         }

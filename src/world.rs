@@ -26,6 +26,16 @@ pub struct StageWorld {
 
 const OBS_CELL: f32 = 8.0;
 
+impl StageWorld {
+    /// Every obstacle the car can hit (trunk / boulder centre, radius, top), sorted: for
+    /// checking stages generate the same scenery on every machine.
+    pub fn obstacle_list(&self) -> Vec<(Vec2, f32, f32)> {
+        let mut v: Vec<(Vec2, f32, f32)> = self.obstacles.values().flatten().copied().collect();
+        v.sort_by(|a, b| a.0.x.total_cmp(&b.0.x).then(a.0.y.total_cmp(&b.0.y)).then(a.1.total_cmp(&b.1)).then(a.2.total_cmp(&b.2)));
+        v
+    }
+}
+
 impl Ground for StageWorld {
     fn height(&self, x: f32, z: f32) -> f32 {
         self.heights.height_at(x, z)
@@ -110,7 +120,7 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         let (a, b) = (road.pts[i], road.pts[i + 10]);
         let mid = (a + b) * 0.5;
         let d = Vec2::new(b.x - a.x, b.z - a.z);
-        rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: d.x.atan2(d.y), y: mid.y, tag: "road".into() });
+        rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: libm::atan2f(d.x, d.y), y: mid.y, tag: "road".into() });
     }
     let line = Polyline { points: road.pts.iter().step_by(5).copied().collect(), closed: false, tag: "road".into() };
     let hf = &w.heights;
@@ -280,12 +290,13 @@ mod start_tests {
             let drift = (car.pos - p).length() - 0.9;
             assert!(drift.abs() < 0.5, "stage {} {}: rolled {drift:.2} m while idle", def.id, def.name);
             let p = car.pos;
-            for _ in 0..240 {
+            for _ in 0..150 {
                 step(&mut car, &spec, Input { throttle: 1.0, ..Input::default() }, &w, 1.0 / 60.0);
             }
             let moved = (car.pos - p).length();
-            // 4 s of full throttle: about 25–65 km/h depending on surface and slope.
-            assert!(car.speed() * 3.6 > 20.0 && moved > 10.0, "stage {} {}: {:.1} km/h after 4 s, moved {moved:.1} m", def.id, def.name, car.speed() * 3.6);
+            // 2.5 s of full throttle with no steering (longer and some starts' first bend puts
+            // the car in the trees): about 30–60 km/h depending on surface and slope.
+            assert!(car.speed() * 3.6 > 20.0 && moved > 10.0, "stage {} {}: {:.1} km/h after 2.5 s, moved {moved:.1} m", def.id, def.name, car.speed() * 3.6);
         }
     }
 }

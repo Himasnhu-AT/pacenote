@@ -1,0 +1,15 @@
+[package]
+name = "simcheck"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Compiles the game's own src/vehicle.rs and src/stage.rs (no copies) without Bevy, so the
+# same code builds in seconds for arm64 and x86_64. See tools/simcheck/run.sh.
+[dependencies]
+bevy = { path = "bevyshim" }
+pcg-core = { path = "/Users/himanshu/codes/game/engine/crates/pcg-core" }
+serde = { version = "1", features = ["derive"] }
+libm = "0.2"
+
+[workspace]

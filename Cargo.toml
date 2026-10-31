@@ -17,6 +17,9 @@ ron = "0.12"
 # Microphone capture for voice chat (same version rodio already pulls in: no new copy).
 cpal = "0.17.3"
 serde_json = "1"
+# Bit-identical sin / cos / atan2 on every platform (std libm differs between Apple arm64 and
+# x86_64): the car sim uses it so ghosts replay the same everywhere. Already in the tree.
+libm = "0.2"
 # Only for the tracer's consent categories: the same crate (and revision) the engine uses.
 ashlar-trace = { git = "https://github.com/Himasnhu-AT/ashlar", rev = "561745aaf96e07a0efe2ed61f37b0a365f46a530", default-features = false, optional = true }
 
