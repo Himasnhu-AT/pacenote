@@ -90,9 +90,7 @@ pub const CATALOG: &[Spec] = &[
             ("penalty_s", Kind::Int),
             ("progress_m", Kind::Int),
             ("hits", Kind::Int),
-            ("engine_pct", Kind::Int),
-            ("steering_pct", Kind::Int),
-            ("suspension_pct", Kind::Int),
+            ("broken", Kind::Int),
             ("recovers", Kind::Int),
             ("codriver", Kind::Bool),
             ("mode", MODE),
@@ -108,7 +106,6 @@ pub const CATALOG: &[Spec] = &[
             ("grade", Kind::Int),
             ("severity", Kind::Float),
             ("speed_kmh", Kind::Int),
-            ("retired", Kind::Bool),
         ],
     },
     Spec { name: "run.recover", props: &[("stage", Kind::Int), ("s_m", Kind::Int)] },
@@ -196,9 +193,9 @@ struct Watch {
     hits: u32,
     penalty: f32,
     recovers: u32,
-    /// The run and the car's damage as of the last frame of the run (a restart or quitting
+    /// The run, the car's hits and what it knocked down as of the last frame of the run (a restart or quitting
     /// resets them before the end is reported).
-    last: Option<(StageRun, crate::vehicle::Damage)>,
+    last: Option<(StageRun, crate::vehicle::Knocks, usize)>,
 }
 
 /// The privacy notice screen id.
@@ -269,12 +266,11 @@ fn time_name(t: crate::stage::TimeOfDay) -> &'static str {
 fn end(world: &mut World, result: &'static str) {
     let w = world.resource::<Watch>();
     let (stage, recovers) = (w.stage, w.recovers);
-    let Some((run, d)) = w.last.clone() else {
+    let Some((run, d, broken)) = w.last.clone() else {
         world.resource_mut::<Watch>().running = false;
         return;
     };
     let (mode, codriver, demo) = kind(world);
-    let pct = |v: f32| Prop::Int((v * 100.0).round() as i64);
     let time = run.finished.unwrap_or(run.time + run.penalty);
     event(
         world,
@@ -285,10 +281,8 @@ fn end(world: &mut World, result: &'static str) {
             ("time_ms", Prop::Int((time * 1000.0).round() as i64)),
             ("penalty_s", Prop::Int(run.penalty.round() as i64)),
             ("progress_m", Prop::Int(run.progress.round() as i64)),
-            ("hits", Prop::Int(d.hits as i64)),
-            ("engine_pct", pct(d.engine)),
-            ("steering_pct", pct(d.steering)),
-            ("suspension_pct", pct(d.suspension)),
+            ("hits", Prop::Int(d.count as i64)),
+            ("broken", Prop::Int(broken as i64)),
             ("recovers", Prop::Int(recovers as i64)),
             ("codriver", codriver),
             ("mode", mode),
@@ -333,21 +327,21 @@ fn watch(world: &mut World) {
                     ("demo", demo),
                 ],
             );
-            *world.resource_mut::<Watch>() = Watch { stage: stage.def.id, running: true, hits: car.damage.hits, penalty: run.penalty, recovers: 0, last: Some((run.clone(), car.damage)) };
+            *world.resource_mut::<Watch>() = Watch { stage: stage.def.id, running: true, hits: car.knocks.count, penalty: run.penalty, recovers: 0, last: Some((run.clone(), car.knocks, car.broken.len())) };
         }
         return;
     }
-    world.resource_mut::<Watch>().last = Some((run.clone(), car.damage));
+    world.resource_mut::<Watch>().last = Some((run.clone(), car.knocks, car.broken.len()));
     let s = run.progress;
-    if car.damage.hits > hits {
-        world.resource_mut::<Watch>().hits = car.damage.hits;
-        let d = car.damage;
+    if car.knocks.count > hits {
+        world.resource_mut::<Watch>().hits = car.knocks.count;
+        let d = car.knocks;
         if d.last >= CRASH_MIN {
             let corner = corner_at(&stage, s);
             let grade = corner.map_or(0, |k| stage.corners[k].grade as i64);
             // Speed before the hit is gone by now; the speed this frame is what's left of it,
             // so report the severity's equivalent closing speed instead.
-            let v = crate::vehicle::DAMAGE_FROM + d.last.sqrt() * (crate::vehicle::DAMAGE_FATAL - crate::vehicle::DAMAGE_FROM);
+            let v = crate::vehicle::Knocks::speed_of(d.last);
             event(
                 world,
                 "run.crash",
@@ -358,7 +352,6 @@ fn watch(world: &mut World) {
                     ("grade", Prop::Int(grade)),
                     ("severity", Prop::Float((d.last as f64 * 1000.0).round() / 1000.0)),
                     ("speed_kmh", Prop::Int((v * 3.6).round() as i64)),
-                    ("retired", Prop::Bool(d.wrecked())),
                 ],
             );
         }

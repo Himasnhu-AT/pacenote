@@ -56,6 +56,8 @@ pub struct CarParams {
     pub susp_damage: f32,
     /// Speed (m/s) of the body sliding on the ground (0 when it isn't touching).
     pub scrape: f32,
+    /// Speed (m/s) through brush, times how deep in it the car is (0 out of the shrubs).
+    pub brush: f32,
     /// How hard the suspension is working (mean |compression speed| m/s over the wheels).
     pub rough: f32,
 }
@@ -76,6 +78,7 @@ impl Default for CarParams {
             engine_damage: 0.0,
             susp_damage: 0.0,
             scrape: 0.0,
+            brush: 0.0,
             rough: 0.0,
         }
     }
@@ -86,6 +89,8 @@ impl Default for CarParams {
 pub enum CarEvent {
     /// Hit a tree/rock/post: closing speed m/s.
     Impact(f32),
+    /// Snapped a sapling / post / sign: car speed m/s.
+    Snap(f32),
     /// The body hit the ground (a roll, nosing into a bank, a heavy landing): m/s.
     Ground(f32),
     /// Suspension slam: strength 0..1, pan −1..1.
@@ -171,6 +176,7 @@ impl CarSynth {
         p.engine_damage = ok(p.engine_damage, 0.0, 1.0, 0.0);
         p.susp_damage = ok(p.susp_damage, 0.0, 1.0, 0.0);
         p.scrape = ok(p.scrape, 0.0, 60.0, 0.0);
+        p.brush = ok(p.brush, 0.0, 60.0, 0.0);
         p.rough = ok(p.rough, 0.0, 10.0, 0.0);
         for c in &mut p.surfaces {
             c.roll = ok(c.roll, 0.0, 3.0, 0.0);
@@ -184,6 +190,7 @@ impl CarSynth {
     pub fn event(&mut self, ev: CarEvent) {
         match ev {
             CarEvent::Impact(v) => self.body.impact(v, true),
+            CarEvent::Snap(v) => self.body.snap(v),
             CarEvent::Ground(v) => self.body.impact(v * 0.8, false),
             CarEvent::Thump(s, p) => self.body.thump(s, p),
             CarEvent::Bottom(s, p) => self.body.bottom(s, p),
@@ -587,6 +594,11 @@ mod tests {
         let (base, _) = lvl(quiet, None);
         let (scrape, _) = lvl(CarParams { scrape: 8.0, ..quiet }, None);
         assert!(scrape > base * 3.0, "scrape {scrape} vs {base}");
+        let (brush, _) = lvl(CarParams { brush: 10.0, ..quiet }, None);
+        assert!(brush > base * 2.0, "brush {brush} vs {base}");
+        let (_, snap) = lvl(quiet, Some(CarEvent::Snap(16.0)));
+        let (_, crash) = lvl(quiet, Some(CarEvent::Impact(16.0)));
+        assert!(snap > 0.02 && snap < crash, "snap {snap} vs crash {crash}");
         let rough = CarParams { rough: 1.5, ..quiet };
         let (tight, _) = lvl(rough, None);
         let (loose, _) = lvl(CarParams { susp_damage: 0.8, ..rough }, None);

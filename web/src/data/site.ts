@@ -183,8 +183,8 @@ export const privacy = {
   events: [
     { name: 'session.settings', when: 'Once per session', props: 'Camera view, speed units, steering speed, traction control and ABS on or off, co-driver options, graphics quality, demo or full game' },
     { name: 'run.start', when: 'The countdown ends', props: 'Stage, solo or team, co-driver on or off, camera, weather, time of day, traction control and ABS on or off, demo or full game' },
-    { name: 'run.end', when: 'The run ends', props: 'Stage, result (finish, retired, quit, restart), time with penalties, penalty seconds, metres driven, number of hits, engine, steering and suspension damage, recovers, co-driver on or off, demo or full game' },
-    { name: 'run.crash', when: 'A hit hard enough to matter', props: 'Stage, metres along the road, which corner and its grade, how hard, speed, which side of the car, whether it ended the run' },
+    { name: 'run.end', when: 'The run ends', props: 'Stage, result (finish, retired, quit, restart), time with penalties, penalty seconds, metres driven, number of hits, how many posts, signs and saplings were knocked down, recovers, co-driver on or off, demo or full game' },
+    { name: 'run.crash', when: 'A hit hard enough to matter', props: 'Stage, metres along the road, which corner and its grade, how hard, speed, which side of the car' },
     { name: 'run.recover', when: 'You press recover', props: 'Stage, metres along the road' },
     { name: 'play_together.connect', when: 'Hosting or joining a Play together session', props: 'Host or join, whether it connected (or timed out, was refused, failed), the round-trip time in ms' },
     { name: 'play_together.end', when: 'A Play together session ends', props: 'Host or join, how long it lasted, why it ended (left, partner left, timeout, error)' },

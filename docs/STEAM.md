@@ -261,9 +261,9 @@ Sources: <https://partner.steamgames.com/doc/store/assets/standard>,
 > different times of day and in fog and rain. Every team drives the same twenty, so times compare
 > on the leaderboards, and your best run comes back as a ghost to beat.
 >
-> The car is simulated: weight transfer, tyres that behave differently on each surface, and
-> damage to the engine, steering and suspension that stays with you to the finish, or ends your
-> run. Recover to the road for a time penalty.
+> The car is simulated: weight transfer and tyres that behave differently on each surface. Clip
+> a marker post or a sapling and it snaps; hit a big tree and you stop dead. Recover to the
+> road for a time penalty.
 >
 > No partner tonight? Drive solo with the AI co-driver reading the notes.
 
@@ -280,7 +280,7 @@ Sources: <https://partner.steamgames.com/doc/store/assets/standard>,
   and rain.
 - Corner calls graded 1–6 the way real co-drivers grade them, plus crests and narrows.
 - Driving model with weight transfer, per-surface grip, four-wheel drive, handbrake turns.
-- Damage to engine, steering and suspension; a bad enough hit retires the car.
+- Posts, signs and saplings that snap when you clip them; shrubs you can cut through.
 - Cockpit, bonnet and chase cameras.
 - Per-stage team leaderboards and ghost cars.
 - Solo practice with an AI co-driver.

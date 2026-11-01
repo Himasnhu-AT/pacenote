@@ -228,8 +228,10 @@ pub fn car_params(car: &Car, spec: &Spec, throttle: f32, interior: f32) -> CarPa
         speed,
         surfaces,
         interior,
-        engine_damage: car.damage.engine,
-        susp_damage: car.damage.suspension,
+        // The car takes no damage: no misfires, no loose rattles.
+        engine_damage: 0.0,
+        susp_damage: 0.0,
+        brush: car.brush * Vec3::new(car.vel.x, 0.0, car.vel.z).length(),
         // The body sliding on the ground (on its roof, side, or grounded on a crest).
         scrape: if car.body_contact { Vec3::new(car.vel.x, 0.0, car.vel.z).length().max(car.vel.length() * 0.5) } else { 0.0 },
         // Set by `Tracker::detect` (needs the last state).
@@ -251,6 +253,7 @@ pub struct Tracker {
     cooldown: [f32; 4],
     bottomed: [bool; 4],
     hits: u32,
+    broken: usize,
     body: bool,
     stats_t: f32,
     last_ns: u64,
@@ -267,7 +270,8 @@ impl Tracker {
             self.seen = true;
             self.impacts = car.impacts;
             self.gear = car.gear;
-            self.hits = car.damage.hits;
+            self.hits = car.knocks.count;
+            self.broken = car.broken.len();
             self.body = car.body_contact;
             for i in 0..4 {
                 self.comp[i] = car.wheels[i].compression;
@@ -284,15 +288,18 @@ impl Tracker {
         if hit > 0.4 {
             f.push(CarEvent::Impact(hit));
             n[0] += 1;
-        } else if car.damage.hits > self.hits {
-            // A damaging hit that wasn't an obstacle: the body hit the ground. Closing speed
-            // back from the severity (see `Damage::severity`; ground hits count 0.6×).
-            let x = (car.damage.last / 0.6).max(0.0).sqrt();
-            f.push(CarEvent::Ground(vehicle::DAMAGE_FROM + x * (vehicle::DAMAGE_FATAL - vehicle::DAMAGE_FROM)));
+        } else if car.knocks.count > self.hits {
+            // A hard hit that wasn't an obstacle: the body hit the ground. Closing speed back
+            // from the severity (see `Knocks::severity`; ground hits count 0.6×).
+            f.push(CarEvent::Ground(vehicle::Knocks::speed_of(car.knocks.last / 0.6)));
             n[0] += 1;
         } else if car.body_contact && !self.body && speed > 2.0 {
-            // A touch that did no damage (grounding on a crest, a bank).
+            // A light touch (grounding on a crest, a bank).
             f.push(CarEvent::Ground(2.0 + speed * 0.1));
+            n[0] += 1;
+        }
+        if car.broken.len() > self.broken {
+            f.push(CarEvent::Snap(speed));
             n[0] += 1;
         }
         if car.gear != self.gear && car.gear > 0 && self.gear > 0 {
@@ -329,7 +336,8 @@ impl Tracker {
         f.car.rough = rough;
         self.impacts = car.impacts;
         self.gear = car.gear;
-        self.hits = car.damage.hits;
+        self.hits = car.knocks.count;
+        self.broken = car.broken.len();
         self.body = car.body_contact;
         n
     }

@@ -44,6 +44,10 @@ pub struct Body {
     scrape_hi: Biquad,
     scrape_am: Wander,
     scrape_ring: [Biquad; 2],
+    rustle: Smooth,
+    rustle_bp: Biquad,
+    rustle_lo: Biquad,
+    rustle_am: Wander,
     rough: Smooth,
     rattles: [Ring; 5],
     next_rattle: usize,
@@ -71,6 +75,10 @@ impl Body {
             scrape_hi: Biquad::highpass(3500.0, 0.7),
             scrape_am: Wander::new(30.0),
             scrape_ring: [Biquad::bandpass(1730.0, 25.0), Biquad::bandpass(3310.0, 30.0)],
+            rustle: Smooth::new(0.0, 0.03, 0.15, RATE),
+            rustle_bp: Biquad::bandpass(3200.0, 0.8),
+            rustle_lo: Biquad::bandpass(700.0, 0.7),
+            rustle_am: Wander::new(45.0),
             rough: Smooth::new(0.0, 0.05, 0.3, RATE),
             rattles: [Ring::default(); 5],
             next_rattle: 0,
@@ -97,6 +105,15 @@ impl Body {
         h.crunch.set_bandpass(n.range(2200.0, 3200.0), 0.9);
         h.debris = if v > 6.0 { 40.0 * a } else { 0.0 };
         h.pan = n.range(-0.4, 0.4);
+    }
+
+    /// Snapping a sapling, post or sign at `v` m/s: a soft woody crack (no metal), a few
+    /// chips rattling off the bodywork.
+    pub fn snap(&mut self, v: f32) {
+        self.impact(v * 0.3, false);
+        let h = &mut self.hits[(self.next_hit + 2) % 3];
+        h.crunch.set_bandpass(self.n.range(1600.0, 2400.0), 1.4);
+        h.debris = 10.0 * (v / 20.0).clamp(0.2, 1.0);
     }
 
     /// Suspension slam: strength 0..1, pan −1..1.
@@ -188,6 +205,15 @@ impl Body {
             let wn = n.white() * am;
             let ring = self.scrape_ring[0].run(wn) + self.scrape_ring[1].run(wn);
             shell += (self.scrape_bp.run(wn) * 0.16 + self.scrape_hi.run(wn) * 0.05 + ring * 0.35) * sc;
+        }
+        // Brush: leaves and twigs swishing along the sides, crackling with the branches.
+        let ru = self.rustle.next((p.brush / 12.0).min(1.2));
+        if ru > 1e-4 {
+            let am = (0.35 + 0.65 * self.rustle_am.next(n)).max(0.0);
+            let wn = n.white() * am;
+            let s = (self.rustle_bp.run(wn) * 0.22 + self.rustle_lo.run(wn) * 0.1) * ru;
+            l += s;
+            r += s;
         }
         // Rattles: rough ground shakes loose parts (much more with damaged suspension).
         let rough = self.rough.next(p.rough.min(3.0));

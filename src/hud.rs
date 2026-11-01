@@ -2,7 +2,6 @@
 //!
 //! - bottom right: rev bar (segments light up to the red line), speed in km/h or mph, gear;
 //! - bottom left: stage name, stage clock (+ penalties), progress bar with km done / total;
-//! - top right: damage per part, once the car is hurt;
 //! - centre: countdown, GO, FINISH with the time, and the RETIRED plate.
 //!
 //! Each readout can be turned off in Settings > HUD ([`crate::prefs::Prefs`]). Cheap: values
@@ -45,7 +44,6 @@ enum HudGroup {
     Revs,
     Clock,
     Progress,
-    Damage,
     Retired,
 }
 
@@ -54,12 +52,6 @@ struct RevSeg(usize);
 
 #[derive(Component)]
 struct ProgressFill;
-
-/// Damage bar fill / percentage of part 0 engine, 1 steering, 2 suspension.
-#[derive(Component)]
-struct DamageFill(usize);
-#[derive(Component)]
-struct DamagePct(usize);
 
 pub struct HudPlugin;
 
@@ -154,26 +146,6 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
                     p.spawn((HudText::Progress, text("", label(SIZE_TINY + 1.0), t.text_muted)));
                 });
             });
-            // Top right: damage.
-            root.spawn((
-                HudGroup::Damage,
-                Node { position_type: PositionType::Absolute, right: px(40), top: px(96), flex_direction: FlexDirection::Column, row_gap: px(6), padding: UiRect::all(px(14)), border: UiRect::left(px(3)), border_radius: BorderRadius::all(px(RADIUS)), display: Display::None, ..default() },
-                plate(),
-                BorderColor::all(t.bad),
-                Pickable::IGNORE,
-            ))
-            .with_children(|c| {
-                c.spawn(text("DAMAGE", label(SIZE_LABEL), t.bad));
-                for (k, name) in ["Engine", "Steering", "Suspension"].into_iter().enumerate() {
-                    c.spawn((Node { column_gap: px(10), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
-                        r.spawn((text(name.to_uppercase(), label(SIZE_TINY + 1.0), t.text_muted), Node { width: px(96), ..default() }));
-                        r.spawn((Node { width: px(150), height: px(6), ..default() }, BackgroundColor(seg_off()), Pickable::IGNORE)).with_children(|b| {
-                            b.spawn((DamageFill(k), Node { width: percent(0), height: percent(100), ..default() }, BackgroundColor(t.text), Pickable::IGNORE));
-                        });
-                        r.spawn((DamagePct(k), text("0%", label(SIZE_TINY + 1.0), t.text), Node { width: px(44), ..default() }, TextLayout::justify(Justify::Right)));
-                    });
-                }
-            });
             // Centre: countdown / GO / FINISH.
             root.spawn((Node { position_type: PositionType::Absolute, top: percent(24), width: percent(100), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|c| {
                 c.spawn((HudText::CenterSmall, text("", label(SIZE_LABEL + 4.0), t.accent)));
@@ -189,7 +161,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
                 w.spawn(accent_panel(t, t.bad, 26.0, GAP_S)).with_children(|c| {
                     c.spawn(eyebrow("Stage over", t.bad));
                     c.spawn(title("Retired", SIZE_H1, t.text));
-                    c.spawn(text("The car is too damaged to continue.", body(SIZE_BODY), t.text_muted));
+                    c.spawn(text("You retired from the stage.", body(SIZE_BODY), t.text_muted));
                     c.spawn(spacer(GAP_XS));
                     c.spawn((Node { column_gap: px(GAP_L), ..default() }, Pickable::IGNORE)).with_children(|k| {
                         key_hint(k, t, "Esc", "Restart or leave");
@@ -210,9 +182,8 @@ struct Shown {
     penalty: Option<u32>,
     progress: Option<(u32, u32)>,
     stage: Option<u32>,
-    damage: Option<[u32; 3]>,
     center: Option<(u8, u32)>,
-    groups: Option<[bool; 6]>,
+    groups: Option<[bool; 5]>,
 }
 
 fn set_text(t: &mut Text, f: impl FnOnce(&mut String)) {
@@ -229,22 +200,18 @@ fn update_hud(
     theme: Res<Theme>,
     cars: Query<&DrivenCar>,
     mut texts: Query<(&HudText, &mut Text, &mut TextColor)>,
-    mut groups: Query<(&HudGroup, &mut Node), (Without<RevSeg>, Without<ProgressFill>, Without<DamageFill>)>,
-    mut segs: Query<(&RevSeg, &mut BackgroundColor), Without<DamageFill>>,
-    mut fill: Query<&mut Node, (With<ProgressFill>, Without<HudGroup>, Without<DamageFill>)>,
-    mut dmg: Query<(&DamageFill, &mut Node, &mut BackgroundColor), (Without<HudGroup>, Without<ProgressFill>, Without<RevSeg>)>,
-    mut pct: Query<(&DamagePct, &mut Text), Without<HudText>>,
+    mut groups: Query<(&HudGroup, &mut Node), (Without<RevSeg>, Without<ProgressFill>)>,
+    mut segs: Query<(&RevSeg, &mut BackgroundColor)>,
+    mut fill: Query<&mut Node, (With<ProgressFill>, Without<HudGroup>)>,
     mut shown: Local<Shown>,
 ) {
     let Ok(c) = cars.single() else { return };
     let car = &c.car;
     let t = &*theme;
     let prefs = prefs.map(|p| p.clone()).unwrap_or_default();
-    let d = car.damage;
-    let damaged = d.worst() > 0.02;
 
-    // Groups on / off (settings, damage, retired).
-    let want = [prefs.hud_speed, prefs.hud_revs, prefs.hud_clock, prefs.hud_progress, prefs.hud_damage && damaged, run.retired];
+    // Groups on / off (settings, retired).
+    let want = [prefs.hud_speed, prefs.hud_revs, prefs.hud_clock, prefs.hud_progress, run.retired];
     if shown.groups != Some(want) {
         shown.groups = Some(want);
         for (g, mut n) in &mut groups {
@@ -282,22 +249,6 @@ fn update_hud(
         shown.progress = Some(prog);
         for mut n in &mut fill {
             n.width = percent((run.progress / len.max(1.0) * 100.0).clamp(0.0, 100.0));
-        }
-    }
-    // Damage.
-    let parts = [d.engine, d.steering, d.suspension];
-    let pcts = parts.map(|x| (x * 100.0).round() as u32);
-    if shown.damage != Some(pcts) {
-        shown.damage = Some(pcts);
-        for (f, mut n, mut bg) in &mut dmg {
-            let x = parts[f.0];
-            n.width = percent(x * 100.0);
-            bg.0 = if x < 0.35 { t.text } else if x < 0.7 { t.accent } else { t.bad };
-        }
-        for (p, mut txt) in &mut pct {
-            set_text(&mut txt, |s| {
-                let _ = write!(s, "{}%", pcts[p.0]);
-            });
         }
     }
     // Centre: 1 countdown, 2 GO, 3 finish; 0 nothing.

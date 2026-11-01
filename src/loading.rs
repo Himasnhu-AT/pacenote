@@ -107,7 +107,7 @@ const PCG_CELL: f32 = 64.0;
 
 const TIPS: &[&str] = &[
     "Your co-driver reads the road ahead: listen for the corner grade (1 hairpin to 6 flat).",
-    "Big hits damage the car. A damaged engine loses power; bent steering pulls to one side.",
+    "Marker posts, signs and saplings snap if you clip them; big trees and rocks stop you dead.",
     "Press C to change camera: cockpit, bonnet or chase.",
     "Stuck or upside down? R puts you back on the road for a 5 s penalty.",
     "The handbrake (Space) helps the car rotate into hairpins.",

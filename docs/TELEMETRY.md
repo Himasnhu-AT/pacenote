@@ -68,8 +68,8 @@ catalog in debug builds and tests.
 |---|---|---|
 | `session.settings` | once per session | `camera` (`cockpit`/`bonnet`/`chase`), `units` (`metric`/`imperial`), `steering_speed` (float), `traction_assist`, `abs`, `codriver` (bools), `codriver_timing` (`early`/`normal`/`late`), `codriver_pace` (`calm`/`normal`/`fast`), `call_order` (`direction_first`/`grade_first`), `subtitles` (bool), `quality` (`low`/`medium`/`high`/`ultra`), `channel` (`demo`/`full`) |
 | `run.start` | the countdown ends | `stage`, `mode` (`solo`/`team`), `codriver`, `camera`, `weather` (`clear`/`overcast`/`fog`/`rain`), `time_of_day` (`morning`/`noon`/`afternoon`/`dusk`), `traction_assist`, `abs`, `demo` |
-| `run.end` | the run ends | `stage`, `result` (`finish`/`retired`/`quit`/`restart`), `time_ms` (clock incl. penalties), `penalty_s`, `progress_m`, `hits`, `engine_pct`, `steering_pct`, `suspension_pct`, `recovers`, `codriver`, `mode`, `demo` |
-| `run.crash` | a hit of severity ≥ 0.04 | `stage`, `s_m` (metres along the road), `corner` (index, −1 on a straight), `grade`, `severity` (float, 1 = fatal), `speed_kmh` (closing speed the severity implies), `retired` (bool) |
+| `run.end` | the run ends | `stage`, `result` (`finish`/`retired`/`quit`/`restart`), `time_ms` (clock incl. penalties), `penalty_s`, `progress_m`, `hits`, `broken` (saplings, posts and signs knocked down), `recovers`, `codriver`, `mode`, `demo` |
+| `run.crash` | a hit of severity ≥ 0.04 | `stage`, `s_m` (metres along the road), `corner` (index, −1 on a straight), `grade`, `severity` (float, 1 = a big crash), `speed_kmh` (closing speed the severity implies) |
 | `run.recover` | the recover key | `stage`, `s_m` |
 | `play_together.connect` | once per host / join attempt | `result` (`ok`/`failed`/`timeout`/`refused`), `role` (`host`/`join`), `latency_ms` (only with `ok`, when known) |
 | `play_together.end` | the partner goes, or the session is left | `duration_s`, `reason` (`left`/`partner_left`/`timeout`/`error`), `role` |

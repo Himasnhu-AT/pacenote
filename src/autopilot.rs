@@ -232,8 +232,9 @@ mod tests {
     use super::*;
     use crate::vehicle::step;
 
-    /// Drives a stage with the autopilot; returns (metres covered, wrecked, peak sideslip °).
-    fn run(stage_id: u32, ap: &mut Autopilot, secs: f32) -> (f32, bool, f32) {
+    /// Drives a stage with the autopilot; returns (metres covered, hard hits + things snapped,
+    /// peak sideslip °).
+    fn run(stage_id: u32, ap: &mut Autopilot, secs: f32) -> (f32, u32, f32) {
         let def = stage::stages().into_iter().find(|d| d.id == stage_id).unwrap();
         let w = crate::world::generate(&def);
         let (p, h) = w.road.start();
@@ -251,25 +252,24 @@ mod tests {
                 progress = rp.s;
             }
             beta = beta.max(car.vel.dot(left_of(&car)).atan2(car.speed().abs().max(1.0)).abs().to_degrees());
-            if car.damage.wrecked() {
-                return (progress, true, beta);
-            }
         }
-        (progress, false, beta)
+        (progress, car.knocks.count + car.broken.len() as u32, beta)
     }
 
     #[test]
     fn drives_a_stage_clean() {
         let mut ap = Autopilot { on: true, ..Autopilot::default() };
-        let (m, wrecked, _) = run(1, &mut ap, 60.0);
-        assert!(!wrecked && m > 700.0, "{m:.0} m in a minute, wrecked {wrecked}");
+        let (m, hits, _) = run(1, &mut ap, 60.0);
+        assert!(hits == 0 && m > 700.0, "{m:.0} m in a minute, {hits} hits or things knocked down");
     }
 
     #[test]
     fn crashes_on_request() {
         let mut ap = Autopilot { on: true, crash_at_m: Some(150.0), ..Autopilot::default() };
-        let (m, _, _) = run(1, &mut ap, 40.0);
-        assert!(m < 400.0, "still going at {m:.0} m");
+        // Off the road into the scenery: it hits something (the car takes no damage, so it may
+        // limp on, but far behind a clean run).
+        let (m, hits, _) = run(1, &mut ap, 40.0);
+        assert!(hits > 0 && m < 600.0, "{m:.0} m, {hits} hits");
     }
 
     /// Hairpins (grade 1–2) on loose ground in the first ~900 m of each stage, and how long the
@@ -356,7 +356,7 @@ mod drift_tests {
                     off = now_off;
                 }
                 slides.dedup();
-                println!("stage {id} drift {drift}: {progress:.0} m in {secs} s, peak β {beta:.0}°, flicks {flicks}, offs {offs}, damage {:.2}, hits {}", car.damage.worst(), car.damage.hits);
+                println!("stage {id} drift {drift}: {progress:.0} m in {secs} s, peak β {beta:.0}°, flicks {flicks}, offs {offs}, hits {}, broken {}", car.knocks.count, car.broken.len());
             }
         }
     }
@@ -450,7 +450,7 @@ mod drift_trace {
             }
             if progress > a && progress < b && i % 6 == 0 {
                 let beta = car.vel.dot(left_of(&car)).atan2(car.speed().abs().max(1.0)).to_degrees();
-                println!("s {progress:5.0} v {:5.1} β {beta:6.1} yaw {:6.1} st {:5.2} th {:.2} br {:.2} hb {} lat {:5.1} {} dmg {:.2}", car.speed() * 3.6, car.ang.dot(car.up()).to_degrees(), input.steer, input.throttle, input.brake, input.handbrake as u8, rp.map_or(99.0, |r| r.lateral), ap.doing, car.damage.worst());
+                println!("s {progress:5.0} v {:5.1} β {beta:6.1} yaw {:6.1} st {:5.2} th {:.2} br {:.2} hb {} lat {:5.1} {} hits {}", car.speed() * 3.6, car.ang.dot(car.up()).to_degrees(), input.steer, input.throttle, input.brake, input.handbrake as u8, rp.map_or(99.0, |r| r.lateral), ap.doing, car.knocks.count);
             }
             if progress > b {
                 break;

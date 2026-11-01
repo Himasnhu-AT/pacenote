@@ -7,10 +7,70 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use engine::world::{Heightfield, WorldDesc};
-use pcg_core::{Area, Graph, Inputs, Op, Polyline, Rect, Side, SpawnDef, SpawnKind, Tier};
+use pcg_core::{Area, Graph, Inputs, Op, Rect, SpawnDef, SpawnKind, Tier};
 
 use crate::stage::{self, Biome, Corner, Road, StageDef, Surface};
-use crate::vehicle::Ground;
+use crate::vehicle::{Give, Ground, Obstacle};
+
+/// A roadside thing the car can knock down or drive through (drawn by `crate::props`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Prop {
+    /// Index in [`StageWorld::props`], and the obstacle's [`Give::Breaks`] id.
+    pub id: u32,
+    pub kind: PropKind,
+    /// Base (on the ground), yaw and size (1 = the kind's standard size).
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub scale: f32,
+    /// Stable per prop (variant picks, debris).
+    pub seed: u64,
+}
+
+/// What a [`Prop`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PropKind {
+    /// White marker post (1.05 m): snaps at walking pace.
+    Post,
+    /// Kilometre board on a post (2 m).
+    Sign,
+    /// A young tree (3–5 m, thin trunk): snaps from ~11 km/h.
+    Sapling,
+    /// A bush the car drives through.
+    Shrub,
+}
+
+impl PropKind {
+    /// Collision radius (m) and height (m) at scale 1.
+    pub fn size(self) -> (f32, f32) {
+        match self {
+            PropKind::Post => (0.07, 1.05),
+            PropKind::Sign => (0.09, 2.0),
+            PropKind::Sapling => (0.3, 11.0),
+            PropKind::Shrub => (0.85, 1.1),
+        }
+    }
+
+    /// Least distance (m) from the road's edge to its centre.
+    pub fn clearance(self) -> f32 {
+        match self {
+            PropKind::Post | PropKind::Sign => 0.8,
+            PropKind::Sapling => 2.0,
+            PropKind::Shrub => 0.6,
+        }
+    }
+
+    /// How the car interacts with one of `scale`: mass (kg) and the closing speed (m/s) that
+    /// snaps it, or the brush drag.
+    pub fn give(self, id: u32, scale: f32) -> Give {
+        match self {
+            PropKind::Post => Give::Breaks { id, mass: 6.0, speed: 1.0 },
+            PropKind::Sign => Give::Breaks { id, mass: 25.0, speed: 2.0 },
+            // ~50–110 kg of green wood.
+            PropKind::Sapling => Give::Breaks { id, mass: 250.0 * scale, speed: 3.0 },
+            PropKind::Shrub => Give::Brush { drag: 0.15 * scale },
+        }
+    }
+}
 
 /// The current stage, generated.
 #[derive(Resource, Clone)]
@@ -20,17 +80,20 @@ pub struct StageWorld {
     pub heights: Arc<Heightfield>,
     pub corners: Arc<Vec<Corner>>,
     pub crests: Arc<Vec<f32>>,
-    /// Trunks and boulders near the road: 8 m grid of (centre, radius, top).
-    obstacles: Arc<HashMap<(i32, i32), Vec<(Vec2, f32, f32)>>>,
+    /// Roadside things the car can knock down (posts, signs, saplings) or drive through
+    /// (shrubs), in a fixed order (their ids).
+    pub props: Arc<Vec<Prop>>,
+    /// Trunks, boulders and props near the road: 8 m grid.
+    obstacles: Arc<HashMap<(i32, i32), Vec<Obstacle>>>,
 }
 
 const OBS_CELL: f32 = 8.0;
 
 impl StageWorld {
-    /// Every obstacle the car can hit (trunk / boulder centre, radius, top), sorted: for
+    /// Every solid obstacle the car can hit (trunk / boulder centre, radius, top), sorted: for
     /// checking stages generate the same scenery on every machine.
     pub fn obstacle_list(&self) -> Vec<(Vec2, f32, f32)> {
-        let mut v: Vec<(Vec2, f32, f32)> = self.obstacles.values().flatten().copied().collect();
+        let mut v: Vec<(Vec2, f32, f32)> = self.obstacles.values().flatten().filter(|o| o.give == Give::Solid).map(|o| (o.pos, o.radius, o.top)).collect();
         v.sort_by(|a, b| a.0.x.total_cmp(&b.0.x).then(a.0.y.total_cmp(&b.0.y)).then(a.1.total_cmp(&b.1)).then(a.2.total_cmp(&b.2)));
         v
     }
@@ -46,7 +109,7 @@ impl Ground for StageWorld {
     fn surface(&self, x: f32, z: f32) -> Surface {
         stage::surface_at(x, z, &self.road)
     }
-    fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<(Vec2, f32, f32)>) {
+    fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
         out.clear();
         let (x0, x1) = (((p.x - r) / OBS_CELL).floor() as i32, ((p.x + r) / OBS_CELL).floor() as i32);
         let (z0, z1) = (((p.y - r) / OBS_CELL).floor() as i32, ((p.y + r) / OBS_CELL).floor() as i32);
@@ -75,6 +138,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
         heights: Arc::new(heights),
         corners: Arc::new(corners),
         crests: Arc::new(crests),
+        props: Arc::new(Vec::new()),
         obstacles: Arc::new(HashMap::new()),
     };
     // Collision for the car: the same points the dressing spawns, evaluated in a band along
@@ -82,7 +146,8 @@ pub fn generate(def: &StageDef) -> StageWorld {
     let (graph, inputs) = dressing(&world);
     let band = road_area(&world.road, 40.0);
     if let Ok(out) = pcg_core::evaluate(&graph, &inputs, Some(band)) {
-        let mut grid: HashMap<(i32, i32), Vec<(Vec2, f32, f32)>> = HashMap::new();
+        let mut grid: HashMap<(i32, i32), Vec<Obstacle>> = HashMap::new();
+        let cell = |c: Vec2| ((c.x / OBS_CELL).floor() as i32, (c.y / OBS_CELL).floor() as i32);
         for (port, radius) in [("trunks", 0.32f32), ("boulders", 0.85)] {
             if let Some(p) = out.emits.get(port) {
                 for k in 0..p.len() {
@@ -93,13 +158,73 @@ pub fn generate(def: &StageDef) -> StageWorld {
                     }
                     let r = radius * p.scale[k].x;
                     let top = p.pos[k].y + 4.0 * p.scale[k].y;
-                    grid.entry(((c.x / OBS_CELL).floor() as i32, (c.y / OBS_CELL).floor() as i32)).or_default().push((c, r, top));
+                    grid.entry(cell(c)).or_default().push(Obstacle::solid(c, r, top));
                 }
             }
         }
+        // Props: sorted by position so ids are the same on every machine.
+        let mut found = roadside(&world);
+        for (port, kind) in [("saplings", PropKind::Sapling), ("shrubs", PropKind::Shrub)] {
+            if let Some(p) = out.emits.get(port) {
+                for k in 0..p.len() {
+                    let c = Vec2::new(p.pos[k].x, p.pos[k].z);
+                    // Near the road but never on it (the graph keeps clear of 20 m chords of
+                    // the road, which cut inside a hairpin).
+                    let Some(rp) = world.road.nearest(c, 30.0) else { continue };
+                    if rp.lateral.abs() < world.road.half_width(&rp) + kind.clearance() {
+                        continue;
+                    }
+                    // A turn about Y (not projected onto the slope); libm, same bits everywhere.
+                    let q = p.rot[k];
+                    let yaw = 2.0 * libm::atan2f(q.y, q.w);
+                    found.push((kind, p.pos[k], yaw, p.scale[k].x, p.seed[k]));
+                }
+            }
+        }
+        found.sort_by(|a, b| a.1.x.total_cmp(&b.1.x).then(a.1.z.total_cmp(&b.1.z)).then((a.0 as u8).cmp(&(b.0 as u8))));
+        let mut props = Vec::with_capacity(found.len());
+        for (i, (kind, pos, yaw, scale, seed)) in found.into_iter().enumerate() {
+            let id = i as u32;
+            let (r, h) = kind.size();
+            let c = Vec2::new(pos.x, pos.z);
+            grid.entry(cell(c)).or_default().push(Obstacle { pos: c, radius: r * scale, top: pos.y + h * scale, give: kind.give(id, scale) });
+            props.push(Prop { id, kind, pos, yaw, scale, seed });
+        }
         world.obstacles = Arc::new(grid);
+        world.props = Arc::new(props);
     }
     world
+}
+
+/// Marker posts both sides every 50 m and a kilometre board on the right every 1000 m, set
+/// off the edge by the road's own width (plain arithmetic on the road and the heightfield: the
+/// same on every machine). (kind, base, yaw, scale, seed)
+fn roadside(w: &StageWorld) -> Vec<(PropKind, Vec3, f32, f32, u64)> {
+    let road = &w.road;
+    let mut out = Vec::new();
+    let len = road.length();
+    let mut put = |kind: PropKind, s: f32, side: f32, gap: f32| {
+        let i = road.station(s);
+        let (p, d) = (road.pts[i], road.dir[i]);
+        let left = Vec2::new(d.y, -d.x);
+        let c = Vec2::new(p.x, p.z) + left * side * (road.width[i] * 0.5 + gap);
+        // Boards face the cars coming.
+        let yaw = libm::atan2f(-d.x, -d.y);
+        let seed = pcg_core::mix64(w.def.seed ^ ((kind as u64) << 48) ^ ((s as u64) << 1) ^ (side > 0.0) as u64);
+        out.push((kind, Vec3::new(c.x, w.heights.height_at(c.x, c.y), c.y), yaw, 1.0, seed));
+    };
+    let mut s = 25.0;
+    while s < len - 10.0 {
+        put(PropKind::Post, s, 1.0, 1.4);
+        put(PropKind::Post, s, -1.0, 1.4);
+        s += 50.0;
+    }
+    let mut s = 1000.0;
+    while s < len - 50.0 {
+        put(PropKind::Sign, s, -1.0, 2.2);
+        s += 1000.0;
+    }
+    out
 }
 
 fn road_area(road: &Road, pad: f32) -> Area {
@@ -114,7 +239,7 @@ fn road_area(road: &Road, pad: f32) -> Area {
 pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
     let road = &w.road;
     let half = stage::half_size(&w.def);
-    // The road as rects (20 m pieces) to keep things off it, and as a polyline for posts.
+    // The road as rects (20 m pieces) to keep things off it.
     let mut rects = Vec::new();
     for i in (0..road.len().saturating_sub(10)).step_by(10) {
         let (a, b) = (road.pts[i], road.pts[i + 10]);
@@ -122,12 +247,10 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         let d = Vec2::new(b.x - a.x, b.z - a.z);
         rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: libm::atan2f(d.x, d.y), y: mid.y, tag: "road".into() });
     }
-    let line = Polyline { points: road.pts.iter().step_by(5).copied().collect(), closed: false, tag: "road".into() };
     let hf = &w.heights;
     let inputs = Inputs::default()
         .rects("area", vec![Rect::new(Vec2::ZERO, Vec2::splat(half - 4.0))])
         .rects("road", rects)
-        .lines("line", vec![line])
         .surface(pcg_core::Surface::Heightfield { origin: hf.origin(), cell: hf.spacing(), width: hf.nx() as usize, heights: hf.heights().to_vec() });
 
     // Trees are drawn by `art::trees` from the `trunks` points (species mix per biome there).
@@ -138,6 +261,14 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         Biome::Moor => (14.0, 0.6, 0.85, 0.5, 0.35),
         Biome::SnowForest => (4.6, 0.32, 0.6, 0.2, 0.15),
     };
+    // Roadside props (`crate::props`): saplings and shrubs kept per biome.
+    let (sapling_keep, shrub_keep): (f32, f32) = match w.def.biome {
+        Biome::PineForest => (0.35, 0.3),
+        Biome::BirchHills => (0.45, 0.35),
+        Biome::Scrub => (0.15, 0.7),
+        Biome::Moor => (0.12, 0.4),
+        Biome::SnowForest => (0.3, 0.15),
+    };
     let (rocks, bushes) = (crate::art::dressing::rocks(w.def.biome), crate::art::dressing::bushes(w.def.biome));
     let spawn = |items: &[(&str, f32)], tier: Tier, shadows: bool| {
         Op::Spawn(SpawnDef { kind: SpawnKind::Mesh, items: items.iter().map(|(n, w)| (n.to_string(), *w)).collect(), tier, shadows, ..Default::default() })
@@ -145,7 +276,6 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
     let g = Graph::build(w.def.seed)
         .input("area")
         .node("road", Op::Input { name: "road".into() }, &[])
-        .node("line", Op::Input { name: "line".into() }, &[])
         // Trees: forests by noise, clear of the road.
         .node("tree_pts", Op::PoissonSample { radius: tree_r }, &["area"])
         .node("forest", Op::DensityNoise { scale: 160.0, octaves: 3, lo: forest_lo, hi: forest_hi }, &["tree_pts"])
@@ -171,12 +301,25 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .node("bush_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.6, 1.4), jitter: 0.0 }, &["bush_clear"])
         .node("bush_on", Op::Project { offset: -0.05, align: true }, &["bush_tf"])
         .node("bushes", spawn(&bushes, Tier::Fine, false), &["bush_on"])
-        // Marker posts both sides every 50 m.
-        .node("posts_l", Op::EdgeSample { spacing: 50.0, offset: road.width[0] * 0.5 + 1.4, side: Side::Left }, &["line"])
-        .node("posts_r", Op::EdgeSample { spacing: 50.0, offset: road.width[0] * 0.5 + 1.4, side: Side::Right }, &["line"])
-        .node("posts_all", Op::Union, &["posts_l", "posts_r"])
-        .node("posts_on", Op::Project { offset: 0.0, align: false }, &["posts_all"])
-        .node("posts", spawn(&[("post", 1.0)], Tier::Essential, true), &["posts_on"])
+        // Breakable and bendable props are drawn one by one by `art::props` (from
+        // `StageWorld::props`), so they can fall over: emitted, not spawned. (Marker posts and
+        // kilometre boards are placed along the road in `roadside`.)
+        // Saplings 2.5–9 m off the edge: small enough to snap.
+        .node("sap_pts", Op::PoissonSample { radius: 7.0 }, &["area"])
+        .node("sap_band", Op::Intersect { with: "road".into(), pad: 9.0 }, &["sap_pts"])
+        .node("sap_keep", Op::Keep { fraction: sapling_keep }, &["sap_band"])
+        .node("sap_clear", Op::Difference { against: "road".into(), pad: 2.5 }, &["sap_keep"])
+        .node("sap_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.25, 0.42), jitter: 0.0 }, &["sap_clear"])
+        .node("sap_on", Op::Project { offset: -0.05, align: false }, &["sap_tf"])
+        .node("saplings", Op::Emit { port: "saplings".into() }, &["sap_on"])
+        // Shrubs right by the road (from 0.6 m off the edge): cut a corner and you're in them.
+        .node("shrub_pts", Op::PoissonSample { radius: 3.5 }, &["area"])
+        .node("shrub_band", Op::Intersect { with: "road".into(), pad: 6.0 }, &["shrub_pts"])
+        .node("shrub_keep", Op::Keep { fraction: shrub_keep }, &["shrub_band"])
+        .node("shrub_clear", Op::Difference { against: "road".into(), pad: 0.6 }, &["shrub_keep"])
+        .node("shrub_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.7, 1.3), jitter: 0.0 }, &["shrub_clear"])
+        .node("shrub_on", Op::Project { offset: -0.05, align: false }, &["shrub_tf"])
+        .node("shrubs", Op::Emit { port: "shrubs".into() }, &["shrub_on"])
         .finish()
         .expect("dressing graph");
     (g, inputs)
@@ -219,9 +362,9 @@ mod tests {
             let p = w.road.pts[i];
             w.obstacles(Vec2::new(p.x, p.z), 30.0, &mut out);
             total += out.len();
-            for (c, r, _) in &out {
-                let rp = w.road.nearest(*c, 50.0).unwrap();
-                assert!(rp.lateral.abs() > w.road.half_width(&rp) + 1.0 - r, "obstacle on the road at station {i}");
+            for o in &out {
+                let rp = w.road.nearest(o.pos, 50.0).unwrap();
+                assert!(rp.lateral.abs() > w.road.half_width(&rp) + 0.5 - o.radius, "obstacle on the road at station {i}: {o:?}");
             }
         }
         assert!(total > 50, "only {total} obstacles near the road");
@@ -234,6 +377,21 @@ mod tests {
 #[cfg(test)]
 mod debug {
     use super::*;
+
+    /// How many points each dressing port emits along stage 1's road, and the props kept.
+    #[test]
+    #[ignore]
+    fn dressing_ports() {
+        let w = generate(&stage::stages()[0]);
+        let (graph, inputs) = dressing(&w);
+        let out = pcg_core::evaluate(&graph, &inputs, Some(road_area(&w.road, 40.0))).unwrap();
+        for (port, p) in &out.emits {
+            println!("{port}: {}", p.len());
+        }
+        for k in [PropKind::Post, PropKind::Sign, PropKind::Sapling, PropKind::Shrub] {
+            println!("kept {k:?}: {}", w.props.iter().filter(|p| p.kind == k).count());
+        }
+    }
     use crate::vehicle::{Car, Input, Spec, step};
 
     #[test]

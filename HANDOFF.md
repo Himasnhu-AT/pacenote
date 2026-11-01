@@ -26,12 +26,12 @@ Full design: `docs/DESIGN.md`.
 | Path | What |
 |---|---|
 | `src/stage.rs` | 20 stage definitions, road growth, terrain shaping, corner grades 1–6, crests (pure, tested) |
-| `src/vehicle.rs` | Car sim (pure, deterministic): raycast suspension, Pacejka tyres per surface, ABS, traction assist, viscous LSD, hill hold, auto gearbox, impulse obstacle hits, `Damage` (engine / steering / suspension; a broken part retires the car) |
+| `src/vehicle.rs` | Car sim (pure, deterministic): raycast suspension, Pacejka tyres per surface, ABS, traction assist, viscous LSD, hill hold, auto gearbox, impulse obstacle hits (solid trunks and boulders; saplings, posts and signs that snap, `Car::broken`; shrubs that drag), no damage (`Knocks` only counts hits) |
 | `src/world.rs` | `StageWorld` (road, heights, obstacles; implements `Ground`), terrain + PCG dressing spawn |
 | `src/drive.rs` | Input actions, 60 Hz fixed-step sim, cameras (cockpit / bonnet / chase), `StageRun` (clock, splits, progress, retired) |
 | `src/loading.rs` | Loading screen: stage generated on a worker, built, pipelines warmed, near scenery and trees in, frames settled; then the countdown |
-| `src/codriver/` | AI co-driver: pace notes read ahead by time (`calls.rs`, pure), damage/splits/finish/off-road/roof lines, system TTS (`speech.rs`: `say`, espeak, PowerShell), subtitles; `N` toggles; quiet when a human guide is connected |
-| `src/hud.rs` | Driver HUD (speed, gear, clock, damage readout, retired message) |
+| `src/codriver/` | AI co-driver: pace notes read ahead by time (`calls.rs`, pure), big-hit/splits/finish/off-road/roof lines, system TTS (`speech.rs`: `say`, espeak, PowerShell), subtitles; `N` toggles; quiet when a human guide is connected |
+| `src/hud.rs` | Driver HUD (speed, gear, clock, retired message) |
 | `src/art/` | Textured terrain material (`terrain.wgsl`), road ribbon, card trees, rocks/plants, car model, per-stage look (sky/fog/rain), wheel spray |
 | `src/audio/` | Synthesised engine/turbo/tyres/ambience on a custom stream; guide hears the replicated car (`RemoteCarSound`) |
 | `src/meta/` | Menus, stage select, leaderboards (`board.rs`), ghosts (`ghost.rs`), results, credits; `netlink.rs` adapts to `net_session` |
@@ -101,8 +101,8 @@ Loading / damage / co-driver (added 30 Oct):
   frame, then every pipeline compiling synchronously on first draw (macOS) while 30k scenery
   entities streamed in. It all happens behind `loading.rs` now (~4 s on an M5 Pro). Scenery past
   450 m of the start still streams in during play, nearest first.
-- Damage isn't replicated to the guide (`NetCar` lacks it), and a retired run isn't on the
-  results screen or the board: the HUD says RETIRED and Esc offers restart / leave.
+- A retired run isn't on the results screen or the board: the HUD says RETIRED and Esc offers
+  restart / leave. (The car takes no damage since 1 Nov; retiring is the driver's choice.)
 - The co-driver uses the OS voice (`say`): its sound skips the engine mixer and volume. Voice,
   rate and timing (`calls::LEAD_S`) may want tuning by ear. Corner calls don't include
   "don't cut" / "caution" from terrain (only grade, long, crest, narrows).

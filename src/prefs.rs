@@ -38,7 +38,6 @@ pub struct Prefs {
     pub hud_revs: bool,
     pub hud_clock: bool,
     pub hud_progress: bool,
-    pub hud_damage: bool,
     /// Keyboard steering speed (0.6–1.6, 1 = default).
     pub steer_speed: f32,
     /// Gamepad stick linearity (1 linear … 2.5 soft around centre).
@@ -66,7 +65,6 @@ impl Default for Prefs {
             hud_revs: true,
             hud_clock: true,
             hud_progress: true,
-            hud_damage: true,
             steer_speed: 1.0,
             stick_linearity: 1.0,
             stick_deadzone: 0.05,
@@ -231,8 +229,7 @@ fn register(app: &mut App) {
             kind: FieldKind::Slider { min: 0.0, max: 0.3, step: 0.01, format: format_percent },
             get: |w| p(w).stick_deadzone,
             set: |w, v| pm(w).stick_deadzone = v.clamp(0.0, 0.3),
-        })
-        .register_setting(toggle("hud_damage", "HUD", "Damage", "Engine, steering and suspension damage, top right, once the car is hurt.", |w| b(p(w).hud_damage), |w, v| pm(w).hud_damage = v > 0.5));
+        });
 }
 
 /// Where each existing row goes: (key, tab, new label, new hint). `""` tab = hidden. Rows not
@@ -263,7 +260,6 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("hud_revs", "HUD", None, None),
     ("hud_clock", "HUD", None, None),
     ("hud_progress", "HUD", None, None),
-    ("hud_damage", "HUD", None, None),
     // Audio.
     ("master_volume", "Audio", Some("Master"), Some("Everything at once.")),
     ("sfx_volume", "Audio", Some("Car"), Some("Engine, turbo, gearbox, tyres, gravel and impacts.")),
@@ -415,9 +411,6 @@ fn rebuild_hud_preview(world: &mut World) {
     let (v, unit) = prefs.speed(31.0);
     world.commands().entity(panel).with_children(|p| {
         p.spawn((Node { height: px(150), flex_direction: FlexDirection::Column, justify_content: JustifyContent::FlexEnd, align_items: AlignItems::FlexEnd, row_gap: px(6), padding: UiRect::all(px(14)), ..default() }, BackgroundColor(Color::srgba(0.18, 0.22, 0.2, 0.55)), Pickable::IGNORE)).with_children(|s| {
-            if prefs.hud_damage {
-                s.spawn(text("DAMAGE \u{2022} STEERING 18%", label(SIZE_TINY), t.accent));
-            }
             if prefs.hud_revs {
                 crate::hud::rev_bar_preview(s, &t, 0.72);
             }
