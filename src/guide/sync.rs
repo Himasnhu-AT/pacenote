@@ -7,6 +7,7 @@
 //! | [`NetStage`] `{id, road_hash, weather, time}` | session entity | ~12 | on change |
 //! | [`NetRun`] clock, penalty, progress, splits, finished | session entity | 8–20 | 10 Hz + on events |
 //! | [`NetCar`] pose, velocity, steer, rpm, gear, wheel spin | the car | ~30 | 30 Hz, interpolated |
+//! | [`NetDamage`] body parts off, engine / steering / suspension damage | the car | 4 | on change |
 //!
 //! Every value is quantised *before* it goes into the component ([`NetCar::from_car`],
 //! [`NetRun::from_run`]), so a car at rest compares equal and isn't sent, and the guide sees
@@ -112,6 +113,47 @@ impl NetCar {
             spin: std::array::from_fn(|i| a.spin[i] + (b.spin[i] - a.spin[i]) * t),
             throttle: a.throttle + (b.throttle - a.throttle) * t,
         }
+    }
+}
+
+/// The car's damage as the guide sees it: body parts knocked off (`vehicle::PARTS` bits, the
+/// guide's car drops the same ones) and each part's damage in 5 % steps (0..=20).
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NetDamage {
+    pub detached: u8,
+    pub engine: u8,
+    pub steering: u8,
+    pub suspension: u8,
+}
+
+impl NetDamage {
+    pub fn from_damage(d: &crate::vehicle::Damage) -> NetDamage {
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 20.0).round() as u8;
+        NetDamage { detached: d.detached, engine: q(d.engine), steering: q(d.steering), suspension: q(d.suspension) }
+    }
+
+    /// Engine, steering, suspension (0..1).
+    pub fn parts(&self) -> [f32; 3] {
+        [self.engine, self.steering, self.suspension].map(|v| f32::from(v) / 20.0)
+    }
+
+    /// The worst part (0..1).
+    pub fn worst(&self) -> f32 {
+        f32::from(self.engine.max(self.steering).max(self.suspension)) / 20.0
+    }
+}
+
+/// [`NetDamage`] on the wire: four bytes.
+pub struct NetDamageCodec;
+
+impl Codec<NetDamage> for NetDamageCodec {
+    fn encode(d: &NetDamage, out: &mut Vec<u8>) {
+        for v in [d.detached, d.engine.min(20), d.steering.min(20), d.suspension.min(20)] {
+            out.put_u8(v);
+        }
+    }
+    fn decode(r: &mut Reader) -> WireResult<NetDamage> {
+        Ok(NetDamage { detached: r.u8()?, engine: r.u8()?.min(20), steering: r.u8()?.min(20), suspension: r.u8()?.min(20) })
     }
 }
 
@@ -252,6 +294,8 @@ pub fn register(app: &mut App) {
         .replicate_with::<NetRun, NetRunCodec>()
         .replicate_with::<NetCar, NetCarCodec>()
         .interpolate::<NetCar>(NetCar::lerp)
+        // (A new type changes the protocol id: an older build is refused at the handshake.)
+        .replicate_with::<NetDamage, NetDamageCodec>()
         .add_systems(FixedPostUpdate, (publish_stage, publish_run, publish_car).run_if(resource_exists::<NetServer>));
 }
 
@@ -287,18 +331,32 @@ fn publish_run(run: Option<Res<StageRun>>, mut q: Query<&mut NetRun, With<Sessio
     }
 }
 
-fn publish_car(mut commands: Commands, actions: Option<Res<engine::actions::ActionState>>, run: Option<Res<StageRun>>, mut cars: Query<(Entity, &DrivenCar, Option<&mut NetCar>)>) {
+fn publish_car(
+    mut commands: Commands,
+    actions: Option<Res<engine::actions::ActionState>>,
+    run: Option<Res<StageRun>>,
+    mut cars: Query<(Entity, &DrivenCar, Option<&mut NetCar>, Option<&mut NetDamage>)>,
+) {
     // What the simulation got: nothing while held at the start or after the finish.
     let held = run.is_none_or(|r| r.countdown > 0.0 || r.finished.is_some());
     let throttle = if held { 0.0 } else { actions.map_or(0.0, |a| a.value("throttle")) };
-    for (e, c, nc) in &mut cars {
+    for (e, c, nc, nd) in &mut cars {
         let want = NetCar::from_car(&c.car, throttle);
+        let damage = NetDamage::from_damage(&c.car.damage);
         match nc {
             Some(mut nc) => {
                 nc.set_if_neq(want);
             }
             None => {
                 commands.entity(e).insert((Replicated, AlwaysRelevant, want));
+            }
+        }
+        match nd {
+            Some(mut nd) => {
+                nd.set_if_neq(damage);
+            }
+            None => {
+                commands.entity(e).insert(damage);
             }
         }
     }
@@ -316,6 +374,19 @@ mod tests {
         let out = K::decode(&mut r).unwrap();
         assert!(r.is_empty(), "codec left bytes");
         (out, b.len())
+    }
+
+    #[test]
+    fn damage_round_trips_in_four_bytes() {
+        let d = crate::vehicle::Damage { engine: 0.42, steering: 1.3, suspension: 0.0, detached: 0b101_0001, ..Default::default() };
+        let nd = NetDamage::from_damage(&d);
+        assert_eq!(nd, NetDamage { detached: 0b101_0001, engine: 8, steering: 20, suspension: 0 });
+        let (back, n) = round_trip::<NetDamage, NetDamageCodec>(&nd);
+        assert_eq!((back, n), (nd, 4));
+        assert_eq!(nd.worst(), 1.0);
+        // Out-of-range bytes from a bad peer are clamped.
+        let mut r = Reader::new(&[0xFF, 200, 3, 21]);
+        assert_eq!(NetDamageCodec::decode(&mut r).unwrap(), NetDamage { detached: 0xFF, engine: 20, steering: 3, suspension: 20 });
     }
 
     fn moving_car() -> Car {

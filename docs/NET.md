@@ -49,6 +49,7 @@ Snapshots at 30 Hz (`NetConfig::send_interval = 2`), delta-compressed by the eng
 | `NetStage` | stage id, road hash | ~10, on change |
 | `NetRun` | countdown, time, penalty, progress, splits, finished | 8–20, every 6 ticks + on events (split, finish, penalty, countdown second) |
 | `NetCar` | pos (1 cm), rot (32-bit smallest-three), vel (5 cm/s), steer, rpm (40), gear, 4 wheel spins (0.1 rad/s), throttle (1/255) | ~31, interpolated on the guide |
+| `NetDamage` | body parts knocked off (`vehicle::PARTS` bits), engine / steering / suspension damage (5 % steps) | 4, on change |
 
 Values are quantised before they go into the component, so a parked car compares equal and
 isn't resent, and the guide sees exactly what the driver encoded. The guide regenerates the
@@ -74,8 +75,11 @@ call when not using voice chat (talking starts a call by itself). All are `engin
 
 ## In-car view and the network
 
-Nothing new is sent: the in-car view is drawn from the same `NetCar` as the map (protocol
-unchanged). The guide's machine builds the stage's scenery behind the loading screen, so the
+The in-car view is drawn from the same `NetCar` as the map, plus `NetDamage`: the guide's car
+drops the same body parts as the driver's (`art::props`) and `GuideFeed::damage` carries the
+damage for the guide's screens. Adding `NetDamage` changed the protocol id (registered types are
+hashed into it), so a build from before it is refused at the handshake instead of mis-reading
+snapshots. The guide's machine builds the stage's scenery behind the loading screen, so the
 link timeout is 12 s (`NetSessionPlugin`) to ride out that load's long frames on either side.
 
 ## Link loss

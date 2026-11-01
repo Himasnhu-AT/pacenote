@@ -32,7 +32,7 @@ use engine::net::Remote;
 
 use crate::net_session::{NetSessionPlugin, Role, Session};
 use crate::stage::{self, Corner, Road, StageDef};
-use sync::{NetCar, NetRun, NetStage};
+use sync::{NetCar, NetDamage, NetRun, NetStage};
 
 /// The stage as the guide knows it: generated from the driver's stage id.
 #[derive(Resource, Clone)]
@@ -64,6 +64,8 @@ impl GuideStage {
 pub struct GuideFeed {
     /// Interpolated car (None until the first snapshot).
     pub car: Option<NetCar>,
+    /// The car's damage and body parts off (the guide's car drops the same parts).
+    pub damage: NetDamage,
     pub run: NetRun,
     /// The driver's stage id and road hash (0 = the driver is in a menu).
     pub stage: NetStage,
@@ -209,13 +211,14 @@ fn update_feed(
     time: Res<Time<Real>>,
     session: Res<Session>,
     stage: Option<Res<GuideStage>>,
-    cars: Query<&NetCar, With<Remote>>,
+    cars: Query<(&NetCar, Option<&NetDamage>), With<Remote>>,
     runs: Query<(Ref<NetRun>, &NetStage), With<Remote>>,
     mut feed: ResMut<GuideFeed>,
 ) {
     let now = time.elapsed_secs_f64();
-    if let Some(c) = cars.iter().next() {
+    if let Some((c, d)) = cars.iter().next() {
         feed.car = Some(*c);
+        feed.damage = d.copied().unwrap_or_default();
     }
     if let Some((run, ns)) = runs.iter().next() {
         if run.is_changed() || feed.run != *run {

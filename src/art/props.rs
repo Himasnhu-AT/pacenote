@@ -13,8 +13,8 @@
 //!   except in near misses.
 //! - **Body parts** (`art::car::DETACHABLE`: mirrors, wing, splitter, bumpers, diffuser) come
 //!   off when the sim says so (`Damage::detached`, set by hard hits in their zone): the part's
-//!   node is hidden and a copy of it tumbles away as debris. A restart puts them back. (The
-//!   guide doesn't get the car's damage over the network, so its view keeps every part.)
+//!   node is hidden and a copy of it tumbles away as debris. A restart puts them back. The
+//!   guide's car drops the same parts, from the replicated damage (`guide::sync::NetDamage`).
 //! - **Shrubs** bend from the car's drawn pose (`SwayPusher` on the car); leaves fly when it
 //!   ploughs in. The drag is the sim's (`vehicle::Give::Brush`), the rustle `audio::body`'s.
 
@@ -461,6 +461,8 @@ mod dev {
 fn car_parts(
     mut commands: Commands,
     cars: Query<(Entity, &DrivenCar, &Children)>,
+    guide_cars: Query<(Entity, &Children), With<crate::guide::seat::GuideCar>>,
+    feed: Option<Res<crate::guide::GuideFeed>>,
     rigs: Query<&super::car::CarRig>,
     kids: Query<&Children>,
     meshes: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &GlobalTransform)>,
@@ -468,9 +470,15 @@ fn car_parts(
     ground: Option<Res<PropGround>>,
     mut shown: Local<Vec<(Entity, u8)>>,
 ) {
-    for (car_e, c, children) in &cars {
+    // (car, parts off, velocity, rotation, its children): the driven car from the sim, the
+    // guide's from the network.
+    let mut all: Vec<(Entity, u8, Vec3, Quat, &Children)> = cars.iter().map(|(e, c, k)| (e, c.car.damage.detached, c.car.vel, c.car.rot, k)).collect();
+    if let Some(f) = feed.as_deref() {
+        let (vel, rot) = f.car.map_or((Vec3::ZERO, Quat::IDENTITY), |c| (c.vel, c.rot));
+        all.extend(guide_cars.iter().map(|(e, k)| (e, f.damage.detached, vel, rot, k)));
+    }
+    for (car_e, now, car_vel, car_rot, children) in all {
         let Some(rig) = children.iter().find_map(|k| rigs.get(k).ok()) else { continue };
-        let now = c.car.damage.detached;
         let i = match shown.iter().position(|s| s.0 == car_e) {
             Some(i) => i,
             None => {
@@ -502,13 +510,13 @@ fn car_parts(
                 let (_, rot, pos) = pg.to_scale_rotation_translation();
                 let seed = ((bit as u64 + 1) * 0x9E37_79B9) ^ car_e.to_bits();
                 let side = if seed.is_multiple_of(2) { 1.0 } else { -1.0 };
-                let right = c.car.rot * Vec3::X;
+                let right = car_rot * Vec3::X;
                 let floor = ground.as_ref().map_or(pos.y - 1.0, |g| g.height(pos.x, pos.z));
                 let root = commands
                     .spawn((
                         Name::new(format!("{name} (off)")),
                         Debris {
-                            vel: c.car.vel * 0.6 + Vec3::Y * 2.5 + right * side * 1.5,
+                            vel: car_vel * 0.6 + Vec3::Y * 2.5 + right * side * 1.5,
                             spin: Vec3::new(3.0, 5.0 * side, 2.0),
                             age: 0.0,
                             life: 12.0,

@@ -150,6 +150,22 @@ fn guide_receives_stage_car_and_run_and_never_simulates() {
     assert_eq!(feed.run.n_splits, 1, "first split at a quarter of {:.0} m", s.road.length());
     assert!((feed.s - 900.0).abs() < 5.0, "guide places the car at {} m", feed.s);
 
+    // Damage and body parts off reach the guide (its car drops the same parts).
+    {
+        let w = p.driver.world_mut();
+        let mut q = w.query::<&mut DrivenCar>();
+        for mut c in q.iter_mut(w) {
+            c.car.damage.hit(0.3, Vec3::new(-0.6, 0.0, -2.0), pacenote::vehicle::HitZone::Front);
+        }
+    }
+    let want = p.driver.world_mut().query::<&DrivenCar>().iter(p.driver.world()).next().unwrap().car.damage;
+    assert!(want.off("FrontSplitter") && want.off("FrontBumper") && want.engine > 0.2, "{want:?}");
+    p.run(30);
+    let got = p.guide.world().resource::<GuideFeed>().damage;
+    assert_eq!(got, pacenote::guide::sync::NetDamage::from_damage(&want));
+    assert_eq!(got.detached, want.detached);
+    assert!((got.parts()[0] - want.engine).abs() <= 0.026, "engine {} vs {}", got.parts()[0], want.engine);
+
     // The guide never simulates: no stage world, no driven car.
     assert!(!p.guide.world().contains_resource::<StageWorld>());
     assert_eq!(p.guide.world_mut().query::<&DrivenCar>().iter(p.guide.world()).count(), 0);
