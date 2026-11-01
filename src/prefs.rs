@@ -48,6 +48,8 @@ pub struct Prefs {
     /// Driving assists (applied to the car before a run starts).
     pub traction_control: bool,
     pub abs: bool,
+    /// The guide's view: 0 in the car (tablet), 1 the map screen.
+    pub guide_view: u32,
 }
 
 impl Default for Prefs {
@@ -70,6 +72,7 @@ impl Default for Prefs {
             stick_deadzone: 0.05,
             traction_control: true,
             abs: true,
+            guide_view: 0,
         }
     }
 }
@@ -165,6 +168,15 @@ fn register(app: &mut App) {
         })
         .register_setting(toggle("codriver_subtitles", "Co-driver", "Subtitles", "Show each call at the top of the screen.", |w| b(p(w).subtitles), |w, v| pm(w).subtitles = v > 0.5))
         .register_setting(FieldDef {
+            key: "guide_view",
+            tab: "Co-driver",
+            label: "Co-driver view",
+            hint: "When you're the guide: ride in the passenger seat with the notes on a tablet (hold Space or right mouse to raise it), or read a full-screen map.",
+            kind: FieldKind::Choice { options: vec!["In car", "Map screen"] },
+            get: |w| p(w).guide_view as f32,
+            set: |w, v| pm(w).guide_view = idx(v, 2),
+        })
+        .register_setting(FieldDef {
             key: "units",
             tab: "HUD",
             label: "Speed units",
@@ -242,6 +254,9 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("call_timing", "Co-driver", None, None),
     ("call_order", "Co-driver", None, None),
     ("codriver_subtitles", "Co-driver", None, None),
+    ("guide_view", "Co-driver", None, None),
+    ("sensitivity", "Co-driver", Some("Look sensitivity (guide in car)"), Some("How fast the mouse turns your head in the passenger seat.")),
+    ("invert_y", "Co-driver", Some("Invert look (guide in car)"), None),
     // HUD.
     ("units", "HUD", None, None),
     ("hud_speed", "HUD", None, None),
@@ -279,8 +294,6 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("stick_linearity", "Controls", None, None),
     ("stick_deadzone", "Controls", None, None),
     // Nothing in Pacenote uses these: hidden.
-    ("sensitivity", "", None, None),
-    ("invert_y", "", None, None),
     ("toggle_actions", "", None, None),
     ("rumble", "", None, None),
     ("music_volume", "", None, None),
@@ -513,9 +526,9 @@ mod tests {
             .add_systems(Update, layout);
         app.update();
         let reg = app.world().resource::<SettingsRegistry>();
-        assert_eq!(reg.tabs, vec!["Driving", "HUD", "Audio", "Video", "Extras", "Controls"]);
+        assert_eq!(reg.tabs, vec!["Driving", "Co-driver", "HUD", "Audio", "Video", "Extras", "Controls"]);
         assert_eq!(reg.tab_fields("Driving").map(|f| f.key).collect::<Vec<_>>(), vec!["camera_view", "fov_deg"]);
-        assert_eq!(reg.field("sensitivity").unwrap().tab, "", "mouse look: hidden");
+        assert_eq!(reg.field("sensitivity").unwrap().tab, "Co-driver", "mouse look: the guide's head in the car");
         assert_eq!(reg.field("master_volume").unwrap().label, "Master");
     }
 

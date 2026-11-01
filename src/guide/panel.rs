@@ -3,14 +3,22 @@
 //! overlays: waiting / link lost messages, countdown, scale bar, controls hint.
 //!
 //! Text is only rewritten when what it shows changes (format into a scratch string, compare).
+//!
+//! On the in-car tablet ([`GuideScreen::InCar`]) the same panel renders into the tablet's
+//! texture (`UiTargetCamera` = the tablet camera), with fewer rows so the type stays big. Under
+//! the next call sits the call-timing cue (`coach.rs`): a bar filling as the note comes into
+//! reach, its green window the time to call, and the word for the last call.
 
 use std::fmt::Write;
 
 use bevy::prelude::*;
 use engine::ui::theme::{display, label};
 
-use super::map::{CREST, MapView, NOTES, PANEL_PX, grade_color};
-use super::{GuideFeed, GuideStage, GuideView, Note, upcoming, view_wanted};
+use bevy::ui::UiTargetCamera;
+
+use super::coach::{self, Grade, GuideCalls};
+use super::map::{CREST, MapCamera, MapView, NOTES, grade_color, panel_px};
+use super::{GuideFeed, GuideScreen, GuideStage, GuideView, Note, upcoming, view_wanted};
 use crate::net_session::Session;
 use crate::stage::Turn;
 
@@ -40,7 +48,24 @@ enum T {
     Overlay,
     Countdown,
     Scale,
+    Cue,
+    CallGrade,
+    Calls,
 }
+
+/// Rows in the coming-up list on this screen.
+fn rows(screen: GuideScreen) -> usize {
+    match screen {
+        GuideScreen::Map => NOTES - 1,
+        GuideScreen::InCar => 4,
+    }
+}
+
+#[derive(Component)]
+struct CueFill;
+
+#[derive(Component)]
+struct CueWindow;
 
 #[derive(Component)]
 struct ProgressFill;
@@ -71,10 +96,25 @@ fn rule(p: &mut ChildSpawnerCommands) {
     p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), margin: UiRect::vertical(Val::Px(4.0)), ..default() }, BackgroundColor(LINE)));
 }
 
-fn spawn(mut commands: Commands) {
+fn spawn(mut commands: Commands, screen: Res<GuideScreen>, cams: Query<Entity, With<MapCamera>>) {
+    let screen = *screen;
+    // On the tablet everything goes to its camera (spawned by the map first).
+    let target = match screen {
+        GuideScreen::Map => None,
+        GuideScreen::InCar => match cams.iter().next() {
+            Some(c) => Some(UiTargetCamera(c)),
+            None => return,
+        },
+    };
+    let panel_w = panel_px(screen);
+    let n_rows = rows(screen);
     // Right panel.
-    commands
-        .spawn((
+    let mut root = commands.spawn_empty();
+    if let Some(t) = &target {
+        root.insert(t.clone());
+    }
+    root
+        .insert((
             Name::new("guide panel"),
             GuideView,
             PanelRoot,
@@ -83,7 +123,7 @@ fn spawn(mut commands: Commands) {
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
-                width: Val::Px(PANEL_PX),
+                width: Val::Px(panel_w),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::axes(Val::Px(28.0), Val::Px(24.0)),
                 row_gap: Val::Px(6.0),
@@ -113,6 +153,20 @@ fn spawn(mut commands: Commands) {
                 r.spawn(t("", display(34.0), DIM, T::NextDist));
             });
             p.spawn(t("", label(18.0), CREST, T::NextMods));
+            // Call cue: the bar fills as the next note comes into reach; green = call it now.
+            let (lo, hi) = coach::window();
+            p.spawn((Node { width: Val::Percent(100.0), height: Val::Px(12.0), margin: UiRect::top(Val::Px(8.0)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)))).with_children(|b| {
+                b.spawn((
+                    CueWindow,
+                    Node { position_type: PositionType::Absolute, left: Val::Percent(lo * 100.0), width: Val::Percent((hi - lo) * 100.0), height: Val::Percent(100.0), ..default() },
+                    BackgroundColor(GOOD.with_alpha(0.28)),
+                ));
+                b.spawn((CueFill, Node { position_type: PositionType::Absolute, left: Val::Percent(0.0), width: Val::Px(5.0), top: Val::Px(-4.0), bottom: Val::Px(-4.0), ..default() }, BackgroundColor(TEXT)));
+            });
+            p.spawn(Node { column_gap: Val::Px(18.0), align_items: AlignItems::Baseline, ..default() }).with_children(|r| {
+                r.spawn(t("", label(17.0), DIM, T::Cue));
+                r.spawn(t("", display(24.0), DIM, T::CallGrade));
+            });
             rule(p);
             eyebrow(p, "COMING UP");
             // Three columns of equal-height cells, so the different type sizes line up.
@@ -120,7 +174,7 @@ fn spawn(mut commands: Commands) {
                 let col = |cols: &mut ChildSpawnerCommands, width: Option<f32>, end: bool, font: &dyn Fn() -> TextFont, color: Color, tag: fn(usize) -> T| {
                     cols.spawn(Node { flex_direction: FlexDirection::Column, width: width.map_or(Val::Auto, Val::Px), align_items: if end { AlignItems::FlexEnd } else { AlignItems::FlexStart }, ..default() })
                         .with_children(|c| {
-                            for i in 0..NOTES - 1 {
+                            for i in 0..n_rows {
                                 c.spawn(Node { height: Val::Px(38.0), align_items: AlignItems::Center, ..default() }).with_child(t("", font(), color, tag(i)));
                             }
                         });
@@ -137,29 +191,42 @@ fn spawn(mut commands: Commands) {
                     r.spawn(t("", display(24.0), DIM, T::Split(i)));
                 });
             }
+            p.spawn(t("", label(15.0), DIM, T::Calls));
         });
     // Map overlays.
-    commands.spawn((
+    let mut overlay = commands.spawn((
         GuideView,
         t("", display(40.0), TEXT, T::Overlay),
-        Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(PANEL_PX), top: Val::Percent(44.0), justify_content: JustifyContent::Center, ..default() },
+        Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(panel_w), top: Val::Percent(40.0), justify_content: JustifyContent::Center, ..default() },
         TextLayout::justify(Justify::Center),
     ));
-    commands.spawn((
+    if let Some(t) = &target {
+        overlay.insert(t.clone());
+    }
+    let mut countdown = commands.spawn((
         GuideView,
         t("", display(120.0), Color::srgb(1.0, 0.85, 0.3), T::Countdown),
-        Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(PANEL_PX), top: Val::Percent(12.0), justify_content: JustifyContent::Center, ..default() },
+        Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(panel_w), top: Val::Percent(12.0), justify_content: JustifyContent::Center, ..default() },
         TextLayout::justify(Justify::Center),
     ));
-    commands
-        .spawn((GuideView, Node { position_type: PositionType::Absolute, left: Val::Px(28.0), bottom: Val::Px(24.0), flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0), ..default() }))
-        .with_children(|p| {
-            p.spawn(Node { column_gap: Val::Px(10.0), align_items: AlignItems::Center, ..default() }).with_children(|r| {
-                r.spawn((ScaleBar, Node { width: Val::Px(100.0), height: Val::Px(4.0), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.7))));
-                r.spawn(t("100 m", label(15.0), DIM, T::Scale));
-            });
-            p.spawn((Text::new("WHEEL / + -  ZOOM    DRAG  PAN    F  FOLLOW    M  WHOLE STAGE    H  HEADING UP"), label(14.0), TextColor(Color::srgba(1.0, 1.0, 1.0, 0.4))));
+    if let Some(t) = &target {
+        countdown.insert(t.clone());
+    }
+    let hint = match screen {
+        GuideScreen::Map => "WHEEL / + -  ZOOM    DRAG  PAN    F  FOLLOW    M  WHOLE STAGE    H  HEADING UP",
+        GuideScreen::InCar => "HOLD SPACE / RIGHT MOUSE  RAISE    E  CALL    WHEEL  ZOOM",
+    };
+    let mut foot = commands.spawn((GuideView, Node { position_type: PositionType::Absolute, left: Val::Px(28.0), bottom: Val::Px(24.0), flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0), ..default() }));
+    if let Some(t) = &target {
+        foot.insert(t.clone());
+    }
+    foot.with_children(|p| {
+        p.spawn(Node { column_gap: Val::Px(10.0), align_items: AlignItems::Center, ..default() }).with_children(|r| {
+            r.spawn((ScaleBar, Node { width: Val::Px(100.0), height: Val::Px(4.0), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.7))));
+            r.spawn(t("100 m", label(15.0), DIM, T::Scale));
         });
+        p.spawn((Text::new(hint), label(14.0), TextColor(Color::srgba(1.0, 1.0, 1.0, 0.4))));
+    });
 }
 
 fn clock(out: &mut String, t: f32) {
@@ -222,15 +289,17 @@ fn put(text: &mut Text, s: &str) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update(
     feed: Res<GuideFeed>,
     session: Res<Session>,
     stage: Option<Res<GuideStage>>,
     view: Res<MapView>,
+    calls: Option<Res<GuideCalls>>,
     mut texts: Query<(&T, &mut Text, &mut TextColor)>,
-    mut fill: Query<&mut Node, (With<ProgressFill>, Without<ScaleBar>)>,
-    mut bar: Query<&mut Node, (With<ScaleBar>, Without<ProgressFill>)>,
+    mut fill: Query<&mut Node, (With<ProgressFill>, Without<ScaleBar>, Without<CueFill>)>,
+    mut bar: Query<&mut Node, (With<ScaleBar>, Without<ProgressFill>, Without<CueFill>)>,
+    mut cue_q: Query<(&mut Node, &mut BackgroundColor), (With<CueFill>, Without<ProgressFill>, Without<ScaleBar>)>,
     mut notes: Local<Vec<Note>>,
     mut s: Local<String>,
 ) {
@@ -241,6 +310,11 @@ fn update(
     }
     let run = feed.run;
     let car = feed.car;
+    let speed = car.map_or(0.0, |c| c.speed());
+    let cue = calls.as_ref().filter(|_| run.running()).and_then(|c| c.coach.cue(feed.s, speed));
+    // The last call's word stays up for 2.5 s of run time.
+    let last = calls.as_ref().and_then(|c| c.coach.last).filter(|(_, at)| (feed.clock - at) < 2.5 && feed.clock >= *at);
+    let tally = calls.as_ref().map(|c| c.coach.tally).unwrap_or_default();
     for (tag, mut text, mut color) in &mut texts {
         s.clear();
         let mut c = color.0;
@@ -347,6 +421,13 @@ fn update(
                 } else if !session.connected && session.was_connected {
                     s.push_str("LINK LOST  RECONNECTING");
                     c = BAD;
+                } else if let Some(f) = run.finished {
+                    s.push_str("FINISH  ");
+                    clock(&mut s, f);
+                    if let Some(score) = tally.score() {
+                        let _ = write!(s, "\nCALL TIMING {score}%");
+                    }
+                    c = TEXT;
                 } else {
                     c = TEXT;
                 }
@@ -358,6 +439,40 @@ fn update(
                     } else if run.finished.is_none() && run.time < 1.0 && car.is_some() {
                         s.push_str("GO");
                     }
+                }
+            }
+            T::Cue => match cue {
+                Some(q) if q.now => {
+                    s.push_str("CALL IT NOW");
+                    c = GOOD;
+                }
+                Some(q) if q.to_go < coach::LATE_S => {
+                    s.push_str("LATE: CALL IT");
+                    c = BAD;
+                }
+                Some(q) if q.fill > 0.0 => {
+                    let _ = write!(s, "CALL IN {:.1} S", (q.to_go - coach::IDEAL_S).max(0.0));
+                    c = DIM;
+                }
+                Some(_) => {
+                    s.push_str("NEXT CALL");
+                    c = DIM;
+                }
+                None => {}
+            },
+            T::CallGrade => {
+                if let Some((g, _)) = last {
+                    s.push_str(g.word());
+                    c = match g {
+                        Grade::OnTime => GOOD,
+                        Grade::Early => WARN,
+                        Grade::Late | Grade::Missed => BAD,
+                    };
+                }
+            }
+            T::Calls => {
+                if let Some(score) = tally.score() {
+                    let _ = write!(s, "CALL TIMING {score}%   {} ON TIME  {} EARLY  {} LATE  {} MISSED", tally.on_time, tally.early, tally.late, tally.missed);
                 }
             }
             T::Scale => {
@@ -378,6 +493,19 @@ fn update(
         let w = Val::Percent((feed.s / g.road.length()).clamp(0.0, 1.0) * 100.0);
         if n.width != w {
             n.width = w;
+        }
+    }
+    if let Ok((mut n, mut bg)) = cue_q.single_mut() {
+        let (x, col) = match cue {
+            Some(q) => (q.fill, if q.now { GOOD } else if q.to_go < coach::LATE_S { BAD } else { TEXT }),
+            None => (0.0, Color::NONE),
+        };
+        let left = Val::Percent(x * 100.0);
+        if n.left != left {
+            n.left = left;
+        }
+        if bg.0 != col {
+            bg.0 = col;
         }
     }
     if let Ok(mut n) = bar.single_mut() {

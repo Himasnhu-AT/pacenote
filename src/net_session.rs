@@ -185,6 +185,10 @@ impl Plugin for NetSessionPlugin {
             cfg.send_interval = 2;
             // The guide stays on its map screen when the link drops (and reconnects).
             cfg.drive_app_state = false;
+            // Either side may hold a frame for a few seconds while a stage loads (the guide in
+            // the car builds the scenery too; shaders compile on first draw): don't call that
+            // a dropped link.
+            cfg.connection.timeout_s = 12.0;
         }
         if role == Role::Guide {
             // The guide has no menu to sit in: straight to its screen, waiting for the driver.

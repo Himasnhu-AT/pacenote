@@ -7,6 +7,10 @@
 //!   extrapolated between updates. The guide never runs the car simulation: it has no
 //!   `StageWorld` and no `DrivenCar`, so the drive systems and the HUD never run there.
 //! - [`map`] + [`panel`]: the guide's screen (top-down map, corner list, clock, splits).
+//! - [`seat`] + [`tablet`] (Co-driver view: In car, the default): the guide rides in the
+//!   passenger seat of the replicated car ([`smooth`] pose, [`head`] motion and look) with the
+//!   map and notes on a tablet on their knees (the same map and panel, drawn into its texture).
+//! - [`coach`]: call timing (when the guide reads each note), shown on the panel and tablet.
 //! - [`notice`]: the driver's small "guide connected / disconnected" label.
 //!
 //! Session and roles: `crate::net_session`.
@@ -16,8 +20,10 @@ pub mod head;
 pub mod map;
 pub mod notice;
 pub mod panel;
+pub mod seat;
 pub mod smooth;
 pub mod sync;
+pub mod tablet;
 
 use std::sync::Arc;
 
@@ -82,6 +88,27 @@ pub fn view_wanted(role: Res<Role>, state: Option<Res<State<engine::flow::AppSta
 #[derive(Component)]
 pub struct GuideView;
 
+/// Where the guide reads the road (Settings > Co-driver > Co-driver view).
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GuideScreen {
+    /// In the passenger seat with the notes on a tablet (default).
+    #[default]
+    InCar,
+    /// The full-screen top-down map and notes panel.
+    Map,
+}
+
+impl GuideScreen {
+    /// From `Prefs::guide_view` (0 in car, 1 map screen).
+    pub fn from_pref(v: u32) -> GuideScreen {
+        if v == 1 { GuideScreen::Map } else { GuideScreen::InCar }
+    }
+}
+
+/// The guide's feed systems (stage, car, run, call timing); views run after them.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FeedSystems;
+
 /// Run condition: this machine is the driver (hosting).
 pub fn is_driver(role: Res<Role>) -> bool {
     *role == Role::Driver
@@ -91,14 +118,16 @@ pub struct GuidePlugin;
 
 impl Plugin for GuidePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(NetSessionPlugin).init_resource::<GuideFeed>();
+        app.add_plugins(NetSessionPlugin).init_resource::<GuideFeed>().init_resource::<GuideScreen>().init_resource::<coach::GuideCalls>();
         sync::register(app);
-        app.add_systems(Update, (follow_stage, update_feed, enter_game).chain().run_if(is_guide));
-        app.add_systems(Update, despawn_view.run_if(not(view_wanted)));
+        app.add_systems(Update, (follow_stage, update_feed, enter_game, coach::track).chain().in_set(FeedSystems).run_if(is_guide));
+        app.add_systems(Update, (follow_screen, despawn_view.run_if(not(view_wanted))).chain().before(FeedSystems));
         let visuals = app.world().get_resource::<engine::flow::Headless>().is_none_or(|h| !h.0);
         if visuals {
             map::build(app);
             panel::build(app);
+            seat::build(app);
+            tablet::build(app);
             notice::build(app);
         }
     }
@@ -108,6 +137,18 @@ impl Plugin for GuidePlugin {
 fn enter_game(stage: Option<Res<GuideStage>>, state: Option<Res<State<engine::flow::AppState>>>, mut next: ResMut<NextState<engine::flow::AppState>>) {
     if stage.is_some() && state.is_some_and(|s| *s.get() == engine::flow::AppState::MainMenu) {
         next.set(engine::flow::AppState::InGame);
+    }
+}
+
+/// Follows Settings > Co-driver > Co-driver view; a change rebuilds the guide's view.
+fn follow_screen(mut commands: Commands, prefs: Option<Res<crate::prefs::Prefs>>, mut screen: ResMut<GuideScreen>, q: Query<Entity, With<GuideView>>) {
+    let Some(p) = prefs else { return };
+    let want = GuideScreen::from_pref(p.guide_view);
+    if *screen != want {
+        *screen = want;
+        for e in &q {
+            commands.entity(e).despawn();
+        }
     }
 }
 

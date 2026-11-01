@@ -327,9 +327,14 @@ fn advance(world: &mut World) {
             let Some(Pending(s)) = world.remove_resource::<Pending>() else { return };
             let t0 = Instant::now();
             let near = near_cells(&s);
-            crate::world::spawn(world, &s);
-            world.spawn((engine::gfx::MainCamera, Camera3d::default(), Transform::from_xyz(0.0, 50.0, 0.0)));
-            crate::drive::spawn_car(world);
+            if world.get_resource::<crate::net_session::Role>() == Some(&crate::net_session::Role::Guide) {
+                // The guide rides along: the scenery and a drawn car, never the simulation.
+                crate::guide::seat::build_scene(world, &s);
+            } else {
+                crate::world::spawn(world, &s);
+                world.spawn((engine::gfx::MainCamera, Camera3d::default(), Transform::from_xyz(0.0, 50.0, 0.0)));
+                crate::drive::spawn_car(world);
+            }
             // Evaluate the dressing with every spare core while nobody is driving.
             let fast = {
                 let mut pcg = world.resource_mut::<PcgSettings>();

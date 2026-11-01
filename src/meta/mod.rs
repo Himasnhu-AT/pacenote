@@ -287,12 +287,13 @@ fn sync_camera(
     *last = Some((*view, profile.camera));
 }
 
-/// The mouse pointer is only captured while there's a car to drive: the guide (map, pan, zoom)
-/// and a finished or retired run keep it free. (The engine also frees it whenever a screen such
-/// as the results is open.)
-fn free_pointer(run: Option<Res<StageRun>>, role: Option<Res<Role>>, capture: Option<ResMut<engine::input::CaptureCursor>>) {
+/// The mouse pointer is only captured while there's a car to drive or a head to turn: the guide
+/// on the map screen (pan, zoom) and a finished or retired run keep it free; the guide in the
+/// car looks around with it. (The engine also frees it whenever a screen such as the results is
+/// open.)
+fn free_pointer(run: Option<Res<StageRun>>, role: Option<Res<Role>>, screen: Option<Res<crate::guide::GuideScreen>>, capture: Option<ResMut<engine::input::CaptureCursor>>) {
     let Some(mut capture) = capture else { return };
-    let guide = role.is_some_and(|r| *r == Role::Guide);
+    let guide = role.is_some_and(|r| *r == Role::Guide) && screen.is_none_or(|s| *s == crate::guide::GuideScreen::Map);
     let done = run.is_some_and(|r| r.finished.is_some() || r.retired);
     let want = !(guide || done);
     if capture.0 != want {
@@ -438,6 +439,7 @@ pub fn teardown(world: &mut World) {
                 With<SpotLight>,
                 With<Camera3d>,
                 With<DrivenCar>,
+                With<crate::guide::seat::GuideCar>,
                 With<engine::pcg::PcgVolume>,
                 With<engine::pcg::PcgCellRoot>,
             )>,

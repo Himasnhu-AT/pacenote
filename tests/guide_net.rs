@@ -203,3 +203,26 @@ fn guide_retries_when_the_link_drops() {
     // RETRY_SECS is real time: the manual time strategy steps 1/60 s per update.
     p.run_until(60 * 8, "guide reconnected by itself", |p| p.guide.world().resource::<Session>().connected);
 }
+
+#[test]
+fn guide_call_timing_follows_the_replicated_run() {
+    use pacenote::guide::coach::GuideCalls;
+    let mut p = Pair::new(1);
+    p.run_until(300, "guide has the stage", |p| p.guide.world().contains_resource::<GuideStage>());
+    p.drive_to(5.0, 0.5);
+    p.run(30);
+    let first = p.guide.world().resource::<GuideCalls>().coach.notes().iter().find(|n| n.at > 60.0).copied().expect("notes");
+    assert_eq!(p.guide.world().resource::<GuideCalls>().coach.tally.count(), 0, "nothing graded at the start");
+    // The car goes past the first note with no call: missed.
+    p.drive_to(first.at + 20.0, 12.0);
+    p.run(30);
+    let t = p.guide.world().resource::<GuideCalls>().coach.tally;
+    assert!(t.missed >= 1, "{t:?}");
+    assert_eq!(t.score(), Some(0));
+    // A restart (the countdown again) starts the tally over.
+    p.driver.world_mut().insert_resource(StageRun { countdown: 3.0, ..default() });
+    p.run(30);
+    assert_eq!(p.guide.world().resource::<GuideCalls>().coach.tally.count(), 0);
+    // Still no simulation on the guide's side.
+    assert!(!p.guide.world().contains_resource::<StageWorld>());
+}

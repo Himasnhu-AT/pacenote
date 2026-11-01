@@ -2,7 +2,9 @@
 
 Two machines (or two processes) play one stage. The **driver hosts** a listen server (engine
 `net`, UDP) and runs the car simulation; the **guide joins**, receives the stage and the car,
-and sees a top-down map instead of the car camera. One guide per driver.
+and rides in the passenger seat with the pace notes on a tablet (Settings > Co-driver >
+Co-driver view: "In car", the default) or reads a full-screen top-down map ("Map screen"). One
+guide per driver.
 
 ## Run it
 
@@ -27,7 +29,12 @@ copy (the shared `target/debug/pacenote` can be another branch's by the time you
 |---|---|
 | `src/net_session.rs` | `Role` (Solo / Driver / Guide), `Session` (peer, names, RTT, link state), `host`, `join`, `leave`, `host_with` / `join_with` (any transport, for tests), the `Hello` name message, guide auto-reconnect |
 | `src/guide/sync.rs` | Replicated `NetStage`, `NetRun`, `NetCar` + quantising codecs, `road_hash`, the driver's publishing systems |
-| `src/guide/mod.rs` | `GuidePlugin`; guide side: `GuideStage` (road + pace notes regenerated from the id), `GuideFeed` (latest car / run, clock extrapolated), `upcoming` notes |
+| `src/guide/mod.rs` | `GuidePlugin`; guide side: `GuideStage` (road + pace notes regenerated from the id), `GuideFeed` (latest car / run, clock extrapolated), `upcoming` notes, `GuideScreen` (in car / map) |
+| `src/guide/seat.rs` | In car: the stage's scenery built on the guide (no `StageWorld`, no `DrivenCar`), the drawn car (`GuideCar`, `ShownCar`), the passenger-seat camera (model node `CoDriverEye`, else the driver's eye mirrored), driver silhouette |
+| `src/guide/smooth.rs` | `PoseSmoother`: steady pose from the interpolated `NetCar` (extrapolates late packets, filters rotation quantisation), acceleration for the head |
+| `src/guide/head.rs` | `HeadMotion` (g-forces on the neck) and `Look` (mouse look within a seated range) |
+| `src/guide/tablet.rs` | The tablet: the map + panel rendered into its texture (`TabletImage`), resting on the knees, raised with Space / right mouse, held in the guide's hands |
+| `src/guide/coach.rs` | Call timing: grades each note's call (voice onset or `E`), cue bar on the panel, score at the finish |
 | `src/guide/map.rs` | The map: 2D ortho camera, road as retained gizmos, highlight, labels, car arrow, controls |
 | `src/guide/panel.rs` | The guide's panel: status, clock, speed, NEXT call, coming-up list, splits, overlays |
 | `src/guide/notice.rs` | The driver's only hint: "GUIDE CONNECTED 17 MS" top-right |
@@ -59,8 +66,17 @@ the driver HUD don't run there, and it never reads driving actions.
 
 ## Guide controls
 
-Mouse wheel or `+` / `-` zoom, left-drag pans (stops following), `F` follows the car, `M`
-shows the whole stage, `H` heading-up. All are `engine::actions` (group "Guide"), rebindable.
+Map screen: mouse wheel or `+` / `-` zoom, left-drag pans (stops following), `F` follows the
+car, `M` shows the whole stage, `H` heading-up. In car: the mouse turns the head, hold Space /
+right mouse / left trigger to raise the tablet, wheel zooms its map. Both: `E` (pad A) marks a
+call when not using voice chat (talking starts a call by itself). All are `engine::actions`
+(group "Guide"), rebindable.
+
+## In-car view and the network
+
+Nothing new is sent: the in-car view is drawn from the same `NetCar` as the map (protocol
+unchanged). The guide's machine builds the stage's scenery behind the loading screen, so the
+link timeout is 12 s (`NetSessionPlugin`) to ride out that load's long frames on either side.
 
 ## Link loss
 
@@ -75,6 +91,8 @@ shows the whole stage, `H` heading-up. All are `engine::actions` (group "Guide")
 - Names: `Session::name` is set by meta's netlink from the profile; command-line sessions send
   an empty name.
 - The map has no terrain shading or hazard marking yet (design: the guide can mark hazards).
-- A second guide is refused (`max_clients = 1`); after a crash the old slot frees on the 5 s
+- A second guide is refused (`max_clients = 1`); after a crash the old slot frees on the 12 s
   timeout, the retry loop covers it.
+- In car: wheel suspension travel and the handbrake aren't replicated (the guide's car shows
+  the wheels at static load); call timing is shown to the guide only.
 - No relay / NAT traversal (engine limit): LAN or a forwarded port.
