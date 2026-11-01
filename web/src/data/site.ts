@@ -18,7 +18,7 @@ export const site = {
   urlPlaceholder: true,
   title: 'Pacenote: two people, one rally car',
   description:
-    'A two-person rally game: one drives and sees only the road, one reads the map and calls the corners. 20 stages, crash damage, AI co-driver. Free demo on Steam.',
+    'A two-person rally game: one drives and sees only the road, one reads the map and calls the corners. 20 stages, posts and saplings that snap, AI co-driver. Free demo on Steam.',
   kind: 'Two-person rally game',
   // PLACEHOLDER studio name.
   studio: { name: 'Marl Studio', placeholder: true as const },
@@ -84,7 +84,7 @@ export const home = {
     },
     solo: {
       name: 'Alone',
-      text: 'No guide tonight? The AI co-driver reads the same notes out loud, a few seconds ahead of the car, chained the way a real co-driver would. It tells you about the damage too, and it goes quiet when a human guide joins. N turns it off.',
+      text: 'No guide tonight? The AI co-driver reads the same notes out loud, a few seconds ahead of the car, chained the way a real co-driver would. It shouts when you have a big hit, and it goes quiet when a human guide joins. N turns it off.',
       transcript: [
         { t: 'Ready. 150 left four long.', k: 'note' },
         { t: '90 left four, into right two, careful.', k: 'note' },
@@ -124,15 +124,17 @@ export const home = {
     all: 'All 20 stages',
   },
   damage: {
-    title: 'Hit something and you will feel it',
-    lead: 'Your car is an original three-door gravel hatchback in white, navy and orange, number 14. Clip a tree and the damage goes where the hit was. A big enough hit ends your run.',
+    title: 'The car never breaks. Things around it do.',
+    lead: 'There is no damage. Clip a marker post, a kilometre board or a young tree and it snaps and topples, chips and leaves flying, and you drive on a little slower. Hit a big tree or a boulder and you stop dead.',
+    // `lost`: share of 60 km/h it costs (the bar).
     parts: [
-      { name: 'Engine', text: 'Less power, lower top speed.' },
-      { name: 'Steering', text: 'The car pulls to one side. Keep correcting.' },
-      { name: 'Suspension', text: 'Softer, slower, less grip in the bumps.' },
+      { name: 'Posts and boards', text: 'Snap at walking pace. You barely feel them.', lost: 0.02 },
+      { name: 'Saplings', text: 'Snap from about 11 km/h. A few km/h gone.', lost: 0.06 },
+      { name: 'Shrubs', text: 'Bend and spring back. Cut the corner through them, they drag a little.', lost: 0.04 },
+      { name: 'Big trees, boulders', text: 'Solid. You stop, back out and go again.', lost: 1 },
     ],
-    retire: 'Break one part completely and you are out of the stage: retired.',
-    recover: 'Off the road but still in one piece? Recover puts you back on it for 5 seconds.',
+    retire: 'No damage, no retirements. A crash costs you time, never the stage.',
+    recover: 'Stuck or upside down? Recover puts you back on the road for 5 seconds.',
   },
   numbers: {
     title: 'The stages, by the numbers',
@@ -202,7 +204,7 @@ export const shots: { hero: ShotRef; driver: ShotRef; guide: ShotRef | null; cra
   hero: { src: 'hero-cockpit', alt: 'The driver’s view on Pinewater at 68 km/h: a white roll cage frames a straight gravel road between tall pines, the dash with two lit gauges below.' },
   driver: { src: 'driver-frostline', alt: 'Cockpit view on Frostline: snow-covered spruce on both sides of a white road, the steering wheel and gauges in front.' },
   guide: { src: 'guide-view', alt: 'The guide’s screen during a run on Pinewater: a top-down map with the car’s position and the next stretch lit in orange, corner tags like L4 and R5 along the road, and a panel with the stage clock, speed, the next call Right 5 at 20 m, and the coming-up list Left 4, Left 5, Right 3, Left 5, Right 1, Left 2.' },
-  crash: { src: 'crash-pinewater', alt: 'Chase camera after a crash on Pinewater: the white rally car off the road among pine trees, the subtitle reads Big hit! The engine took a knock, and a damage readout shows engine 32%, steering 27%, suspension 14%.' },
+  crash: { src: 'snap-pinewater', alt: 'Chase camera on Pinewater: the rally car has just clipped a kilometre board at the road edge, which tips over behind it with yellow chips flying, at 40 km/h.' },
   car: { src: 'car-sunscar', alt: 'The rally car from behind on Sunscar’s orange gravel, kicking up dust under a clear sky, scrub trees on the ridge.', caption: 'Car 14 on Sunscar, stage 5.' },
 };
 

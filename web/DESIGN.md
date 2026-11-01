@@ -5,7 +5,7 @@
 - **Subject:** Pacenote, an original two-person rally game (Rust, Bevy 0.19, in-house engine).
   A **driver** sees only the road from the cockpit; a **guide** sees the stage map and the
   corner list and reads pace notes over built-in voice. Solo, an AI co-driver reads the notes
-  out loud. 20 fixed stages, crash damage, leaderboards and ghosts per stage.
+  out loud. 20 fixed stages, roadside things that break (never the car), leaderboards and ghosts per stage.
 - **Audience:** rally and sim-racing players, couch/online co-op pairs, Reddit readers who come
   from a post with real gameplay stats.
 - **Job:** launch a free **Steam demo** and collect **wishlists**. In 3 seconds: two people,
@@ -128,7 +128,7 @@ HOME
 3 Read the road        [ pinned: map cols 1-7 | call sheet cols 8-12, grade legend    ]
   (signature)          [ elevation strip under the map, progress in metres            ]
 4 Stages (index)       [ 20 rows: no. | name | outline | km | surface | weather → page ]
-5 Damage & car (asym)  [ chase capture full bleed | three parts as gauges | lines      ]
+5 What breaks (asym)   [ chase capture full bleed | four things, speed-lost bars | lines ]
 6 Numbers (data)       [ sample badge | 4 totals | co-driver on/off | worst corner map ]
 7 Gallery wall         [ biome captures, mixed sizes, captions = stage + conditions  ]
 8 FAQ (narrow)         [ details/summary list, col 4-10                               ]
