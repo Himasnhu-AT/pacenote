@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "Two-person rally: a driver who can't see the map and a guide who can't drive, talking over voice."
 
 [dependencies]
-engine = { path = "/Users/himanshu/codes/game/engine", default-features = false, features = ["look", "vfx", "pcg", "world", "net", "sound", "actions", "ktx2"] }
+engine = { path = "/Users/himanshu/codes/game/engine", default-features = false, features = ["look", "vfx", "pcg", "world", "net", "sound", "actions", "props", "ktx2"] }
 # Stage generation and pure game logic (no Bevy systems).
 pcg-core = { path = "/Users/himanshu/codes/game/engine/crates/pcg-core" }
 # Bevy derive macros expand to `bevy::ecs::..`, so the game names bevy itself (no features of

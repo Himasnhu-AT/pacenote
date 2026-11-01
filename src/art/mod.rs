@@ -13,6 +13,7 @@ pub mod ground;
 pub mod hands;
 pub mod look;
 pub mod meshfile;
+pub mod props;
 pub mod spray;
 pub mod terrain;
 pub mod trees;
@@ -43,7 +44,7 @@ impl Plugin for ArtPlugin {
         }
         app.add_systems(Update, (trees::ingest, trees::stream).chain())
             .add_systems(Update, dressing::tag_cover)
-            .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin));
+            .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin));
     }
 }
 
@@ -92,6 +93,7 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     let cat = dressing::catalog(world, s.def.biome, wet(&s.def));
     world.insert_resource(cat);
     trees::setup(world, s, view);
+    props::spawn(world, s);
     let (graph, inputs) = crate::world::dressing(s);
     let half = stage::half_size(&s.def);
     world.spawn(PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area: Area::new(Vec2::splat(-half), Vec2::splat(half)), cell: 64.0 });
