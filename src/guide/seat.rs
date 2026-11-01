@@ -309,7 +309,10 @@ fn ride(
     let fwd = body * Vec3::NEG_Z;
     let level = Quat::from_rotation_y(f32::atan2(-fwd.x, -fwd.z));
     let head_frame = level.slerp(body, 0.55 + 0.4 * shake);
-    cam.translation = car_tf.translation + body * (eye + ride.head.offset);
+    // Looking round, the head leans forward past the seat's wings (and in, towards the driver).
+    let centre = if eye.x > 0.0 { 1.0 } else { -1.0 };
+    let lean = super::head::lean(ride.look.yaw, centre);
+    cam.translation = car_tf.translation + body * (eye + ride.head.offset + lean);
     cam.rotation = head_frame * ride.look.rotation() * ride.head.tilt();
 }
 

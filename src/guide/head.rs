@@ -27,6 +27,22 @@ pub const PITCH_UP: f32 = 28.0 * std::f32::consts::PI / 180.0;
 /// Resting pitch: a little down, the way a co-driver looks at the road.
 pub const REST_PITCH: f32 = -0.06;
 
+/// How far the head leans when looking round (m): forward past the seat's head wings, and in
+/// towards the car's centre when looking across at the driver.
+pub const LEAN_FORWARD: f32 = 0.17;
+pub const LEAN_INWARD: f32 = 0.07;
+
+/// Where the head moves for a look `yaw` (rad, + = left), car frame. `centre` is the side the
+/// car's centre is on from this seat: +1 = to the left (right-hand seat), −1 = to the right.
+/// Nothing straight ahead; full lean by ~80° either way, inward only towards the centre.
+pub fn lean(yaw: f32, centre: f32) -> Vec3 {
+    let k = (yaw.abs() / 80f32.to_radians()).clamp(0.0, 1.0);
+    let k = k * k * (3.0 - 2.0 * k);
+    let inward = if yaw * centre > 0.0 { LEAN_INWARD * k } else { 0.0 };
+    // Centre to the left (+1) is −X.
+    Vec3::new(-centre * inward, 0.015 * k, -LEAN_FORWARD * k)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct HeadMotion {
     /// Offset from the rest eye point, car frame (m).
@@ -154,6 +170,17 @@ mod tests {
             }
         }
         assert!(a.offset.distance(b.offset) < 0.006, "{} vs {}", a.offset, b.offset);
+    }
+
+    #[test]
+    fn looking_across_leans_forward_and_in() {
+        assert_eq!(lean(0.0, 1.0), Vec3::ZERO);
+        // Right-hand seat looking left at the driver: forward and to the left (−X).
+        let l = lean(1.4, 1.0);
+        assert!(l.z < -0.15 && l.x < -0.05, "{l}");
+        // Looking out of the window: forward only.
+        let r = lean(-1.4, 1.0);
+        assert!(r.z < -0.15 && r.x == 0.0, "{r}");
     }
 
     #[test]
