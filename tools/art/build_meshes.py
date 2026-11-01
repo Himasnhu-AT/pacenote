@@ -1,4 +1,5 @@
-# Decimates the Poly Haven rocks / shrubs / ferns / grass / stump / log models and writes them
+# Decimates the Poly Haven rocks / ferns / grass / stump models (the shrubs come from
+# tools/art/build_bushes.py) and writes them
 # as small binary meshes the game reads at load (src/art/meshfile.rs):
 #   blender -b --factory-startup -P tools/art/build_meshes.py -- <assets_src> <assets/models>
 # Format ("PNM1"): u32 vertex count, u32 index count, then f32 positions (xyz), normals (xyz),
@@ -23,8 +24,6 @@ ITEMS = [
     ("rock_moss_c", "rocks/rock_moss_set_02", "rock_moss_set_02", "rock_moss_set_02_rock13", 1200, 0.9, 0.08),
     ("rock_moss_d", "rocks/rock_moss_set_02", "rock_moss_set_02", "rock_moss_set_02_rock10", 1200, 0.9, 0.08),
     ("rock_dry", "rocks/namaqualand_boulder_05", "namaqualand_boulder_05", "namaqualand_boulder_05", 1400, 1.6, 0.1),
-    ("shrub_a", "vegetation/shrub_02", "shrub_02", "shrub_02_b", 1600, 1.0, 0.0),
-    ("shrub_b", "vegetation/shrub_02", "shrub_02", "shrub_02_d", 1600, 1.0, 0.0),
     ("fern_a", "vegetation/fern_02", "fern_02", "fern_02_b", 600, 1.1, 0.0),
     ("fern_b", "vegetation/fern_02", "fern_02", "fern_02_c", 600, 1.1, 0.0),
     ("grass_a", "vegetation/grass_medium_01", "grass_medium_01", "grass_medium_01_mid_c_LOD0", 700, 2.6, 0.0),

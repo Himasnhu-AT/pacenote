@@ -16,8 +16,8 @@ import sys
 import bpy
 import numpy as np
 
-argv = sys.argv[sys.argv.index("--") + 1:]
-SRC, OUT, ONLY = argv[0], argv[1], set(argv[2:])
+argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+SRC, OUT, ONLY = (argv[0], argv[1], set(argv[2:])) if len(argv) >= 2 else ("", "", set())
 VEG = os.path.join(SRC, "models", "vegetation")
 
 W, H = 1024, 2048
@@ -432,6 +432,8 @@ def build(name, model, obj_name, alphas, bands, dz, da, snow, opts=None):
     print("tree card", name, {k: tuple(round(x, 3) for x in v) for k, v in regions.items()})
 
 
-for t in TREES:
-    if not ONLY or t[0] in ONLY:
-        build(*t)
+# Imported by build_bushes.py for its helpers: only render when run as the script.
+if __name__ == "__main__" and SRC:
+    for t in TREES:
+        if not ONLY or t[0] in ONLY:
+            build(*t)

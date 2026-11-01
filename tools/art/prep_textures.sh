@@ -69,7 +69,7 @@ model rocks/boulder_01 boulder_01 m_boulder 1024
 model rocks/rock_moss_set_01 rock_moss_set_01 m_rock_moss1 1024
 model rocks/rock_moss_set_02 rock_moss_set_02 m_rock_moss2 1024
 model rocks/namaqualand_boulder_05 namaqualand_boulder_05 m_rock_dry 1024
-model vegetation/shrub_02 shrub_02 m_shrub 1024 shrub_02_alpha_2k.jpg
+# m_shrub (bush leaf clumps) is rendered by tools/art/build_bushes.py.
 model vegetation/fern_02 fern_02 m_fern 512 fern_02_alpha_2k.jpg
 model vegetation/grass_medium_01 grass_medium_01 m_grass1 1024 grass_medium_01_alpha_2k.jpg
 model vegetation/grass_medium_02 grass_medium_02 m_grass2 512 grass_medium_02_alpha_2k.jpg

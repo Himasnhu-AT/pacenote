@@ -479,7 +479,7 @@ Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; 
 
 ### Tree Small 02 (`tree_small_02`), added 2026-11-01
 
-- **Use:** birch crown card atlas (rendered without its trunk by `tools/art/render_tree_cards.py` into `assets/textures/card_birch`; the game draws a white birch trunk)
+- **Use:** birch crown card atlas and the roadside bushes' leaf clumps (rendered without its trunk by `tools/art/render_tree_cards.py` into `assets/textures/card_birch`; the game draws a white birch trunk)
 - **Path:** `assets_src/models/vegetation/tree_small_02/`
 - **Source page:** https://polyhaven.com/a/tree_small_02
 - **Download:** https://dl.polyhaven.org/file/ph-assets/Models/gltf/2k/tree_small_02/tree_small_02_2k.gltf (+ .bin and textures listed in https://api.polyhaven.com/files/tree_small_02 under gltf.2k, + `leaves_alpha` 2k jpg); md5-checked
@@ -806,7 +806,7 @@ Same authors and licence as the models above. ~3.3 MB in total.
 ### What the game ships (assets/, built by tools/art/)
 
 - `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures, the `pine_bark` trunk texture, tree card atlases rendered in Blender from `fir_tree_01`, `pine_tree_01` and `tree_small_02` (`tools/art/render_tree_cards.py`) and the scrub-tree card from `island_tree_02` (`tools/art/render_cards.py`; `tools/art/prep_textures.sh`).
-- `assets/models/*.pnm`: decimated rocks, shrubs, ferns, grass and a stump (`tools/art/build_meshes.py`).
+- `assets/models/*.pnm`: decimated rocks, ferns, grass and a stump (`tools/art/build_meshes.py`); the bushes `shrub_a`/`shrub_b` are clusters of leaf-clump cards cut from `tree_small_02` (texture set `m_shrub`, `tools/art/build_bushes.py`), since Poly Haven's `shrub_02` is a sparse weed rather than a bush.
 - `assets/models/rallycar.glb`: the Mercedes-AMG GT3 Evo (above, CC BY), converted and rigged by `tools/art/import_sketchfab.py --profile gt3`. (The original procedural hatchback, `tools/art/build_rallycar.py`, has no third-party content.)
 - Credits: `assets/credits.txt`.
 
