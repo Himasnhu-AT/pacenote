@@ -441,25 +441,27 @@ fn update(
                     }
                 }
             }
-            T::Cue => match cue {
-                Some(q) if q.now => {
-                    s.push_str("CALL IT NOW");
-                    c = GOOD;
+            T::Cue => {
+                // Name the note the cue is for: it may be the one after the corner in progress.
+                if let (Some(q), Some(g), Some(cl)) = (cue, &stage, &calls)
+                    && let Some(n) = cl.coach.notes().get(q.note)
+                {
+                    if q.now {
+                        s.push_str("CALL ");
+                        call(&mut s, g, n);
+                        s.push_str(" NOW");
+                        c = GOOD;
+                    } else if q.to_go < coach::LATE_S {
+                        s.push_str("LATE: CALL ");
+                        call(&mut s, g, n);
+                        c = BAD;
+                    } else {
+                        call(&mut s, g, n);
+                        let _ = write!(s, " IN {:.0} S", (q.to_go - coach::EARLY_S).max(0.0).ceil());
+                        c = DIM;
+                    }
                 }
-                Some(q) if q.to_go < coach::LATE_S => {
-                    s.push_str("LATE: CALL IT");
-                    c = BAD;
-                }
-                Some(q) if q.fill > 0.0 => {
-                    let _ = write!(s, "CALL IN {:.1} S", (q.to_go - coach::IDEAL_S).max(0.0));
-                    c = DIM;
-                }
-                Some(_) => {
-                    s.push_str("NEXT CALL");
-                    c = DIM;
-                }
-                None => {}
-            },
+            }
             T::CallGrade => {
                 if let Some((g, _)) = last {
                     s.push_str(g.word());

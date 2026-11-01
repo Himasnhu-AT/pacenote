@@ -87,7 +87,7 @@ pub struct Cue {
     /// 0 = the note is [`ACCEPT_S`] away … 1 = at the note; the on-time window is
     /// [`window`].
     pub fill: f32,
-    /// It's time to call it.
+    /// It's time to call it (in the on-time window).
     pub now: bool,
 }
 
@@ -215,7 +215,7 @@ impl Coach {
         let i = self.next(s)?;
         let to_go = time_to(self.notes[i].at, s, speed);
         let fill = (1.0 - to_go / ACCEPT_S).clamp(0.0, 1.0);
-        Some(Cue { note: i, to_go, fill, now: (LATE_S..=EARLY_S).contains(&to_go) && to_go <= IDEAL_S + 1.0 })
+        Some(Cue { note: i, to_go, fill, now: (LATE_S..=EARLY_S).contains(&to_go) })
     }
 }
 

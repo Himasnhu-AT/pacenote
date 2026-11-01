@@ -318,7 +318,7 @@ fn spawn_driver(world: &mut World, car: Entity) {
     let (helmet, suit, visor, glove) = {
         let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
         (
-            mats.add(StandardMaterial { base_color: Color::srgb(0.92, 0.92, 0.94), perceptual_roughness: 0.35, ..default() }),
+            mats.add(StandardMaterial { base_color: Color::srgb(0.1, 0.13, 0.26), perceptual_roughness: 0.55, ..default() }),
             mats.add(StandardMaterial { base_color: Color::srgb(0.08, 0.12, 0.22), perceptual_roughness: 0.85, ..default() }),
             mats.add(StandardMaterial { base_color: Color::srgb(0.03, 0.03, 0.04), perceptual_roughness: 0.1, metallic: 0.3, ..default() }),
             mats.add(StandardMaterial { base_color: Color::srgb(0.05, 0.05, 0.06), perceptual_roughness: 0.8, ..default() }),
@@ -327,7 +327,7 @@ fn spawn_driver(world: &mut World, car: Entity) {
     let (head, visor_mesh, torso, arm, hand) = {
         let mut meshes = world.resource_mut::<Assets<Mesh>>();
         (
-            meshes.add(Sphere::new(0.125).mesh().uv(24, 16)),
+            meshes.add(Sphere::new(0.118).mesh().uv(24, 16)),
             meshes.add(Cuboid::new(0.19, 0.065, 0.06)),
             meshes.add(Capsule3d::new(0.17, 0.38)),
             meshes.add(Capsule3d::new(0.045, 0.27)),
@@ -336,7 +336,7 @@ fn spawn_driver(world: &mut World, car: Entity) {
     };
     let part = |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, tf: Transform| (Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, Actor, ChildOf(car));
     // Helmet a little behind and above the eye, visor in front of it.
-    world.spawn((Name::new("driver helmet"), part(&head, &helmet, Transform::from_translation(d + Vec3::new(0.0, 0.0, 0.02)))));
+    world.spawn((Name::new("driver helmet"), part(&head, &helmet, Transform::from_translation(d + Vec3::new(0.0, -0.015, 0.02)))));
     world.spawn((Name::new("driver visor"), part(&visor_mesh, &visor, Transform::from_translation(d + Vec3::new(0.0, 0.0, -0.075)))));
     // Torso, leaning back against the seat.
     let chest = d + Vec3::new(0.0, -0.42, 0.14);

@@ -87,9 +87,9 @@ fn no_tablet(q: Query<(), With<Tablet>>, cams: Query<(), With<SeatCamera>>) -> b
 fn spawn(mut commands: Commands, image: Res<TabletImage>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
     let body = meshes.add(Cuboid::new(BODY.x, BODY.y, BODY.z));
     let screen = meshes.add(Rectangle::new(SCREEN.x, SCREEN.y));
-    let shell = mats.add(StandardMaterial { base_color: Color::srgb(0.035, 0.037, 0.04), perceptual_roughness: 0.45, metallic: 0.2, ..default() });
-    // Unlit and a touch brighter than the texture: a lit display, readable in shade and at night.
-    let face = mats.add(StandardMaterial { base_color: Color::WHITE, base_color_texture: Some(image.0.clone()), unlit: true, ..default() });
+    let shell = mats.add(StandardMaterial { base_color: Color::srgb(0.035, 0.037, 0.04), perceptual_roughness: 0.6, metallic: 0.1, fog_enabled: false, ..default() });
+    // Unlit and out of the fog: a lit display, readable in shade, fog and at night.
+    let face = mats.add(StandardMaterial { base_color: Color::WHITE, base_color_texture: Some(image.0.clone()), unlit: true, fog_enabled: false, ..default() });
     let glove = mats.add(StandardMaterial { base_color: Color::srgb(0.12, 0.12, 0.13), perceptual_roughness: 0.75, ..default() });
     let suit = mats.add(StandardMaterial { base_color: super::seat::CODRIVER_SUIT, perceptual_roughness: 0.85, ..default() });
     let palm = meshes.add(Sphere::new(1.0).mesh().uv(14, 9));
@@ -119,9 +119,10 @@ fn spawn(mut commands: Commands, image: Res<TabletImage>, mut meshes: ResMut<Ass
 }
 
 /// Where the tablet rests on the knees, in the car's frame, for a co-driver eye at `eye`:
-/// held on the thighs below the eye, its face tilted up to the eye.
+/// held up off the thighs, ~0.4 m from the eye (a third of the view's height: the big type
+/// reads at a glance; raise it for the rest), its face tilted up to the eye.
 pub fn lap_pose(eye: Vec3) -> Transform {
-    let p = eye + Vec3::new(0.0, -0.42, -0.3);
+    let p = eye + Vec3::new(0.0, -0.33, -0.25);
     // Face (+Z) towards the eye, top edge towards the front of the car.
     let to_eye = (eye - p).normalize();
     Transform::from_translation(p).looking_to(-to_eye, Vec3::NEG_Z)
@@ -190,7 +191,9 @@ mod tests {
     fn the_tablet_rests_below_the_eye_facing_it() {
         let eye = Vec3::new(0.37, 0.8, 0.6);
         let t = lap_pose(eye);
-        assert!(t.translation.y < eye.y - 0.4 && t.translation.z < eye.z);
+        assert!(t.translation.y < eye.y - 0.3 && t.translation.z < eye.z);
+        let d = t.translation.distance(eye);
+        assert!((0.35..0.5).contains(&d), "{d}");
         let face = t.rotation * Vec3::Z;
         assert!(face.dot((eye - t.translation).normalize()) > 0.99, "{face}");
         // Its top edge points to the front of the car.
