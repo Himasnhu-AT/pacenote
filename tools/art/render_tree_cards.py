@@ -29,11 +29,13 @@ BR_W, BR_H = W - TREE_W, H // 3
 # options: `height` of the atlas (2048 for tall trees, 1024 for wide ones), `clusters`: the
 # three small pictures are round leaf clumps seen from the side (broadleaf) instead of branch
 # slices from above (conifers); `no_trunk`: the whole-tree picture leaves the trunk out (the
-# game draws its own, e.g. a white birch trunk).
+# game draws its own, e.g. a white birch trunk); `trunk`: extra trunk material names; `grade`: hue shift, saturation, value for the
+# needles/leaves (the scans' pine needles are olive-brown, the fir's yellowish).
 TREES = [
-    ("card_fir", "fir_tree_01", "fir_tree_01_a_LOD0", {"fir_tree_01_twig": "fir_tree_01_twig_alpha_2k.jpg"}, [(0.22, 20), (0.42, 140), (0.62, 260)], 0.55, 0.42, True),
+    ("card_fir", "fir_tree_01", "fir_tree_01_a_LOD0", {"fir_tree_01_twig": "fir_tree_01_twig_alpha_2k.jpg"}, [(0.22, 20), (0.42, 140), (0.62, 260)], 0.55, 0.42, True, {"grade": (0.06, 1.0, 0.85)}),
     ("card_birch", "tree_small_02", "tree_small_02_LOD0", {"tree_small_02_leaves": "tree_small_02_leaves_alpha_2k.jpg"}, [(0.5, 30), (0.68, 150), (0.84, 270)], 0.75, 0.6, False, {"height": 1024, "clusters": True, "no_trunk": True}),
-    ("card_pine", "pine_tree_01", "pine_tree_01_a_LOD0", {"pine_tree_01_twig": "pine_tree_01_twig_alpha_2k.jpg"}, [(0.62, 30), (0.74, 150), (0.5, 270)], 0.8, 0.55, False),
+    ("card_olive", "island_tree_01", "island_tree_01_LOD0", {"island_tree_01_leaves": "island_tree_01_leaves_alpha_2k.jpg"}, [(0.45, 30), (0.65, 150), (0.82, 270)], 0.8, 0.6, False, {"height": 1024, "clusters": True, "trunk": ("island_tree_01",)}),
+    ("card_pine", "pine_tree_01", "pine_tree_01_a_LOD0", {"pine_tree_01_twig": "pine_tree_01_twig_alpha_2k.jpg"}, [(0.62, 30), (0.74, 150), (0.5, 270)], 0.8, 0.55, False, {"grade": (0.13, 1.05, 0.85)}),
 ]
 
 
@@ -77,6 +79,11 @@ def upstream_image(socket):
     return None
 
 
+# Colour grade for the foliage (alpha-mapped) materials of the tree being rendered: hue shift
+# (0 = none, +0.1 = a tenth of the wheel towards green from yellow), saturation, value.
+GRADE = None
+
+
 def to_emission(mat, alpha_path, mode):
     """Rewires a glTF-imported material in place: emit its base colour (times a little ambient
     occlusion) or the camera-space normal; cut out by `alpha_path` (same UV/mapping as the
@@ -96,6 +103,13 @@ def to_emission(mat, alpha_path, mode):
         mul.blend_type = "MULTIPLY"
         mul.inputs["Factor"].default_value = 1.0
         if base is not None:
+            if GRADE and alpha_path:
+                hsv = nt.nodes.new("ShaderNodeHueSaturation")
+                hsv.inputs["Hue"].default_value = 0.5 + GRADE[0]
+                hsv.inputs["Saturation"].default_value = GRADE[1]
+                hsv.inputs["Value"].default_value = GRADE[2]
+                nt.links.new(base, hsv.inputs["Color"])
+                base = hsv.outputs["Color"]
             nt.links.new(base, mul.inputs[6])
         else:
             mul.inputs[6].default_value = bsdf.inputs["Base Color"].default_value if bsdf else (0.3, 0.25, 0.2, 1)
@@ -264,8 +278,9 @@ def dilate(rgb, known, steps=32):
 
 
 def build(name, model, obj_name, alphas, bands, dz, da, snow, opts=None):
-    global H, BR_H
+    global H, BR_H, GRADE
     opts = opts or {}
+    GRADE = opts.get("grade")
     H = opts.get("height", 2048)
     BR_H = H // 3
     clusters = opts.get("clusters", False)
@@ -297,7 +312,7 @@ def build(name, model, obj_name, alphas, bands, dz, da, snow, opts=None):
     cen = cen.reshape(-1, 3)
     mi = np.zeros(npoly, np.int64)
     me.polygons.foreach_get("material_index", mi)
-    trunk_mats = [k for k, m in enumerate(me.materials) if "trunk" in m.name]
+    trunk_mats = [k for k, m in enumerate(me.materials) if m.name in opts.get("trunk", ()) or "trunk" in m.name]
     not_trunk = ~np.isin(mi, trunk_mats)
 
     # 1) Whole tree, side view (looking along +Y). The frame keeps the full model's extent so

@@ -25,18 +25,27 @@ Only cooked outputs are committed (`assets/textures/<set>/*.ktx2 + color.avg`,
 
 ```sh
 tools/art/prep_textures.sh                       # ground/road/model sets → assets/textures/<set>/*.jpg (1K, normals 512)
-blender -b --factory-startup -P tools/art/render_cards.py -- <assets_src> assets/textures   # foliage cards (+ snow variant)
+memgate -- blender -b --factory-startup -P tools/art/render_tree_cards.py -- <assets_src> assets/textures [set ...]   # tree card atlases (+ fir snow)
+memgate -- blender -b --factory-startup -P tools/art/build_bushes.py -- <assets_src> assets   # bushes: m_shrub atlas + shrub_a/b.pnm
 memgate -- cargo run --manifest-path <engine>/tools/cook/Cargo.toml -- assets/textures       # → KTX2 (BC7/BC5), alpha kept
-blender -b --factory-startup -P tools/art/build_meshes.py -- <assets_src> assets/models      # rocks/plants → .pnm
+blender -b --factory-startup -P tools/art/build_meshes.py -- <assets_src> assets/models      # rocks/ferns/grass/stump → .pnm
 blender -b --factory-startup -P tools/art/build_rallycar.py -- assets/models/rallycar.glb [preview_dir]   # car (no sources needed)
 ```
 
-- **Foliage cards** are orthographic side renders of the Poly Haven saplings (unlit albedo,
-  alpha from the separately downloaded `*_alpha` maps, camera-space normals softened halfway to
-  the card normal, colour dilated into the transparent texels so mips don't halo). `*_dense`
-  composites four rotated copies for a fuller silhouette; `_snow` whitens upward-facing needles.
-- **Trees**: near = trunk (tapered cylinder, bark) + crown (three crossed core cards + drooping
-  branch cards), ≤ 400 triangles, two entities sharing meshes per species/variant (batched), cast
+- **Tree cards** (`render_tree_cards.py`) are orthographic renders of Poly Haven's full-size
+  scans: `fir_tree_01` (spruce, `card_fir` + `card_fir_snow`), `pine_tree_01` (`card_pine`),
+  `tree_small_02` (birch crown, trunk left out, `card_birch`) and `island_tree_01` (scrub tree,
+  `card_olive`). Each atlas holds the whole tree from the side plus three small pictures: real
+  branch slices seen from above (conifers) or leaf clumps seen from the side (broadleaf). Unlit
+  albedo with a little baked ambient occlusion and a per-tree colour grade for the needles
+  (the scans' pine needles are olive-brown), alpha from the separately downloaded `*_alpha` maps,
+  camera-space normals softened towards the card normal, colour dilated into the transparent
+  texels so mips don't halo; `_snow` whitens upward-facing needles. `frame.txt` lists the regions;
+  `trees.rs` has them as constants and a test keeps the two in sync.
+- **Bushes** (`build_bushes.py`): Poly Haven has no dense bush, so `shrub_a`/`shrub_b` are shells
+  of leaf-clump cards cut from `tree_small_02` (`m_shrub`), 66 / 50 triangles, base at the origin.
+- **Trees**: near = trunk (tapered cylinder, `pine_bark`; white in code for birch) + crown (three
+  crossed core cards from the crown up + drooping branch cards or leaf clumps), ≤ 400 triangles, two entities sharing meshes per species/variant (batched), cast
   shadows; spawned for PCG cells within 220 m of the camera (3 cells per frame), removed beyond
   270 m, fade out at 150 m. Far = the core cards merged per 64 m PCG cell, GPU-only mesh, no
   shadows, from 104 m (to the cell centre) to the fog distance.

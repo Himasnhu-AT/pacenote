@@ -1,8 +1,9 @@
 //! Trees, built in code from foliage cards and fed by the dressing graph's `trunks` points (the
 //! same points the car collides with). Conifer cards are rendered from Poly Haven's full-size
 //! scanned trees (`pine_tree_01`, `fir_tree_01`) by `tools/art/render_tree_cards.py`: the whole
-//! tree from the side plus three real branches from above ([`Atlas`]). The broadleaf card comes
-//! from `island_tree_02` (`tools/art/render_cards.py`). Trunks use the `pine_bark` scan.
+//! tree from the side plus three real branches from above ([`Atlas`]). The birch crown comes from
+//! `tree_small_02` and the scrub tree from `island_tree_01`, rendered the same way. Trunks use
+//! the `pine_bark` scan.
 //!
 //! - **Species**: Scots pine (long bare trunk, crown on top), spruce/fir (bare lower trunk,
 //!   dense crown), snowy spruce, birch (white trunk, leafy crown) and an olive-like scrub tree.
@@ -138,7 +139,6 @@ struct Frame {
     v1: f32,
 }
 
-const FRAME_BROAD: Frame = Frame { u0: 0.0098, v0: 0.1031, u1: 0.9902, v1: 0.8969 };
 
 /// A conifer card atlas (`tools/art/render_tree_cards.py`, from Poly Haven's full-size scans):
 /// the whole tree from the side, three real branches from above (trunk end at the bottom).
@@ -187,6 +187,17 @@ const ATLAS_BIRCH: Atlas = Atlas {
     tree: fr!(0.0062, 0.0099, 0.6813, 1.0),
     aspect: 0.6818,
     crown: 0.4442,
+    branches: [fr!(0.6906, 0.0133, 0.9969, 0.3197), fr!(0.6906, 0.3463, 0.9969, 0.6527), fr!(0.6906, 0.6793, 0.9969, 0.9857)],
+    branch_aspect: [1.0000, 1.0000, 1.0000],
+};
+
+/// `island_tree_01`: the scrub stages' olive-like tree, trunk included; the three small
+/// pictures are leaf clumps seen from the side.
+const ATLAS_OLIVE: Atlas = Atlas {
+    set: "card_olive",
+    tree: fr!(0.0034, 0.4204, 0.6841, 1.0),
+    aspect: 1.1745,
+    crown: 0.2166,
     branches: [fr!(0.6906, 0.0133, 0.9969, 0.3197), fr!(0.6906, 0.3463, 0.9969, 0.6527), fr!(0.6906, 0.6793, 0.9969, 0.9857)],
     branch_aspect: [1.0000, 1.0000, 1.0000],
 };
@@ -370,12 +381,24 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
             }
         }
         Species::Olive => {
+            // Gnarled trunk and round crown, both in the picture; leaf clumps for volume.
+            let a = &ATLAS_OLIVE;
             let h = rng.range(4.2, 6.0);
-            let w = h * 1.24;
+            let w = h * a.aspect * rng.range(0.9, 1.05);
             for k in 0..3 {
-                let a = yaw0 + k as f32 * PI / 3.0;
-                core_card(&mut crown, a, -0.1, h, w, FRAME_BROAD);
-                core_card(&mut far, a, -0.1, h, w, FRAME_BROAD);
+                let yaw = yaw0 + k as f32 * PI / 3.0;
+                core_card(&mut crown, yaw, -0.1, h, w, a.tree);
+                core_card(&mut far, yaw, -0.1, h, w, a.tree);
+            }
+            let crown0 = h * a.crown;
+            for k in 0..5 {
+                let y = rng.range(crown0 + 0.8, h - 0.8);
+                let yaw = rng.range(0.0, TAU);
+                let r = w * rng.range(0.1, 0.25);
+                let sz = h * rng.range(0.35, 0.5);
+                let mut c = Geo::default();
+                core_card(&mut c, yaw + PI / 2.0, -sz * 0.5, sz * 0.5, sz * a.branch_aspect[k % 3], a.branches[k % 3]);
+                crown.append(&c, 0.0, Vec3::ONE, Vec3::new(yaw.sin() * r, y, yaw.cos() * r));
             }
             return TreeGeo { trunk: None, crown, far };
         }
@@ -466,7 +489,7 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
             Species::Spruce => ("card_fir", Color::srgb(0.7, 0.78, 0.68)),
             Species::SnowSpruce => ("card_fir_snow", Color::srgb(0.9, 0.92, 0.94)),
             Species::Birch => (ATLAS_BIRCH.set, Color::srgb(0.95, 1.0, 0.88)),
-            Species::Olive => ("card_broadleaf", Color::srgb(0.85, 0.88, 0.72)),
+            Species::Olive => (ATLAS_OLIVE.set, Color::srgb(0.95, 0.98, 0.88)),
         };
         let crown_mat = pbr(world, set, |m| foliage(m, tint, wet));
         let far_mat = pbr(world, set, |m| {
@@ -696,7 +719,7 @@ mod tests {
     /// The atlas constants match the renderer's `frame.txt` (re-render → update the constants).
     #[test]
     fn atlas_constants_match_the_rendered_frames() {
-        for a in [&ATLAS_FIR, &ATLAS_PINE, &ATLAS_BIRCH] {
+        for a in [&ATLAS_FIR, &ATLAS_PINE, &ATLAS_BIRCH, &ATLAS_OLIVE] {
             let path = format!("{}/assets/textures/{}/frame.txt", env!("CARGO_MANIFEST_DIR"), a.set);
             let txt = std::fs::read_to_string(&path).expect(&path);
             let row = |key: &str| -> Vec<f32> {
