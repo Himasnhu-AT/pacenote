@@ -146,10 +146,10 @@ PROFILES = {
         "driver-pedals": "0.33,-0.12",
         # Harness straps laid on the passenger seat (its middle, model x).
         "passenger-harness": "0.36",
-        # Co-driver's eye and tablet anchor, glTF model frame: in the passenger seat, leaning
-        # in a little (13 cm ahead of the driver's eye, 1.5 cm higher) so the driver's seat
-        # wing doesn't hide the driver.
-        "codriver-eye": "0.34,0.61,0.56",
+        # Co-driver's eye (the driver's mirrored: the seated rest position; src/guide leans
+        # the head forward and inboard when the guide looks round) and tablet anchor, glTF
+        # model frame.
+        "codriver-eye": "0.36,0.595,0.69",
         "codriver-tablet": "0.33,0.06,0.37",
         # Cabin parts that get baked ambient occlusion (vertex colours).
         "ao-mat": r"Interior|Cockpit_Console|Seat|Net_Share|stitches|Pedals|Steering",
