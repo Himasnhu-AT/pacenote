@@ -51,6 +51,34 @@ enum T {
     Cue,
     CallGrade,
     Calls,
+    Damage,
+}
+
+/// The car's damage on the panel, coloured like the driver's HUD bars (under 35 % plain, under
+/// 70 % warning, then bad); empty while the car is whole.
+fn damage(out: &mut String, d: &super::sync::NetDamage) -> Color {
+    let parts = d.parts();
+    let worst = d.worst();
+    if worst <= 0.0 && d.detached == 0 {
+        return TEXT;
+    }
+    out.push_str("DAMAGE");
+    for (name, v) in ["ENGINE", "STEERING", "SUSPENSION"].into_iter().zip(parts) {
+        if v > 0.0 {
+            let _ = write!(out, "  {name} {:.0}%", v * 100.0);
+        }
+    }
+    let off = d.detached.count_ones();
+    if off > 0 {
+        let _ = write!(out, "  {off} PART{} OFF", if off == 1 { "" } else { "S" });
+    }
+    if worst >= 0.7 {
+        BAD
+    } else if worst >= 0.35 {
+        WARN
+    } else {
+        TEXT
+    }
 }
 
 /// Rows in the coming-up list on this screen.
@@ -146,6 +174,7 @@ fn spawn(mut commands: Commands, screen: Res<GuideScreen>, cams: Query<Entity, W
             p.spawn((Node { width: Val::Percent(100.0), height: Val::Px(6.0), margin: UiRect::top(Val::Px(6.0)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.1))))
                 .with_child((ProgressFill, Node { width: Val::Percent(0.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(Color::srgb(1.0, 0.75, 0.25))));
             p.spawn(t("", label(15.0), DIM, T::Km));
+            p.spawn(t("", label(16.0), TEXT, T::Damage));
             rule(p);
             eyebrow(p, "NEXT");
             p.spawn(Node { column_gap: Val::Px(16.0), align_items: AlignItems::Baseline, ..default() }).with_children(|r| {
@@ -441,6 +470,7 @@ fn update(
                     }
                 }
             }
+            T::Damage => c = damage(&mut s, &feed.damage),
             T::Cue => {
                 // Name the note the cue is for: it may be the one after the corner in progress.
                 if let (Some(q), Some(g), Some(cl)) = (cue, &stage, &calls)
@@ -526,4 +556,23 @@ fn scale_bar(scale: f32) -> (f32, f32) {
         }
     }
     (5000.0, 5000.0 / scale)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::guide::sync::NetDamage;
+
+    #[test]
+    fn damage_reads_like_the_hud() {
+        let mut s = String::new();
+        assert_eq!(damage(&mut s, &NetDamage::default()), TEXT);
+        assert!(s.is_empty(), "whole car: nothing shown");
+        let d = NetDamage { detached: 0b101, engine: 0, steering: 8, suspension: 2 };
+        let c = damage(&mut s, &d);
+        assert_eq!(s, "DAMAGE  STEERING 40%  SUSPENSION 10%  2 PARTS OFF");
+        assert_eq!(c, WARN);
+        s.clear();
+        assert_eq!(damage(&mut s, &NetDamage { engine: 18, ..default() }), BAD);
+    }
 }
