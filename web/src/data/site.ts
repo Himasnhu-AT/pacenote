@@ -18,7 +18,7 @@ export const site = {
   urlPlaceholder: true,
   title: 'Pacenote: two people, one rally car',
   description:
-    'A two-person rally game: one drives and sees only the road, one reads the map and calls the corners. 20 stages, posts and saplings that snap, AI co-driver. Free demo on Steam.',
+    'A two-person rally game: one drives and sees only the road, one reads the map and calls the corners. 20 stages, crash damage, roadside things that break, AI co-driver. Free demo on Steam.',
   kind: 'Two-person rally game',
   // PLACEHOLDER studio name.
   studio: { name: 'Marl Studio', placeholder: true as const },
@@ -84,7 +84,7 @@ export const home = {
     },
     solo: {
       name: 'Alone',
-      text: 'No guide tonight? The AI co-driver reads the same notes out loud, a few seconds ahead of the car, chained the way a real co-driver would. It shouts when you have a big hit, and it goes quiet when a human guide joins. N turns it off.',
+      text: 'No guide tonight? The AI co-driver reads the same notes out loud, a few seconds ahead of the car, chained the way a real co-driver would. It tells you about the damage too, and it goes quiet when a human guide joins. N turns it off.',
       transcript: [
         { t: 'Ready. 150 left four long.', k: 'note' },
         { t: '90 left four, into right two, careful.', k: 'note' },
@@ -124,17 +124,15 @@ export const home = {
     all: 'All 20 stages',
   },
   damage: {
-    title: 'The car never breaks. Things around it do.',
-    lead: 'There is no damage. Clip a marker post, a kilometre board or a young tree and it snaps and topples, chips and leaves flying, and you drive on a little slower. Hit a big tree or a boulder and you stop dead.',
-    // `lost`: share of 60 km/h it costs (the bar).
+    title: 'Hit something and you will feel it',
+    lead: 'Clip a tree or a boulder and the damage goes where the hit was: bumpers, splitter, mirrors and wing come off on the hardest hits. Marker posts, saplings and shrubs never hurt the car: they snap, topple or bend around you. A big enough hit ends your run.',
     parts: [
-      { name: 'Posts and boards', text: 'Snap at walking pace. You barely feel them.', lost: 0.02 },
-      { name: 'Saplings', text: 'Snap from about 11 km/h. A few km/h gone.', lost: 0.06 },
-      { name: 'Shrubs', text: 'Bend and spring back. Cut the corner through them, they drag a little.', lost: 0.04 },
-      { name: 'Big trees, boulders', text: 'Solid. You stop, back out and go again.', lost: 1 },
+      { name: 'Engine', text: 'Less power, lower top speed.' },
+      { name: 'Steering', text: 'The car pulls to one side. Keep correcting.' },
+      { name: 'Suspension', text: 'Softer, slower, less grip in the bumps.' },
     ],
-    retire: 'No damage, no retirements. A crash costs you time, never the stage.',
-    recover: 'Stuck or upside down? Recover puts you back on the road for 5 seconds.',
+    retire: 'Break one part completely and you are out of the stage: retired.',
+    recover: 'Off the road but still in one piece? Recover puts you back on it for 5 seconds.',
   },
   numbers: {
     title: 'The stages, by the numbers',
@@ -185,8 +183,8 @@ export const privacy = {
   events: [
     { name: 'session.settings', when: 'Once per session', props: 'Camera view, speed units, steering speed, traction control and ABS on or off, co-driver options, graphics quality, demo or full game' },
     { name: 'run.start', when: 'The countdown ends', props: 'Stage, solo or team, co-driver on or off, camera, weather, time of day, traction control and ABS on or off, demo or full game' },
-    { name: 'run.end', when: 'The run ends', props: 'Stage, result (finish, retired, quit, restart), time with penalties, penalty seconds, metres driven, number of hits, how many posts, signs and saplings were knocked down, recovers, co-driver on or off, demo or full game' },
-    { name: 'run.crash', when: 'A hit hard enough to matter', props: 'Stage, metres along the road, which corner and its grade, how hard, speed, which side of the car' },
+    { name: 'run.end', when: 'The run ends', props: 'Stage, result (finish, retired, quit, restart), time with penalties, penalty seconds, metres driven, number of hits, engine, steering and suspension damage, recovers, co-driver on or off, demo or full game' },
+    { name: 'run.crash', when: 'A hit hard enough to matter', props: 'Stage, metres along the road, which corner and its grade, how hard, speed, which side of the car, whether it ended the run' },
     { name: 'run.recover', when: 'You press recover', props: 'Stage, metres along the road' },
     { name: 'play_together.connect', when: 'Hosting or joining a Play together session', props: 'Host or join, whether it connected (or timed out, was refused, failed), the round-trip time in ms' },
     { name: 'play_together.end', when: 'A Play together session ends', props: 'Host or join, how long it lasted, why it ended (left, partner left, timeout, error)' },
@@ -204,7 +202,7 @@ export const shots: { hero: ShotRef; driver: ShotRef; guide: ShotRef | null; cra
   hero: { src: 'hero-cockpit', alt: 'The driver’s view on Pinewater at 68 km/h: a white roll cage frames a straight gravel road between tall pines, the dash with two lit gauges below.' },
   driver: { src: 'driver-frostline', alt: 'Cockpit view on Frostline: snow-covered spruce on both sides of a white road, the steering wheel and gauges in front.' },
   guide: { src: 'guide-view', alt: 'The guide’s screen during a run on Pinewater: a top-down map with the car’s position and the next stretch lit in orange, corner tags like L4 and R5 along the road, and a panel with the stage clock, speed, the next call Right 5 at 20 m, and the coming-up list Left 4, Left 5, Right 3, Left 5, Right 1, Left 2.' },
-  crash: { src: 'snap-pinewater', alt: 'Chase camera on Pinewater: the rally car has just clipped a kilometre board at the road edge, which tips over behind it with yellow chips flying, at 40 km/h.' },
+  crash: { src: 'crash-pinewater', alt: 'Chase camera after a crash on Pinewater: the rally car on its side among birches and pines, its front bumper and a mirror lying on the ground, the subtitle reads Ouch. The engine is damaged, and a damage readout shows engine, steering and suspension.' },
   car: { src: 'car-sunscar', alt: 'The rally car from behind on Sunscar’s orange gravel, kicking up dust under a clear sky, scrub trees on the ridge.', caption: 'Car 14 on Sunscar, stage 5.' },
 };
 

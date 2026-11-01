@@ -55,9 +55,11 @@ is the guide's skill.
   differential (4WD with centre split, viscous limited-slip front, rear and centre so an
   unloaded wheel can't take the drive), handbrake locks the rear and cuts the rear coupling.
   Hill hold: stopped with no pedals, the brakes hold the car (sloped start lines).
-- No damage: the car bounces off big trees and boulders, snaps saplings, marker posts and
-  kilometre boards (they topple; it loses only their momentum) and pushes through shrubs (a
-  little drag). A recover button (5 s penalty) resets the car to the road.
+- Damage-lite: big hits bend the steering or reduce top speed; no wreck/restart, a recover
+  button (5 s penalty) resets the car to the road.
+- Only solid things damage the car (trees, boulders, the ground in a roll); hard hits knock
+  bodywork off (bumpers, splitter, mirrors, wing). Saplings, marker posts and km boards snap
+  and topple, shrubs bend: none of them hurt the car.
 - Input through `engine::actions`: gamepad (analogue throttle/brake/steer) and keyboard with
   steering assist.
 

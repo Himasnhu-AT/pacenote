@@ -96,7 +96,7 @@ a door-seal whistle. Both go as speed², with slow gusts.
 - Impacts: `car.impacts` rising by more than 0.4 m/s. A thud (lower and longer for bigger
   hits), a panel crunch, three inharmonic metal rings, then debris tinkling for ~0.5 s
   after hits over 6 m/s. All scaled by the hit speed.
-- The body hitting the ground (`Knocks::count` rising with no obstacle hit, or a new body
+- The body hitting the ground (`Damage::hits` rising with no obstacle hit, or a new body
   touch at speed): the same, darker, with less metal.
 - Scrape: while `body_contact`, gritty noise with two panel modes ringing, scaled by speed.
 - Suspension thumps: a wheel compressing faster than 1 m/s and at least 1.8× its previous
