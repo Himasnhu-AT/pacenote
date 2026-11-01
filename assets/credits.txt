@@ -5,8 +5,7 @@ Pacenote:
 An original two-person rally game.
 
 Car:
-Body: "Milano '95 - Low poly model" by Daniel Zhabotinsky (sketchfab.com/DanielZhabotinsky), licensed under CC BY 4.0 (creativecommons.org/licenses/by/4.0). Modified: scaled, wheels split, interior replaced.
-The cockpit, livery and wheels are original, modelled for Pacenote.
+"Mercedes-AMG GT3 Evo 2020 | www.vecarz.com" by vecarz (sketchfab.com/heynic), licensed under CC BY 4.0 (creativecommons.org/licenses/by/4.0). Modified: scaled, decimated, wheels split, shifter and handbrake added.
 
 Driver:
 Arms: "First Person arms" by DJMaesen (sketchfab.com/bumstrum), licensed under CC BY 4.0 (creativecommons.org/licenses/by/4.0). Modified: rigged to the cockpit, recoloured.

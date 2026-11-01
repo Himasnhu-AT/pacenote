@@ -11,8 +11,8 @@
 //! - Handbrake (hydraulic, vertical): pulled back while the handbrake is held, at least
 //!   [`MIN_PULL`] s for a tap.
 //!
-//! The levers are the model's `Shifter` and `Handbrake` nodes (`tools/art/build_rallycar.py`),
-//! tilted about their foot. Hands and arms are a few shared primitive meshes (finger rings
+//! The levers are the model's `Shifter` and `Handbrake` nodes (`tools/art/cockpit.py`, put in by
+//! `build_rallycar.py` or `import_sketchfab.py`), tilted about their foot. Hands and arms are a few shared primitive meshes (finger rings
 //! around the grip, an ellipsoid palm, thumb, cuff with an orange band, sleeve capsules); the
 //! arms bend with two-bone IK from fixed shoulders. They only show in the cockpit view (there's
 //! no driver body for the outside views).
@@ -30,24 +30,34 @@ use super::car::{CarModel, CarRig, STEERING_RATIO};
 use crate::drive::{CameraView, DriverInput, DrivenCar};
 
 // ---------------------------------------------------------------- the model (glTF frame)
-// Mirrors build_rallycar.py: Blender (x, y, z) → model (x, z, −y).
+// Mirrors tools/art/cockpit.py: Blender (x, y, z) → model (x, z, −y).
 
-/// Steering wheel centre, its rest rotation (column tilted 22°) and rim radius.
-const WHEEL_C: Vec3 = Vec3::new(-0.37, 0.515, 0.17);
-const WHEEL_TILT: f32 = -22.0 * PI / 180.0;
-const RIM: f32 = 0.175;
+/// Where the driver sits in this body relative to the rally hatchback the rig was laid out
+/// for: `import_sketchfab.py --profile gt3` moves the cockpit nodes by this (it prints it) so
+/// the steering wheel lands on the GT3's own. Points of the rig are the hatchback's + `RIG`.
+const RIG: Vec3 = Vec3::new(0.01, -0.15, 0.055);
+
+const fn rig(x: f32, y: f32, z: f32) -> Vec3 {
+    Vec3::new(x + RIG.x, y + RIG.y, z + RIG.z)
+}
+
+/// Steering wheel centre, its rest rotation (the GT3's wheel stands upright) and the radius of
+/// its grips (a yoke: the hands hold its two side grips).
+const WHEEL_C: Vec3 = rig(-0.37, 0.515, 0.17);
+const WHEEL_TILT: f32 = 0.0;
+const RIM: f32 = 0.14;
 
 /// Shifter: pivot, knob centre and stick direction (in the lever's frame).
-const SHIFT_PIVOT: Vec3 = Vec3::new(-0.10, 0.255, 0.05);
+const SHIFT_PIVOT: Vec3 = rig(-0.10, 0.255, 0.05);
 const SHIFT_GRIP: Vec3 = Vec3::new(-0.03, 0.30, 0.05);
 const SHIFT_AXIS: Vec3 = Vec3::new(-0.03, 0.28, 0.05);
 /// Handbrake: pivot, grip centre and stick direction.
-const HB_PIVOT: Vec3 = Vec3::new(-0.03, 0.255, 0.20);
+const HB_PIVOT: Vec3 = rig(-0.03, 0.255, 0.20);
 const HB_GRIP: Vec3 = Vec3::new(-0.0086, 0.2137, 0.0342);
 const HB_AXIS: Vec3 = Vec3::new(-0.01, 0.25, 0.04);
 
-/// Shoulders (left, right): 0.90 m above the ground, a little behind the eye.
-const SHOULDER: [Vec3; 2] = [Vec3::new(-0.58, 0.575, 0.74), Vec3::new(-0.16, 0.575, 0.74)];
+/// Shoulders (left, right): 0.17 m below the eye, a little behind it.
+const SHOULDER: [Vec3; 2] = [rig(-0.58, 0.575, 0.74), rig(-0.16, 0.575, 0.74)];
 /// Which way each elbow points (out and down).
 const POLE: [Vec3; 2] = [Vec3::new(-0.9, -0.8, 0.2), Vec3::new(0.6, -0.9, 0.2)];
 /// Upper arm and forearm (elbow to wrist) lengths.
@@ -58,9 +68,9 @@ const TRAVEL_ARC: Vec3 = Vec3::new(0.0, -0.01, 0.04);
 /// Wrist behind the grip centre, along the hand's −Z.
 const WRIST: f32 = 0.10;
 
-/// Grip on the rim above the horizontal ("quarter to three"), and how far the hands follow the
-/// wheel round before they slip on the rim (rad, soft limit).
-const GRIP_UP: f32 = 0.22;
+/// Grip angle above the horizontal (0: the yoke's side grips, "quarter to three"), and how far
+/// the hands follow the wheel round before they slip on the rim (rad, soft limit).
+const GRIP_UP: f32 = 0.0;
 const HAND_FOLLOW: f32 = 0.45;
 /// Most the wrist bends sideways off the forearm before the grip slips round the rim (rad),
 /// and the slip search's step and reach.
@@ -880,7 +890,7 @@ mod tests {
     /// The cockpit camera: eye (car.rs `COCKPIT_EYE_MODEL`), pitched 0.05 rad down, 80°
     /// vertical field of view, 16:9. Returns normalised screen coordinates (−1..1).
     fn screen(p: Vec3) -> Option<Vec2> {
-        const EYE: Vec3 = Vec3::new(-0.37, 0.795, 0.60);
+        const EYE: Vec3 = Vec3::new(-0.36, 0.595, 0.69);
         let d = Quat::from_rotation_x(0.05) * (p - EYE);
         let depth = -d.z;
         if depth < 0.05 {
@@ -928,10 +938,11 @@ mod tests {
 
     #[test]
     fn arms_stay_below_the_dash_and_off_the_rev_gauge() {
-        // The dash top's near edge, straight ahead of the driver.
-        let dash = screen(Vec3::new(-0.37, 0.65, -0.24)).unwrap().y;
-        let tacho = screen(Vec3::new(-0.445, 0.51, -0.19)).unwrap();
-        let tacho_r = (screen(Vec3::new(-0.445 + 0.062, 0.51, -0.19)).unwrap() - tacho).length();
+        // The dash top's near edge (the display's hood), straight ahead of the driver, and the
+        // driver's display (it shows the revs) with its half width (GT3 cabin, measured).
+        let dash = screen(Vec3::new(-0.36, 0.56, -0.20)).unwrap().y;
+        let tacho = screen(Vec3::new(-0.36, 0.407, -0.071)).unwrap();
+        let tacho_r = (screen(Vec3::new(-0.36 + 0.054, 0.407, -0.071)).unwrap() - tacho).length();
         let mut worst = (f32::MIN, String::new());
         let mut pts = Vec::new();
         let mut check = |what: String, pts: &[(Vec2, f32)], gauge: bool| {

@@ -6,9 +6,9 @@ Every file under `assets_src/` is listed here. Only CC0 and CC BY licences are u
 
 ## Credits that must appear in the game (CC BY)
 
-- "Milano '95 - Low poly model" by Daniel Zhabotinsky, CC BY 4.0 (car body; see models/sketchfab below).
+- "Mercedes-AMG GT3 Evo 2020 | www.vecarz.com" by vecarz, CC BY 4.0 (the car, with its cabin; see models/sketchfab below).
 - "First Person arms" by DJMaesen (bumstrum), CC BY 4.0 (driver's arms; see models/sketchfab below).
-- Both lines are in `assets/credits.txt`. (The CC BY Car Concept below is no longer shipped. Restore its credit line if it is ever used again.)
+- Both lines are in `assets/credits.txt`. (The CC BY Milano '95 and Car Concept below are no longer shipped. Restore their credit lines if they are ever used again.)
 
 CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and models from Poly Haven (polyhaven.com) and ambientCG (ambientcg.com), CC0. Smoke sprites by Kenney (kenney.nl), CC0. Hay bale and fence by carlosjorgereis (OpenGameArt), CC0."
 
@@ -32,7 +32,20 @@ CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and mo
 
 Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; converted by `tools/art/import_sketchfab.py`. Licence facts read from the Sketchfab API (`https://api.sketchfab.com/v3/models/<uid>`) on 2026-10-31.
 
-### Milano '95 - Low poly model (`milano_95`)
+### Mercedes-AMG GT3 Evo 2020 (`mercedes_amg_gt3_evo`)
+
+- **Use:** The player's car (`assets/models/rallycar.glb`): body, wheels and its own cabin (seat, dash, cage, yoke steering wheel). Converted by `tools/art/import_sketchfab.py -- car <file> --profile gt3`: scaled to the sim's wheelbase and track, decimated ~496k → ~124k triangles, textures capped at 2048 (opaque ones as JPEG), its steering wheel made the animated `SteeringWheel` node, our shifter and handbrake added, cabin ambient occlusion baked.
+- **Path:** `assets_src/sketchfab/mercedes_amg_gt3_evo/mercedes_benz_amg_gt3_red_bull.glb` (from the owner's download `mercedes-amg-gt3-red-bull-racing.zip`, 2026-11-01; the zip's `textures/` folder only repeats the images embedded in the glb)
+- **Source page:** https://sketchfab.com/3d-models/mercedes-amg-gt3-evo-2020-wwwvecarzcom-39e77243109f4e5cb7134b6f31c8f619
+- **Download:** Sketchfab download dialog (login required), by the owner
+- **Author:** vecarz (https://sketchfab.com/heynic)
+- **Licence:** CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/)
+- **Size:** 55.4 MB glb
+- **Resolution / polys:** 496,438 triangles; 57 meshes, 34 materials, 41 images (one 4096², the rest 1024² or less)
+- **Credit line:** REQUIRED: "Mercedes-AMG GT3 Evo 2020 | www.vecarz.com" by vecarz (sketchfab.com/heynic), licensed under CC BY 4.0. Modified: scaled, decimated, wheels split, shifter and handbrake added.
+- **Trademarks:** A real, branded car in a real team livery (Mercedes-Benz star and AMG badges, Red Bull, Michelin, Ravenol, DEKRA, Viaplay, Sparco and others). CC BY covers the model's copyright only, not these trademarks or the car's design; see the note at the end of this file on branded cars. Check with the trademark owners (or replace the livery and badges) before a commercial release.
+
+### Milano '95 - Low poly model (`milano_95`): former car body, no longer shipped
 
 - **Use:** Car body (exterior, glass, wheels). Its own interior is dropped; the cockpit is ours (`tools/art/cockpit.py`).
 - **Path:** `assets_src/sketchfab/` (as downloaded)

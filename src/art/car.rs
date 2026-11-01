@@ -1,16 +1,17 @@
-//! The car on screen: an original gravel-rally hatchback built procedurally by
-//! `tools/art/build_rallycar.py` (livery, wheels, cockpit interior) under the simulated body,
-//! its wheels driven from the simulation (steer, spin, suspension travel).
+//! The car on screen (`assets/models/rallycar.glb`) under the simulated body, its wheels driven
+//! from the simulation (steer, spin, suspension travel). The model is the Mercedes-AMG GT3 Evo
+//! download (`assets_src/SOURCES.md`), converted by `tools/art/import_sketchfab.py --profile
+//! gt3`: scaled to the sim's wheelbase and track, decimated, its own cabin kept. The earlier
+//! procedural hatchback (`tools/art/build_rallycar.py`) uses the same node names.
 //!
 //! The model's wheel hubs keep their own track and wheelbase position (X/Z); their height
 //! follows each simulated wheel's suspension. Its tyres are a little bigger than the
-//! simulation's (0.325 m vs `Spec::wheel_radius`), so hubs sit that much higher.
+//! simulation's (`MODEL_WHEEL_RADIUS` vs `Spec::wheel_radius`), so hubs sit that much higher.
 //!
-//! Cockpit: the steering wheel turns with the road wheels (`STEERING_RATIO`), the tacho and
-//! speedo needles follow the engine and road speed, and the bonnet lamp pod is hidden in the
-//! cockpit and bonnet views (it would block the road). The driver's hands, arms and the gear
-//! and handbrake levers are animated in `hands.rs`. The body shell is single-sided, so
-//! from the driver's eye only the interior's own skin, dash and cage show.
+//! Cockpit: the steering wheel turns with the road wheels (`STEERING_RATIO`); tacho and
+//! speedo needles (when the model has them: the GT3 has a screen instead) follow the engine
+//! and road speed, and a bonnet lamp pod (if any) is hidden in the cockpit and bonnet views.
+//! The driver's hands, arms and the gear and handbrake levers are animated in `hands.rs`.
 
 use bevy::prelude::*;
 use engine::render_budget::Actor;
@@ -26,12 +27,13 @@ impl Plugin for CarArtPlugin {
 }
 
 /// Bonnet camera in the model's frame (origin at hub height): over the front of the bonnet
-/// (the bonnet top is ~0.53 m above hub height there).
-const BONNET_CAM_MODEL: Vec3 = Vec3::new(0.0, 0.72, -1.6);
+/// (the GT3's bonnet top is ~0.39 m above hub height there).
+const BONNET_CAM_MODEL: Vec3 = Vec3::new(0.0, 0.55, -1.55);
 
-/// Driver's eye in the model's frame: left seat, 1.12 m above the ground, 0.43 m behind the
-/// steering wheel (`build_rallycar.py`: `DRV_X`, `STEER_C`).
-const COCKPIT_EYE_MODEL: Vec3 = Vec3::new(-0.37, 0.795, 0.60);
+/// Driver's eye in the model's frame: left seat, 0.93 m above the ground (a low GT seat, the
+/// roof bar just above the windscreen's top edge), 0.47 m behind the steering wheel's centre
+/// (`hands.rs` `WHEEL_C`).
+const COCKPIT_EYE_MODEL: Vec3 = Vec3::new(-0.36, 0.595, 0.69);
 
 /// Bonnet camera position in the car body's frame.
 pub fn bonnet_cam(s: &crate::vehicle::Spec) -> Vec3 {
@@ -43,7 +45,8 @@ pub fn cockpit_eye(s: &crate::vehicle::Spec) -> Vec3 {
     COCKPIT_EYE_MODEL + model_offset(s)
 }
 
-/// The model's wheel centres (`build_rallycar.py` `HUB`): half track and half wheelbase, about
+/// The model's wheel centres (`import_sketchfab.py` `HALF_TRACK`, `FRONT_Y`; `build_rallycar.py`
+/// `HUB`): half track and half wheelbase, about
 /// the model origin. They match the sim's mounts (tested), so drawn and simulated wheels agree.
 pub const MODEL_HALF_TRACK: f32 = 0.78;
 pub const MODEL_HALF_WHEELBASE: f32 = 1.275;
@@ -54,8 +57,8 @@ pub fn model_offset(s: &crate::vehicle::Spec) -> Vec3 {
     Vec3::new(0.0, model_height(s), (s.mounts[0].z + s.mounts[2].z) * 0.5)
 }
 
-/// Model tyre radius (m), from the prepared model.
-pub const MODEL_WHEEL_RADIUS: f32 = 0.325;
+/// Model tyre radius (m), from the prepared model (the importer prints it).
+pub const MODEL_WHEEL_RADIUS: f32 = 0.337;
 
 /// Steering wheel turn per radian of road-wheel steer (full lock 0.56 rad ≈ 260°).
 pub const STEERING_RATIO: f32 = 8.0;
@@ -246,9 +249,10 @@ mod tests {
     fn cameras_sit_in_and_over_the_car() {
         let s = crate::vehicle::Spec::default();
         let ground = model_height(&s) - MODEL_WHEEL_RADIUS;
-        // Driver's eye: left seat, ~1.1 m over the ground, behind the front axle.
+        // Driver's eye: left seat, ~0.9-1.2 m over the ground (a GT seat is low), behind the
+        // front axle.
         let eye = cockpit_eye(&s);
-        assert!(eye.x < -0.2 && (1.0..1.25).contains(&(eye.y - ground)) && eye.z > s.mounts[0].z, "{eye}");
+        assert!(eye.x < -0.2 && (0.88..1.25).contains(&(eye.y - ground)) && eye.z > s.mounts[0].z, "{eye}");
         let bonnet = bonnet_cam(&s);
         assert!(bonnet.z < eye.z && bonnet.y - ground > 0.85, "{bonnet}");
     }
