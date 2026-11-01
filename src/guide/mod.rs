@@ -11,9 +11,12 @@
 //!
 //! Session and roles: `crate::net_session`.
 
+pub mod coach;
+pub mod head;
 pub mod map;
 pub mod notice;
 pub mod panel;
+pub mod smooth;
 pub mod sync;
 
 use std::sync::Arc;
