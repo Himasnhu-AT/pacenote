@@ -26,7 +26,7 @@ use bevy::math::{Affine3A, Vec3A};
 use bevy::prelude::*;
 use engine::render_budget::Actor;
 
-use super::car::{CarModel, CarRig, STEERING_RATIO};
+use super::car::{CarModel, CarPose, CarRig, STEERING_RATIO};
 use crate::drive::{CameraView, DriverInput, DrivenCar};
 
 // ---------------------------------------------------------------- the model (glTF frame)
@@ -428,7 +428,7 @@ pub fn spawn(world: &mut World, car: Entity, model: Entity) {
         world.insert_resource(a);
     }
     let a = world.resource::<ArmAssets>().clone();
-    let gear = world.get::<DrivenCar>(car).map_or(1, |c| c.car.gear);
+    let gear = world.get::<DrivenCar>(car).map(|c| c.car.gear).or_else(|| world.get::<CarPose>(car).map(|p| p.gear)).unwrap_or(1);
     let part = |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, tf: Transform| (Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, Actor);
     let mut hand = [Entity::PLACEHOLDER; 2];
     let mut fore = [Entity::PLACEHOLDER; 2];
@@ -714,7 +714,7 @@ fn segment(a: Vec3, b: Vec3, len: f32) -> Transform {
 pub fn animate(
     time: Res<Time>,
     view: Option<Res<CameraView>>,
-    cars: Query<(&DrivenCar, Option<&DriverInput>)>,
+    cars: Query<(Option<&DrivenCar>, Option<&DriverInput>, Option<&CarPose>)>,
     mut arms: Query<(&mut Arms, &mut Visibility)>,
     mut tfs: Query<&mut Transform>,
 ) {
@@ -722,13 +722,14 @@ pub fn animate(
     let cockpit = view.as_deref().is_none_or(|v| *v == CameraView::Cockpit);
     for (mut a, mut vis) in &mut arms {
         let a = &mut *a;
-        let Ok((c, input)) = cars.get(a.car) else { continue };
+        let Ok((driven, input, shown)) = cars.get(a.car) else { continue };
+        // The simulated car, else the pose its owner fills (the guide's copy of the car).
+        let Some(c) = CarPose::read(driven, input, shown) else { continue };
         let want = if cockpit { Visibility::Inherited } else { Visibility::Hidden };
         if *vis != want {
             *vis = want;
         }
-        let handbrake = input.is_some_and(|i| i.0.handbrake);
-        let moved = a.driver.step(dt, c.car.gear, handbrake);
+        let moved = a.driver.step(dt, c.gear, c.handbrake);
         // Levers.
         let (pitch, roll) = a.driver.shifter();
         let shift_rot = lever_rot(pitch, roll);
@@ -747,7 +748,7 @@ pub fn animate(
             a.now = None;
             continue;
         }
-        let wheel = c.car.steer * STEERING_RATIO;
+        let wheel = c.steer * STEERING_RATIO;
         let target = match a.driver.job {
             Job::Wheel => wheel_grip(1, wheel),
             Job::Shifter => lever_grip(SHIFT_PIVOT, SHIFT_GRIP, SHIFT_AXIS, shift_rot),
