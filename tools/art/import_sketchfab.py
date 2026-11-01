@@ -4,16 +4,30 @@
 #   blender -b --factory-startup -P tools/art/import_sketchfab.py -- car  <file|dir> [options]
 #   blender -b --factory-startup -P tools/art/import_sketchfab.py -- arms <file|dir> [options]
 #
-# car: the "Milano '95" body → assets/models/rallycar.glb, with the node names src/art/car.rs
+# car: a downloaded car body → assets/models/rallycar.glb, with the node names src/art/car.rs
 #   expects (Car root, Body, Interior, Hub<FL|FR|RL|RR>/Spin<..>, SteeringWheel, Tacho, Speedo,
 #   Shifter, Handbrake). Steps: import; bake every transform into the meshes; turn the car to
-#   face +Y; find the four wheels (by name, else by shape); scale to the sim's wheelbase
-#   (front axle y +1.25, rear -1.22) with the origin at hub height; drop the model's own
-#   interior (parts inside the cabin, or matching --drop); make the glass see-through from
-#   inside; measure the cabin; add our cockpit (cockpit.py) and a lining; merge the static
-#   parts per material; split each wheel onto its Hub/Spin nodes; export.
+#   face +Y; decimate (per material, --decimate); find the four wheels (by name, else by
+#   shape); scale to the sim's wheelbase (axles at y ±1.275) and track (hubs at x ±0.78:
+#   src/art/car.rs MODEL_HALF_*) with the origin at hub height; then either
+#     --interior ours (default): drop the model's own interior (parts inside the cabin, or
+#       matching --drop); make the glass see-through from inside; measure the cabin; add our
+#       cockpit (cockpit.py) and a lining;
+#     --interior keep: keep the model's interior; its steering wheel (--steer-mat) becomes
+#       the SteeringWheel node and our shifter and handbrake go on its console. The driver's
+#       rig (eye, shoulders, wheel, levers) moves as one by the offset that puts our wheel
+#       centre on the model's: the script prints it and the constants for car.rs / hands.rs;
+#   merge the static parts per material; split each wheel onto its Hub/Spin nodes; cap the
+#   textures (opaque ones as JPEG); export.
 #   Options: --out PATH  --forward +y|-y|+x|-x|auto  --drop REGEX  --keep REGEX
-#            --max-tex N (default 2048)  --preview DIR  --no-bake  --list
+#            --max-tex N (default 2048)  --small-tex N (parts matching --small-mat, 1024)
+#            --decimate "REGEX=RATIO;..." (first match on the material names; "*" default 1)
+#            --pbr "REGEX=METAL,ROUGH;..." (metallic and least roughness per material; also
+#              drops clear coat, which the game renders as a pale haze)
+#            --ao-mat REGEX (keep: cabin materials that get baked ambient occlusion)
+#            --interior ours|keep  --steer-mat REGEX  --steer-dz M  --steer-tilt DEG
+#            --profile NAME (option defaults for a known download, see PROFILES)
+#            --preview DIR  --no-bake  --list
 #
 # arms: the "First Person arms" rig → assets/models/driver_arms.glb. Steps: import; apply
 #   scale/rotation; remove constraints, animations and helper objects; rename the arm bones
@@ -27,18 +41,64 @@ import math
 import os
 import re
 import sys
+import tempfile
 
 import bmesh
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cockpit  # noqa: E402
-from blendkit import MATS, link  # noqa: E402
+from blendkit import MATS, empty, link  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-FRONT_Y, REAR_Y = 1.25, -1.22  # src/vehicle.rs Spec mounts
+# Hubs about the model origin: src/art/car.rs MODEL_HALF_WHEELBASE / MODEL_HALF_TRACK (the
+# sim's mounts, src/vehicle.rs Spec).
+FRONT_Y, REAR_Y = 1.275, -1.275
+HALF_TRACK = 0.78
+# Option defaults per download (assets_src/SOURCES.md). Command-line options win.
+PROFILES = {
+    # "Mercedes-AMG GT3 Evo" by vecarz: ~500k triangles, its own detailed cabin. Hidden parts
+    # (engine, suspension, screws, pedals) go hardest; the livery shell and tyres least.
+    "gt3": {
+        "forward": "+x",
+        "interior": "keep",
+        "steer-mat": r"Steering_Wheel",
+        "steer-dz": "0.0125",  # the hub sits 12.5 mm above the wheel's bounding-box centre
+        "steer-tilt": "0",  # an upright wheel
+        "decimate": ";".join([
+            r"Engine_Components|Suspension|Screws|Pedals|WorldGrid=0.10",
+            r"Brake_Disc|Caliper=0.20",
+            r"Interior_Details|Interior_Stickers=0.18",
+            r"Interior_Chassis|Cockpit_Console=0.25",
+            r"Seat|Net_Share|stitches=0.30",
+            r"Exterior_Details|Grille|Lights=0.28",
+            r"Rim_Inst=0.22",
+            r"Steering_Wheel_Inst=0.30",
+            r"Tyre=0.45",
+            r"Livery=0.45",
+            r"*=0.5",
+        ]),
+        "small-mat": r"Engine|Suspension|Screws|Pedals|Brake_Disc|Caliper|Interior|Cockpit|Seat|Net_Share|stitches|Steering|Grille|Lights|Rim|Stickers",
+        "drop-mat": r"WorldGrid",
+        # metallic, least roughness: satin dark rims, steel discs and screws, the rest
+        # (paint, carbon, plastics, fabric, glass) dielectric.
+        "pbr": ";".join([
+            r"Rim_Inst=0.7,0.32",
+            r"Brake_Disc|Screws=1.0,0.35",
+            r"Interactive_Lights=0.0,0.4",
+            r"Lights$=1.0,0.05",
+            r"Livery|Exterior_Details|Glass|Windows_Stickers=0.0,0.0",
+            r"Seat|Net_Share|stitches|Tyre=0.0,0.6",
+            r"Interior|Cockpit_Console|Pedals|Steering=0.0,0.55",
+            r"*=0.0,0.4",
+        ]),
+        # Cabin parts that get baked ambient occlusion (vertex colours).
+        "ao-mat": r"Interior|Cockpit_Console|Seat|Net_Share|stitches|Pedals|Steering",
+    },
+}
 EXTS = (".glb", ".gltf", ".fbx", ".blend", ".obj")
 WHEEL_RE = re.compile(r"wheel|tire|tyre|rim|disc|disk|brake|hub|caliper|rotor", re.I)
 CALIPER_RE = re.compile(r"caliper", re.I)
@@ -67,6 +127,9 @@ def args():
             opts[k[2:]] = a[i + 1]
             i += 1
         i += 1
+    if "profile" in opts:
+        for k, v in PROFILES[opts["profile"]].items():
+            opts.setdefault(k, v)
     return opts
 
 
@@ -133,14 +196,137 @@ def bbox(objs):
     return lo, hi
 
 
-def shrink_textures(n):
+def shrink_textures(n, small=None, small_re=None, jpeg=False):
+    """Caps every image at n pixels (images only used by materials matching `small_re` at
+    `small`). With `jpeg`, opaque images are written as JPEG (much smaller than PNG)."""
+    users = {}
+    for mt in bpy.data.materials:
+        if mt.node_tree is None:
+            continue
+        for nd in mt.node_tree.nodes:
+            if nd.type == "TEX_IMAGE" and nd.image is not None:
+                users.setdefault(nd.image.name, []).append(mt.name)
     for im in bpy.data.images:
-        if im.size[0] > n or im.size[1] > n:
-            f = n / max(im.size)
+        if im.size[0] == 0:
+            continue
+        cap = n
+        mats = users.get(im.name, [])
+        if small and small_re and mats and all(small_re.search(m) for m in mats):
+            cap = min(cap, small)
+        if im.size[0] > cap or im.size[1] > cap:
+            f = cap / max(im.size)
             w, h = max(1, int(im.size[0] * f)), max(1, int(im.size[1] * f))
-            print(f"texture {im.name}: {im.size[0]}x{im.size[1]} -> {w}x{h}")
+            print(f"texture {im.name} ({', '.join(mats)}): {im.size[0]}x{im.size[1]} -> {w}x{h}")
             im.scale(w, h)
             im.pack()
+        if not jpeg or im.is_float or not mats:
+            continue
+        if im.channels == 4:
+            px = np.empty(im.size[0] * im.size[1] * 4, dtype=np.float32)
+            im.pixels.foreach_get(px)
+            if px[3::4].min() < 0.995:
+                continue
+        # The exporter keeps a file's own format: write it out as a JPEG and use that.
+        global TMP
+        TMP = TMP or tempfile.mkdtemp(prefix="pacenote_tex_")
+        path = os.path.join(TMP, re.sub(r"[^\w.-]", "_", im.name) + ".jpg")
+        im.file_format = "JPEG"
+        im.save(filepath=path, quality=88)
+        if im.packed_file:
+            im.unpack(method="REMOVE")
+        im.source = "FILE"
+        im.filepath_raw = path
+        im.reload()
+
+
+TMP = None
+
+
+def fix_pbr(rules):
+    """Metallic and least roughness per material (rules: "REGEX=METAL,ROUGH;...", first
+    match; "*" all). Downloads often leave glTF's metallicFactor unset, which means 1: every
+    part turns to chrome."""
+    table = []
+    for r in rules.split(";"):
+        rx, v = r.rsplit("=", 1)
+        metal, rough = (float(x) for x in v.split(","))
+        table.append((None if rx == "*" else re.compile(rx, re.I), metal, rough))
+    for mt in bpy.data.materials:
+        b = mt.node_tree and next((n for n in mt.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if not b:
+            continue
+        hit = next(((m, r) for rx, m, r in table if rx is None or rx.search(mt.name)), None)
+        if hit is None:
+            continue
+        if not b.inputs["Metallic"].is_linked:
+            b.inputs["Metallic"].default_value = hit[0]
+        if not b.inputs["Roughness"].is_linked:
+            b.inputs["Roughness"].default_value = max(b.inputs["Roughness"].default_value, hit[1])
+    # No clear coat: the game's clear coat lights a dark paint up to a pale haze.
+    for mt in bpy.data.materials:
+        b = mt.node_tree and next((n for n in mt.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if b and "Coat Weight" in b.inputs:
+            for l in list(b.inputs["Coat Weight"].links):
+                mt.node_tree.links.remove(l)
+            b.inputs["Coat Weight"].default_value = 0.0
+
+
+def strip_uvs(objs):
+    """Drops UV layers no material reads (downloads often carry a stack of lightmap UVs)."""
+    for o in objs:
+        uvs = o.data.uv_layers
+        want = {uvs.active.name} if uvs.active else set()
+        for l in uvs:
+            if l.active_render:
+                want.add(l.name)
+        for mt in used_mats(o):
+            if mt.node_tree is not None:
+                for nd in mt.node_tree.nodes:
+                    if nd.type == "UVMAP" and nd.uv_map:
+                        want.add(nd.uv_map)
+        for l in [l for l in uvs if l.name not in want]:
+            uvs.remove(l)
+
+
+def decimate(objs, rules):
+    """Collapse-decimates each object by the ratio of the first rule matching one of its
+    materials (rules: "REGEX=RATIO;...", "*" matches all). The shading normals come from the
+    full mesh (copied onto the decimated one), so the reflections keep their shape."""
+    table = []
+    for r in rules.split(";"):
+        rx, ratio = r.rsplit("=", 1)
+        table.append((None if rx == "*" else re.compile(rx, re.I), float(ratio)))
+    before = after = 0
+    for o in objs:
+        names = [m.name for m in used_mats(o)] + [o.name]
+        ratio = next((q for rx, q in table if rx is None or any(rx.search(n) for n in names)), 1.0)
+        o.data.calc_loop_triangles()
+        t0 = len(o.data.loop_triangles)
+        if ratio < 0.999 and t0 > 200:
+            full = o.copy()
+            full.data = o.data.copy()
+            link(full)
+            mod = o.modifiers.new("dec", "DECIMATE")
+            mod.ratio = ratio
+            mod.use_collapse_triangulate = True
+            select([o])
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            o.data.shade_smooth()
+            o.data.set_sharp_from_angle(angle=math.radians(40))
+            dt = o.modifiers.new("normals", "DATA_TRANSFER")
+            dt.object = full
+            dt.use_loop_data = True
+            dt.data_types_loops = {"CUSTOM_NORMAL"}
+            dt.loop_mapping = "POLYINTERP_NEAREST"
+            bpy.ops.object.modifier_apply(modifier=dt.name)
+            mesh = full.data
+            bpy.data.objects.remove(full, do_unlink=True)
+            bpy.data.meshes.remove(mesh)
+        o.data.calc_loop_triangles()
+        before += t0
+        after += len(o.data.loop_triangles)
+        print(f"  {o.name}: {t0} -> {len(o.data.loop_triangles)} ({', '.join(names[:-1])})")
+    print(f"decimated {before} -> {after} triangles")
 
 
 # ---------------------------------------------------------------- car
@@ -197,7 +383,8 @@ def list_car(objs):
     for o in objs:
         l, h = bbox([o])
         mats = [m.name for m in used_mats(o)]
-        print(f"  {o.name:32s} verts {len(o.data.vertices):6d}  centre {tuple(round(x, 2) for x in (l + h) / 2)}  size {tuple(round(x, 2) for x in h - l)}  mats {mats}{'  [glass]' if is_glass(o) else ''}")
+        o.data.calc_loop_triangles()
+        print(f"  {o.name:32s} tris {len(o.data.loop_triangles):6d} verts {len(o.data.vertices):6d}  centre {tuple(round(x, 2) for x in (l + h) / 2)}  size {tuple(round(x, 2) for x in h - l)}  mats {mats}{'  [glass]' if is_glass(o) else ''}")
     for m in bpy.data.materials:
         print(f"  material {m.name}")
     for im in bpy.data.images:
@@ -308,7 +495,7 @@ def measure_cabin(glass, body_lo, body_hi):
 
 
 def car(opts):
-    path = find_file(opts["src"], "milano")
+    path = find_file(opts["src"], opts.get("hint", "milano"))
     import_any(path)
     for o in list(bpy.data.objects):
         if o.type not in ("MESH", "EMPTY"):
@@ -320,27 +507,114 @@ def car(opts):
     if opts.get("list"):
         list_car(meshes)
         return
+    keep_interior = opts.get("interior", "ours") == "keep"
+    if "drop-mat" in opts:
+        rx = re.compile(opts["drop-mat"], re.I)
+        for o in [o for o in meshes if any(rx.search(m.name) for m in used_mats(o))]:
+            print(f"dropped {o.name} (--drop-mat)")
+            meshes.remove(o)
+            bpy.data.objects.remove(o, do_unlink=True)
     orient(meshes, opts.get("forward", "auto"))
-    parts = split_loose(meshes)
+    if "decimate" in opts:
+        decimate(meshes, opts["decimate"])
+        strip_uvs(meshes)
+    if "pbr" in opts:
+        fix_pbr(opts["pbr"])
+    if keep_interior:
+        # Only the wheels need splitting into parts (the interior stays as it is).
+        wheelish = [o for o in meshes if any(WHEEL_RE.search(n) and not NOT_WHEEL_RE.search(n) for n in [o.name] + [m.name for m in used_mats(o)])]
+        parts = [o for o in meshes if o not in wheelish] + split_loose(wheelish)
+    else:
+        parts = list(dict.fromkeys(split_loose(meshes)))
     corners, centres, r = find_wheels(parts)
-    # Scale to the sim's wheelbase; origin at hub height, axles at the sim's y, centred in x.
+    # Scale to the sim's wheelbase (and squeeze the width to its track); origin at hub height,
+    # axles at the sim's y, centred in x.
     wb = (centres["FL"].y + centres["FR"].y - centres["RL"].y - centres["RR"].y) / 2
     s = (FRONT_Y - REAR_Y) / wb
+    half_track = (centres["FR"].x + centres["RR"].x - centres["FL"].x - centres["RL"].x) / 4
+    sx = HALF_TRACK / half_track
     hub_z = sum(c.z for c in centres.values()) / 4
     front_y = (centres["FL"].y + centres["FR"].y) / 2
-    lo, hi = bbox(parts)
-    mid_x = (lo.x + hi.x) / 2
-    m = Matrix.Translation((0, FRONT_Y, 0)) @ Matrix.Scale(s, 4) @ Matrix.Translation((-mid_x, -front_y, -hub_z))
+    mid_x = sum(c.x for c in centres.values()) / 4
+    m = Matrix.Translation((0, FRONT_Y, 0)) @ Matrix.Diagonal((sx, s, s, 1.0)) @ Matrix.Translation((-mid_x, -front_y, -hub_z))
     for p in parts:
         p.data.transform(m)
     for k in centres:
         centres[k] = m @ centres[k]
-    print(f"scale {s:.4f}; tyre radius {r * s:.3f} m (src/art/car.rs MODEL_WHEEL_RADIUS is 0.325: update it if this differs)")
+    r *= s
+    print(f"scale {s:.4f} (width {sx:.4f}); tyre radius {r:.3f} m (src/art/car.rs MODEL_WHEEL_RADIUS: set it to this)")
     print("hubs:", {k: tuple(round(x, 3) for x in v) for k, v in centres.items()})
     wheel_parts = {p for ps in corners.values() for p in ps}
     rest = [p for p in parts if p not in wheel_parts]
     glass = [p for p in rest if is_glass(p)]
     lo, hi = bbox(rest)
+    root = bpy.data.objects.new("Car", None)
+    link(root)
+    if keep_interior:
+        rx = re.compile(opts["steer-mat"], re.I)
+        steer = [p for p in rest if any(rx.search(mt.name) for mt in used_mats(p))]
+        if "ao-mat" in opts and not opts.get("no-bake"):
+            bake_ao(rest + steer, re.compile(opts["ao-mat"], re.I), glass)
+        rest = [p for p in rest if p not in steer]
+        interior_keep(opts, steer, glass, root, r)
+    else:
+        cab = interior_drop(opts, rest, glass, lo)
+    select(rest)
+    bpy.ops.object.join()
+    body = bpy.context.view_layer.objects.active
+    body.name = body.data.name = "Body"
+    body.parent = root
+    # Wheels on Hub/Spin nodes (callipers on the hub, not spinning).
+    for k, ps in corners.items():
+        ce = centres[k]
+        hub = bpy.data.objects.new(f"Hub{k}", None)
+        link(hub)
+        hub.parent = root
+        hub.location = (ce.x, ce.y, 0.0)
+        spin = bpy.data.objects.new(f"Spin{k}", None)
+        link(spin)
+        spin.parent = hub
+        for group, name, parent in (([p for p in ps if not is_caliper(p)], f"Wheel{k}", spin),
+                                    ([p for p in ps if is_caliper(p)], f"Caliper{k}", hub)):
+            if not group:
+                continue
+            select(group)
+            if len(group) > 1:
+                bpy.ops.object.join()
+            w = bpy.context.view_layer.objects.active
+            w.name = w.data.name = name
+            w.data.transform(Matrix.Translation((-ce.x, -ce.y, -ce.z)))
+            w.parent = parent
+    if not keep_interior:
+        # Our cockpit, lined with the body's own cabin faces.
+        cockpit.materials()
+        glass_mats = {i for i, mt in enumerate(body.data.materials) if mt and is_glass_mat(mt)}
+        ground = cockpit.G
+        y0, y1 = lo.y + 0.12, cab.screen_base[0] + 0.06
+        skin = cockpit.inner_skin(body, lambda f, c: f.material_index not in glass_mats and y0 < c.y < y1 and c.z - ground > cab.floor and f.normal.z > -0.5)
+        cockpit.build(root, skin, cab, bake=not opts.get("no-bake"))
+    small_re = re.compile(opts["small-mat"], re.I) if "small-mat" in opts else None
+    shrink_textures(int(opts.get("max-tex", 2048)), int(opts.get("small-tex", 1024)), small_re, jpeg=keep_interior or "small-mat" in opts)
+    tris = 0
+    for o in bpy.data.objects:
+        if o.type == "MESH":
+            o.data.calc_loop_triangles()
+            tris += len(o.data.loop_triangles)
+    print(f"car: {tris} triangles, {len(bpy.data.materials)} materials")
+    if "preview" in opts:
+        import build_rallycar
+        build_rallycar.preview(opts["preview"], eye=getattr(cockpit, "EYE_OFFSET", Vector()))
+    export(opts.get("out", os.path.join(ROOT, "assets/models/rallycar.glb")))
+
+
+def is_caliper(p):
+    return CALIPER_RE.search(p.name) or any(CALIPER_RE.search(m.name) for m in used_mats(p))
+
+
+def interior_drop(opts, rest, glass, lo):
+    """Drops the model's interior (our cockpit replaces it) and thins the glass. Returns the
+    measured cabin."""
+    _, hi = bbox(rest)
     cab = measure_cabin(glass, lo, hi)
     ground = cockpit.G
     # Drop the model's interior: parts inside the cabin (or named so), unless --keep says not.
@@ -365,58 +639,92 @@ def car(opts):
     # Single-sided materials (the body vanishes from inside, our lining shows); glass thinner.
     for mt in bpy.data.materials:
         mt.use_backface_culling = True
+    thin_glass(glass)
+    return cab
+
+
+def thin_glass(glass, alpha=0.45):
     for p in glass:
         for mt in used_mats(p):
             if mt and mt.use_nodes:
                 b = next((n for n in mt.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
                 if b is not None and not b.inputs["Alpha"].is_linked:
-                    b.inputs["Alpha"].default_value = min(b.inputs["Alpha"].default_value, 0.45)
+                    b.inputs["Alpha"].default_value = min(b.inputs["Alpha"].default_value, alpha)
+                # Plain alpha blending, not transmission (a costly pass in the game).
+                if b is not None and "Transmission Weight" in b.inputs:
+                    for l in list(b.inputs["Transmission Weight"].links):
+                        mt.node_tree.links.remove(l)
+                    b.inputs["Transmission Weight"].default_value = 0.0
                 mt.surface_render_method = "BLENDED"
-    root = bpy.data.objects.new("Car", None)
-    link(root)
-    select(rest)
-    bpy.ops.object.join()
-    body = bpy.context.view_layer.objects.active
-    body.name = body.data.name = "Body"
-    body.parent = root
-    # Wheels on Hub/Spin nodes (callipers on the hub, not spinning).
-    for k, ps in corners.items():
-        ce = centres[k]
-        hub = bpy.data.objects.new(f"Hub{k}", None)
-        link(hub)
-        hub.parent = root
-        hub.location = (ce.x, ce.y, 0.0)
-        spin = bpy.data.objects.new(f"Spin{k}", None)
-        link(spin)
-        spin.parent = hub
-        for group, name, parent in (([p for p in ps if not CALIPER_RE.search(p.name)], f"Wheel{k}", spin),
-                                    ([p for p in ps if CALIPER_RE.search(p.name)], f"Caliper{k}", hub)):
-            if not group:
-                continue
-            select(group)
-            if len(group) > 1:
-                bpy.ops.object.join()
-            w = bpy.context.view_layer.objects.active
-            w.name = w.data.name = name
-            w.data.transform(Matrix.Translation((-ce.x, -ce.y, -ce.z)))
-            w.parent = parent
-    # Our cockpit, lined with the body's own cabin faces.
+
+
+def bake_ao(objs, rx, glass, samples=48):
+    """Bakes contact ambient occlusion (30 cm, the glass not counted) into an "AO" vertex
+    colour layer (0.3..1) of the parts whose materials match `rx`; the rest get a white one
+    (every part joined into the body needs the layer)."""
+    targets = [o for o in objs if any(rx.search(m.name) for m in used_mats(o))]
+    for o in objs:
+        a = o.data.color_attributes.new("AO", "BYTE_COLOR", "CORNER")
+        o.data.color_attributes.active_color = a
+        c = np.ones(len(a.data) * 4, dtype=np.float32)
+        a.data.foreach_set("color", c)
+    sc = bpy.context.scene
+    sc.render.engine = "CYCLES"
+    sc.cycles.device = "CPU"
+    sc.cycles.samples = samples
+    if sc.world is None:
+        sc.world = bpy.data.worlds.new("World")
+    sc.world.light_settings.distance = 0.30
+    for g in glass:
+        g.hide_render = True
+    select(targets)
+    bpy.ops.object.bake(type="AO", target="VERTEX_COLORS")
+    for g in glass:
+        g.hide_render = False
+    for o in targets:
+        a = o.data.color_attributes["AO"]
+        c = np.zeros(len(a.data) * 4, dtype=np.float32)
+        a.data.foreach_get("color", c)
+        c = c.reshape(-1, 4)
+        c[:, :3] = 0.30 + 0.70 * c[:, :3]
+        c[:, 3] = 1.0
+        a.data.foreach_set("color", c.ravel())
+    print(f"baked ambient occlusion into {len(targets)} cabin parts")
+
+
+def interior_keep(opts, steer, glass, root, r):
+    """Keeps the model's cabin. Its steering wheel (`steer`: the parts with a --steer-mat
+    material) becomes the SteeringWheel node; our levers go in; the driver's rig moves by the
+    offset that puts our wheel centre on the model's."""
+    if not steer:
+        sys.exit(f"no steering wheel parts match --steer-mat {opts['steer-mat']}")
+    lo, hi = bbox(steer)
+    tilt = math.radians(float(opts.get("steer-tilt", math.degrees(cockpit.STEER_TILT))))
+    # Rim centre: middle of the wheel's width and height, its grip plane ~3 cm in front of the
+    # rearmost point (the grips' middle).
+    centre = Vector(((lo.x + hi.x) / 2, lo.y + 0.03, (lo.z + hi.z) / 2 + float(opts.get("steer-dz", 0))))
+    off = centre - cockpit.STEER_C
+    off = Vector(tuple(round(x / 0.005) * 0.005 for x in off))
+    nudge = cockpit.STEER_C + off - centre
+    print(f"steering wheel centre {tuple(round(x, 3) for x in centre)}; driver offset {tuple(off)} (nudge {tuple(round(x, 4) for x in nudge)})")
+    select(steer)
+    if len(steer) > 1:
+        bpy.ops.object.join()
+    w = bpy.context.view_layer.objects.active
+    node = empty("SteeringWheel", cockpit.STEER_C + off, root, rot=(-tilt, 0, 0))
+    w.data.transform(Matrix.Translation(nudge))
+    w.data.transform(Matrix.Rotation(tilt, 4, "X") @ Matrix.Translation(-(cockpit.STEER_C + off)))
+    w.name = w.data.name = "SteeringWheelMesh"
+    w.parent = node
     cockpit.materials()
-    glass_mats = {i for i, mt in enumerate(body.data.materials) if mt and is_glass_mat(mt)}
-    y0, y1 = lo.y + 0.12, cab.screen_base[0] + 0.06
-    skin = cockpit.inner_skin(body, lambda f, c: f.material_index not in glass_mats and y0 < c.y < y1 and c.z - ground > cab.floor and f.normal.z > -0.5)
-    cockpit.build(root, skin, cab, bake=not opts.get("no-bake"))
-    shrink_textures(int(opts.get("max-tex", 2048)))
-    tris = 0
-    for o in bpy.data.objects:
-        if o.type == "MESH":
-            o.data.calc_loop_triangles()
-            tris += len(o.data.loop_triangles)
-    print(f"car: {tris} triangles, {len(bpy.data.materials)} materials")
-    if "preview" in opts:
-        import build_rallycar
-        build_rallycar.preview(opts["preview"])
-    export(opts.get("out", os.path.join(ROOT, "assets/models/rallycar.glb")))
+    cockpit.add_nodes(root, parts=("levers",), offset=off)
+    cockpit.EYE_OFFSET = off
+    # The constants for the game (glTF frame: x, z, -y).
+    g = lambda v: f"Vec3::new({v.x:.4f}, {v.z:.4f}, {-v.y:.4f})"
+    eye = Vector((cockpit.DRV_X, -0.60, cockpit.zg(1.12))) + off
+    print("src/art/car.rs COCKPIT_EYE_MODEL =", g(eye), f"(eye {eye.z + r:.3f} m above the ground)")
+    print("src/art/hands.rs driver offset (glTF) =", g(off), f"WHEEL_TILT = {-math.degrees(tilt):.1f} deg")
+    thin_glass(glass, alpha=0.35)
 
 
 def is_glass_mat(mt):

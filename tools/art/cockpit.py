@@ -515,10 +515,21 @@ def codriver(M, D, cab):
 # ---------------------------------------------------------------- moving parts
 
 
-def add_nodes(root):
+def add_nodes(root, parts=("wheel", "dials", "levers"), offset=Vector()):
+    """The animated nodes: steering wheel, needles, levers (`parts` picks which), all moved by
+    `offset` (a body whose seat sits elsewhere: src/art/car.rs and hands.rs move the same)."""
+    if "wheel" in parts:
+        add_wheel(root, offset)
+    if "dials" in parts:
+        add_dials(root, offset)
+    if "levers" in parts:
+        add_levers(root, offset)
+
+
+def add_wheel(root, offset=Vector()):
     # Steering wheel: a suede deep-dish three-spoke, built about its own local Y axis (rim in
     # local XZ), tilted with the column. The rim stays at RIM (the hands grip it there).
-    sw = empty("SteeringWheel", STEER_C, root, rot=(-STEER_TILT, 0, 0))
+    sw = empty("SteeringWheel", STEER_C + offset, root, rot=(-STEER_TILT, 0, 0))
     W = Mesh()
     W.torus((0, 0, 0), (0, 1, 0), RIM, 0.019, 48, 10, "Suede")
     W.torus((0, 0, 0), (0, 1, 0), RIM, 0.0195, 4, 10, "Accent", a0=math.radians(86), a1=math.radians(94))
@@ -539,13 +550,19 @@ def add_nodes(root):
     W.torus((0, dish - 0.016, 0), (0, 1, 0), 0.034, 0.003, 18, 4, "Accent")
     W.cyl((0, dish + 0.05, 0), (0, dish + 0.085, 0), 0.03, 14, "Alu")
     W.obj("SteeringWheelMesh", sw, recalc=True, smooth_angle=50)
+
+
+def add_dials(root, offset=Vector()):
     # Needle nodes at the dial centres.
     for name, c in (("Tacho", TACHO_C), ("Speedo", SPEEDO_C)):
-        node = empty(name, c, root)
+        node = empty(name, c + offset, root)
         Nd = Mesh()
         Nd.add([(-0.003, -0.009, -0.008), (0.003, -0.009, -0.008), (0.0015, -0.009, 0.050), (-0.0015, -0.009, 0.050)], [(0, 1, 2, 3)], "Needle")
         Nd.cyl((0, -0.006, 0), (0, -0.011, 0), 0.008, 10, "Black")
         Nd.obj(name + "Needle", node, recalc=False)
+
+
+def add_levers(root, offset=Vector()):
     # Sequential shifter (leaning back towards the driver): shaft, reverse-lockout collar, knob.
     S = Mesh()
     top = Vector((-0.03, -0.05, 0.28))
@@ -553,14 +570,14 @@ def add_nodes(root):
     S.cyl(top * 0.68, top * 0.74, 0.016, 12, "Accent")
     S.cyl(top, top + Vector((0, 0, 0.055)), 0.021, 14, "Black")
     S.cyl(top + Vector((0, 0, 0.055)), top + Vector((0, 0, 0.065)), 0.021, 14, "Black", r1=0.012)
-    S.obj("ShifterMesh", empty("Shifter", SHIFT_PIVOT, root), recalc=True, smooth_angle=40)
+    S.obj("ShifterMesh", empty("Shifter", SHIFT_PIVOT + offset, root), recalc=True, smooth_angle=40)
     # Hydraulic handbrake: short and low (top below the wheel hub), leaning back.
     H = Mesh()
     hb = Vector((-0.01, -0.04, 0.25)).normalized()
     H.cyl((0, 0, 0), hb * 0.18, 0.011, 10, "Metal")
     H.cyl(hb * 0.18, hb * 0.253, 0.016, 12, "Accent")
     H.cyl(hb * 0.253, hb * 0.258, 0.012, 12, "Black")
-    H.obj("HandbrakeMesh", empty("Handbrake", HB_PIVOT, root), recalc=True, smooth_angle=40)
+    H.obj("HandbrakeMesh", empty("Handbrake", HB_PIVOT + offset, root), recalc=True, smooth_angle=40)
 
 
 # ---------------------------------------------------------------- assemble

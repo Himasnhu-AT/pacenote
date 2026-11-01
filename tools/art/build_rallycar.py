@@ -512,7 +512,8 @@ def add_wheels(root):
 # ---------------------------------------------------------------- preview renders
 
 
-def preview(out):
+def preview(out, eye=Vector()):
+    """Workbench renders of the car (`eye`: the driver rig's offset for the cockpit view)."""
     import os
     os.makedirs(out, exist_ok=True)
     sc = bpy.context.scene
@@ -529,7 +530,7 @@ def preview(out):
         "rear34": ((-4.5, -5.5, 1.8), (0, -0.2, 0.2), 40),
         "side_left": ((-7.5, 0.1, 0.3), (0, 0.1, 0.25), 40),
         "top": ((0.01, 0.1, 9.0), (0, 0.1, 0), 40),
-        "cockpit": ((DRV_X, -0.60, zg(1.12)), (DRV_X, 3.0, zg(1.0)), 95),
+        "cockpit": (Vector((DRV_X, -0.60, zg(1.12))) + eye, Vector((DRV_X, 3.0, zg(1.0))) + eye, 95),
     }
     for name, (eye, at, lens_fov) in views.items():
         cam.location = eye
