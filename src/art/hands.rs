@@ -14,8 +14,8 @@
 //! The levers are the model's `Shifter` and `Handbrake` nodes (`tools/art/cockpit.py`, put in by
 //! `build_rallycar.py` or `import_sketchfab.py`), tilted about their foot. Hands and arms are a few shared primitive meshes (finger rings
 //! around the grip, an ellipsoid palm, thumb, cuff with an orange band, sleeve capsules); the
-//! arms bend with two-bone IK from fixed shoulders. They only show in the cockpit view (there's
-//! no driver body for the outside views).
+//! arms bend with two-bone IK from fixed shoulders. They show from every camera, joined to the
+//! model's seated `DriverBody` (car.rs hides that body in the driver's own cockpit view).
 //!
 //! Everything here is per-frame transform maths: no allocations after spawning. The timing
 //! logic ([`Driver`]) is pure and tested.
@@ -27,7 +27,7 @@ use bevy::prelude::*;
 use engine::render_budget::Actor;
 
 use super::car::{CarModel, CarPose, CarRig, STEERING_RATIO};
-use crate::drive::{CameraView, DriverInput, DrivenCar};
+use crate::drive::{DriverInput, DrivenCar};
 
 // ---------------------------------------------------------------- the model (glTF frame)
 // Mirrors tools/art/cockpit.py: Blender (x, y, z) → model (x, z, −y).
@@ -713,19 +713,19 @@ fn segment(a: Vec3, b: Vec3, len: f32) -> Transform {
 /// Hands, arms and levers, every frame.
 pub fn animate(
     time: Res<Time>,
-    view: Option<Res<CameraView>>,
     cars: Query<(Option<&DrivenCar>, Option<&DriverInput>, Option<&CarPose>)>,
     mut arms: Query<(&mut Arms, &mut Visibility)>,
     mut tfs: Query<&mut Transform>,
 ) {
     let dt = time.delta_secs();
-    let cockpit = view.as_deref().is_none_or(|v| *v == CameraView::Cockpit);
     for (mut a, mut vis) in &mut arms {
         let a = &mut *a;
         let Ok((driven, input, shown)) = cars.get(a.car) else { continue };
         // The simulated car, else the pose its owner fills (the guide's copy of the car).
         let Some(c) = CarPose::read(driven, input, shown) else { continue };
-        let want = if cockpit { Visibility::Inherited } else { Visibility::Hidden };
+        // The arms belong to the seated driver's body (car.rs `DriverBody`), seen from every
+        // camera: the cockpit, the co-driver's seat, the chase camera through the glass.
+        let want = Visibility::Inherited;
         if *vis != want {
             *vis = want;
         }

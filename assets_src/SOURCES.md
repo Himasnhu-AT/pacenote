@@ -42,7 +42,7 @@ Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; 
 - **Licence:** CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/)
 - **Size:** 55.4 MB glb
 - **Resolution / polys:** 496,438 triangles; 57 meshes, 34 materials, 41 images (one 4096², the rest 1024² or less)
-- **Credit line:** REQUIRED: "Mercedes-AMG GT3 Evo 2020 | www.vecarz.com" by vecarz (sketchfab.com/heynic), licensed under CC BY 4.0. Modified: scaled, decimated, rigged (wheels, suspension, detachable parts), passenger seat mirrored, shifter and handbrake added.
+- **Credit line:** REQUIRED: "Mercedes-AMG GT3 Evo 2020 | www.vecarz.com" by vecarz (sketchfab.com/heynic), licensed under CC BY 4.0. Modified: scaled, decimated, rigged (wheels, suspension, detachable parts), passenger seat mirrored, cabin tidied, shifter, handbrake and driver figure added.
 - **Trademarks:** A real, branded car in a real team livery (Mercedes-Benz star and AMG badges, Red Bull, Michelin, Ravenol, DEKRA, Viaplay, Sparco and others). CC BY covers the model's copyright only, not these trademarks or the car's design; see the note at the end of this file on branded cars. Check with the trademark owners (or replace the livery and badges) before a commercial release.
 
 ### Milano '95 - Low poly model (`milano_95`): former car body, no longer shipped

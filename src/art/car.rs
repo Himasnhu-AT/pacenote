@@ -70,6 +70,10 @@ pub fn model_offset(s: &crate::vehicle::Spec) -> Vec3 {
     Vec3::new(0.0, model_height(s), (s.mounts[0].z + s.mounts[2].z) * 0.5)
 }
 
+/// The cabin's fill light: under the roof between the seats (model frame) and its power.
+const CABIN_FILL_MODEL: Vec3 = Vec3::new(0.0, 0.62, 0.45);
+const CABIN_FILL_LUMENS: f32 = 6000.0;
+
 /// Model tyre radius (m), from the prepared model (the importer prints it).
 pub const MODEL_WHEEL_RADIUS: f32 = 0.337;
 
@@ -138,6 +142,8 @@ pub struct CarRig {
     dials: [Option<(Entity, Quat)>; 3],
     /// The bonnet lamp pod.
     pod: Option<Entity>,
+    /// The seated driver's body (helmet, suit, legs): hidden in this car's own cockpit view.
+    driver: Option<Entity>,
     chassis: Option<Entity>,
     parts: Vec<(&'static str, Entity)>,
 }
@@ -179,6 +185,17 @@ pub fn spawn(world: &mut World, car: Entity) {
     let tf = Transform::from_translation(model_offset(&spec));
     let model = world.spawn((Name::new("car model"), CarModel, WorldAssetRoot(scene), tf, Visibility::default(), Actor)).id();
     world.entity_mut(car).add_child(model);
+    // A soft fill in the cabin: the roof shades it from the sun and sky, and without this the
+    // interior reads as a cave from both seats. No shadows (cheap), short range.
+    let fill = world
+        .spawn((
+            Name::new("cabin fill light"),
+            PointLight { color: Color::srgb(1.0, 0.97, 0.92), intensity: CABIN_FILL_LUMENS, range: 1.6, radius: 0.3, shadow_maps_enabled: false, ..default() },
+            Transform::from_translation(CABIN_FILL_MODEL),
+            Actor,
+        ))
+        .id();
+    world.entity_mut(model).add_child(fill);
     super::hands::spawn(world, car, model);
 }
 
@@ -200,6 +217,7 @@ fn rig(
         let mut rest = [Vec3::ZERO; 4];
         let mut dials = [None; 3];
         let mut pod = None;
+        let mut driver = None;
         let mut chassis = None;
         let mut detached = Vec::new();
         let mut parts = Vec::new();
@@ -210,6 +228,8 @@ fn rig(
                 dials[i] = Some((e, tf.rotation));
             } else if n.as_str() == "LightPod" {
                 pod = Some(e);
+            } else if n.as_str() == "DriverBody" {
+                driver = Some(e);
             } else if n.as_str() == "Chassis" {
                 chassis = Some(e);
             } else if let Some(p) = DETACHABLE.iter().find(|p| n.as_str() == **p) {
@@ -247,7 +267,7 @@ fn rig(
                 }
             }
         }
-        commands.entity(m).insert(CarRig { hub, knuckle, spin, rest, dials, pod, chassis, parts: detached });
+        commands.entity(m).insert(CarRig { hub, knuckle, spin, rest, dials, pod, driver, chassis, parts: detached });
     }
 }
 
@@ -314,12 +334,19 @@ fn cockpit(
                 t.rotation = rest * Quat::from_rotation_z(a);
             }
         }
-        if let Some(pod) = rig.pod
-            && let Ok(mut v) = vis.get_mut(pod)
-        {
-            let want = if view.as_deref().is_some_and(|v| *v != CameraView::Chase) { Visibility::Hidden } else { Visibility::Inherited };
-            if *v != want {
-                *v = want;
+        let inside = view.as_deref().is_some_and(|v| *v != CameraView::Chase);
+        // The lamp pod would block the road from the bonnet and cockpit; the driver's own body
+        // would fill the cockpit camera (it's inside the helmet). The co-driver (no
+        // `DrivenCar` here) and the chase camera see both.
+        let hide = [(rig.pod, inside), (rig.driver, driven.is_some() && view.as_deref().is_none_or(|v| *v == CameraView::Cockpit))];
+        for (e, hidden) in hide {
+            if let Some(e) = e
+                && let Ok(mut v) = vis.get_mut(e)
+            {
+                let want = if hidden { Visibility::Hidden } else { Visibility::Inherited };
+                if *v != want {
+                    *v = want;
+                }
             }
         }
     }
@@ -395,7 +422,7 @@ mod tests {
             assert_eq!(parent(&format!("Wheel{k}")), Some(format!("Spin{k}")));
         }
         assert_eq!(parent("Chassis").as_deref(), Some("Car"));
-        for n in ["Body", "SteeringWheel", "Shifter", "Handbrake"].into_iter().chain(DETACHABLE) {
+        for n in ["Body", "SteeringWheel", "Shifter", "Handbrake", "DriverBody", "SeatHarness"].into_iter().chain(DETACHABLE) {
             assert_eq!(parent(n).as_deref(), Some("Chassis"), "{n}");
         }
         for n in ["CoDriverEye", "CoDriverTablet"] {
