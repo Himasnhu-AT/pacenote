@@ -303,10 +303,10 @@ fn update(
     mut notes: Local<Vec<Note>>,
     mut s: Local<String>,
 ) {
-    if let Some(g) = &stage {
-        upcoming(g, feed.s, NOTES, &mut notes);
-    } else {
-        notes.clear();
+    // No more notes once the run is over.
+    match &stage {
+        Some(g) if feed.run.finished.is_none() => upcoming(g, feed.s, NOTES, &mut notes),
+        _ => notes.clear(),
     }
     let run = feed.run;
     let car = feed.car;
