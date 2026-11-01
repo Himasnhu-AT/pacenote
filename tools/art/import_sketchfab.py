@@ -56,7 +56,7 @@ from mathutils import Matrix, Vector
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cockpit  # noqa: E402
-from blendkit import MATS, empty, link  # noqa: E402
+from blendkit import MATS, empty, link, material  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 # Hubs about the model origin: src/art/car.rs MODEL_HALF_WHEELBASE / MODEL_HALF_TRACK (the
@@ -76,14 +76,16 @@ PROFILES = {
         "decimate": ";".join([
             r"Engine_Components|Suspension|Screws|Pedals|WorldGrid=0.10",
             r"Brake_Disc|Caliper=0.20",
-            r"Interior_Details|Interior_Stickers=0.18",
-            r"Interior_Chassis|Cockpit_Console=0.25",
-            r"Seat|Net_Share|stitches=0.30",
-            r"Exterior_Details|Grille|Lights=0.28",
-            r"Rim_Inst=0.22",
-            r"Steering_Wheel_Inst=0.30",
-            r"Tyre=0.45",
-            r"Livery=0.45",
+            # The cabin is seen from a few centimetres: the cage, pads, seats, dash and door
+            # cards keep most of their shape.
+            r"Interior_Details|Interior_Stickers=0.45",
+            r"Interior_Chassis|Cockpit_Console=0.6",
+            r"Seat|Net_Share|stitches=0.7",
+            r"Exterior_Details|Grille|Lights=0.35",
+            r"Rim_Inst=0.25",
+            r"Steering_Wheel_Inst=0.5",
+            r"Tyre=0.5",
+            r"Livery=0.55",
             r"*=0.5",
         ]),
         "small-mat": r"Engine|Suspension|Screws|Pedals|Brake_Disc|Caliper|Interior|Cockpit|Seat|Net_Share|stitches|Steering|Grille|Lights|Rim|Stickers",
@@ -115,6 +117,32 @@ PROFILES = {
             # The battery box on the passenger floor would poke through the mirrored seat.
             r"-=0.1,0.6,-0.8,-0.2,-0.35,0.05@Interior_Details|Interior_Stickers",
         ]),
+        # Cabin tidy-up (faces whose middle is in a box, model frame): the net strung between
+        # the seats (the door's window net stays), the clutter on the passenger floor.
+        "cut": ";".join([
+            r"-0.32,0.8,-1.2,0.6,-0.4,1.2@Net_Share",
+            r"-0.32,0.8,-1.2,0.0,0.16,1.2@stitches|Interior_Stickers",
+            r"0.14,0.72,-0.05,0.62,-0.26,0.12@Interior_Details|Interior_Stickers",
+            r"0.14,0.62,0.05,0.55,-0.17,0.25@Interior_Chassis$",
+            r"0.14,0.62,0.05,0.55,0.12,0.30@Interior_Details",
+            # The padding round the bar over the windscreen (the tube stays): the driver sees
+            # more road.
+            r"-0.9,0.9,-0.40,0.15,0.62,0.95@Interior_Details",
+        ]),
+        # A carbon floor panel and footrest on the passenger side (box, tilt about x in degrees).
+        "plates": ";".join([
+            r"0.09,0.71,-0.06,0.52,-0.185,-0.170,0@^Carbon$",
+            r"0.12,0.68,0.47,0.64,-0.19,-0.175,40@^Tread$",
+            r"0.12,0.71,0.60,0.615,-0.20,0.10,-12@^Carbon$",
+        ]),
+        "mirror-glass": "MirrorL,MirrorR",
+        # The seated driver (tools/art/driver.py): helmet on the cockpit eye (car.rs
+        # COCKPIT_EYE_MODEL, glTF), the cushion's top and where the feet rest (model y, z).
+        "driver-eye": "-0.36,0.595,0.69",
+        "driver-seat-z": "-0.17",
+        "driver-pedals": "0.33,-0.12",
+        # Harness straps laid on the passenger seat (its middle, model x).
+        "passenger-harness": "0.36",
         # Co-driver's eye (the driver's mirrored) and tablet anchor, glTF model frame.
         "codriver-eye": "0.36,0.595,0.69",
         "codriver-tablet": "0.33,0.06,0.37",
@@ -581,14 +609,24 @@ def car(opts):
         rx = re.compile(opts["steer-mat"], re.I)
         steer = [p for p in rest if any(rx.search(mt.name) for mt in used_mats(p))]
         rest = [p for p in rest if p not in steer]
+        if "cut" in opts:
+            cut_faces(rest, opts["cut"])
         if "mirror-seat" in opts:
             rest.append(mirror_seat(rest, re.compile(opts["mirror-seat"], re.I)))
+        if "plates" in opts:
+            cockpit.materials()
+            rest += plates(opts["plates"])
         if "parts" in opts:
             detached = split_parts(rest, opts["parts"])
         if "ao-mat" in opts and not opts.get("no-bake"):
             bake_ao(rest + steer + [p for ps in detached.values() for p in ps], re.compile(opts["ao-mat"], re.I), glass)
         interior_keep(opts, steer, glass, chassis, r)
         codriver_nodes(opts, root)
+        if "driver-eye" in opts:
+            driver_body(opts, chassis)
+        if "passenger-harness" in opts:
+            import driver
+            driver.seat_harness(chassis, float(opts["passenger-harness"]))
     else:
         cab = interior_drop(opts, rest, glass, lo)
     select(rest)
@@ -608,6 +646,8 @@ def car(opts):
         o.data.transform(Matrix.Translation(-c))
         o.location = c
         o.parent = chassis
+        if name in opts.get("mirror-glass", "").split(","):
+            mirror_glass(o)
         o.data.calc_loop_triangles()
         print(f"detachable {name}: {len(o.data.loop_triangles)} triangles at {tuple(round(x, 3) for x in c)}")
     # Wheels: Hub<k> (suspension travel) > Steer<k> (front: the knuckle, steering) > Spin<k>
@@ -704,6 +744,89 @@ def thin_glass(glass, alpha=0.45):
                         mt.node_tree.links.remove(l)
                     b.inputs["Transmission Weight"].default_value = 0.0
                 mt.surface_render_method = "BLENDED"
+
+
+def boxes_of(spec):
+    """"x0,x1,y0,y1,z0,z1[,extra...]@MATREGEX;..." → [(lo, hi, extras, regex)]."""
+    out = []
+    for item in spec.split(";"):
+        v, _, mat = item.partition("@")
+        n = [float(t) for t in v.split(",")]
+        out.append((Vector((n[0], n[2], n[4])), Vector((n[1], n[3], n[5])), n[6:], re.compile(mat or ".", re.I)))
+    return out
+
+
+def cut_faces(objs, spec):
+    """Deletes the faces whose middle lies in a box and whose material matches."""
+    boxes = boxes_of(spec)
+    n = 0
+    for o in objs:
+        mats = [m.name if m else "" for m in o.data.materials]
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        gone = []
+        for f in bm.faces:
+            c = f.calc_center_median()
+            m = mats[f.material_index] if f.material_index < len(mats) else ""
+            if any(all(lo[k] <= c[k] <= hi[k] for k in range(3)) and rx.search(m) for lo, hi, _, rx in boxes):
+                gone.append(f)
+        if gone:
+            bmesh.ops.delete(bm, geom=gone, context="FACES")
+            bm.to_mesh(o.data)
+            n += len(gone)
+        bm.free()
+    print(f"cut {n} faces")
+
+
+def plates(spec):
+    """Flat panels (boxes, tilted about x by the 7th number, degrees) in the first material
+    matching the regex, UVs planar at 0.2 m a repeat."""
+    out = []
+    for lo, hi, extra, rx in boxes_of(spec):
+        mat = next(m for m in bpy.data.materials if rx.search(m.name))
+        c, size = (lo + hi) / 2, hi - lo
+        me = bpy.data.meshes.new("Plate")
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=1.0)
+        bm.transform(Matrix.Diagonal((*size, 1.0)))
+        bm.transform(Matrix.Translation(c) @ Matrix.Rotation(math.radians(extra[0] if extra else 0.0), 4, "X"))
+        uv = bm.loops.layers.uv.new("UVMap")
+        for f in bm.faces:
+            for l in f.loops:
+                l[uv].uv = (l.vert.co.x * 5.0, (l.vert.co.y + l.vert.co.z) * 5.0)
+        bm.to_mesh(me)
+        bm.free()
+        ob = bpy.data.objects.new("Plate", me)
+        link(ob)
+        me.materials.append(mat)
+        out.append(ob)
+    return out
+
+
+def mirror_glass(o):
+    """The door mirror's glass: its rear-facing faces get a dark mirror material."""
+    mt = bpy.data.materials.get("MirrorGlass") or material("MirrorGlass", (0.10, 0.11, 0.12), rough=0.04, metal=1.0)
+    o.data.materials.append(mt)
+    k = len(o.data.materials) - 1
+    n3 = o.matrix_world.to_3x3()
+    n = 0
+    for f in o.data.polygons:
+        if (n3 @ f.normal).normalized().y < -0.75:
+            f.material_index = k
+            n += 1
+    print(f"mirror glass on {o.name}: {n} faces")
+
+
+def driver_body(opts, parent):
+    """The seated driver (tools/art/driver.py) for the outside and co-driver views."""
+    import driver
+    gx, gy, gz = (float(t) for t in opts["driver-eye"].split(","))
+    eye = Vector((gx, -gz, gy))
+    off = cockpit.EYE_OFFSET
+    # The arms' shoulders (src/art/hands.rs SHOULDER, the hatchback's + the rig offset).
+    shoulders = [Vector((-0.58, -0.74, cockpit.zg(0.90))) + off, Vector((-0.16, -0.74, cockpit.zg(0.90))) + off]
+    py, pz = (float(t) for t in opts["driver-pedals"].split(","))
+    driver.build(parent, eye, shoulders, float(opts["driver-seat-z"]), (py, pz))
 
 
 def mirror_seat(rest, rx):
@@ -839,7 +962,7 @@ def codriver_nodes(opts, root):
 
 def bake_ao(objs, rx, glass, samples=48):
     """Bakes contact ambient occlusion (30 cm, the glass not counted) into an "AO" vertex
-    colour layer (0.3..1) of the parts whose materials match `rx`; the rest get a white one
+    colour layer (0.55..1: the game adds its own screen-space occlusion) of the parts whose materials match `rx`; the rest get a white one
     (every part joined into the body needs the layer)."""
     targets = [o for o in objs if any(rx.search(m.name) for m in used_mats(o))]
     for o in objs:
@@ -865,7 +988,7 @@ def bake_ao(objs, rx, glass, samples=48):
         c = np.zeros(len(a.data) * 4, dtype=np.float32)
         a.data.foreach_get("color", c)
         c = c.reshape(-1, 4)
-        c[:, :3] = 0.30 + 0.70 * c[:, :3]
+        c[:, :3] = 0.55 + 0.45 * c[:, :3]
         c[:, 3] = 1.0
         a.data.foreach_set("color", c.ravel())
     print(f"baked ambient occlusion into {len(targets)} cabin parts")
@@ -895,7 +1018,8 @@ def interior_keep(opts, steer, glass, root, r):
     w.data.transform(Matrix.Rotation(tilt, 4, "X") @ Matrix.Translation(-(cockpit.STEER_C + off)))
     w.name = w.data.name = "SteeringWheelMesh"
     w.parent = node
-    cockpit.materials()
+    if "Metal" not in MATS:
+        cockpit.materials()
     cockpit.add_nodes(root, parts=("levers",), offset=off)
     cockpit.EYE_OFFSET = off
     # The constants for the game (glTF frame: x, z, -y).
