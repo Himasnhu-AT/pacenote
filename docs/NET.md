@@ -30,7 +30,7 @@ copy (the shared `target/debug/pacenote` can be another branch's by the time you
 | `src/net_session.rs` | `Role` (Solo / Driver / Guide), `Session` (peer, names, RTT, link state), `host`, `join`, `leave`, `host_with` / `join_with` (any transport, for tests), the `Hello` name message, guide auto-reconnect |
 | `src/guide/sync.rs` | Replicated `NetStage`, `NetRun`, `NetCar` + quantising codecs, `road_hash`, the driver's publishing systems |
 | `src/guide/mod.rs` | `GuidePlugin`; guide side: `GuideStage` (road + pace notes regenerated from the id), `GuideFeed` (latest car / run, clock extrapolated), `upcoming` notes, `GuideScreen` (in car / map) |
-| `src/guide/seat.rs` | In car: the stage's scenery built on the guide (no `StageWorld`, no `DrivenCar`), the drawn car (`GuideCar`, `ShownCar`), the passenger-seat camera (model node `CoDriverEye`, else the driver's eye mirrored), driver silhouette |
+| `src/guide/seat.rs` | In car: the stage's scenery built on the guide (no `StageWorld`, no `DrivenCar`), the drawn car (`GuideCar` + `art::car::CarPose`: wheels, steering wheel, gauges and the driver's arms animate), the passenger-seat camera (model node `CoDriverEye`, else the driver's eye mirrored), driver silhouette |
 | `src/guide/smooth.rs` | `PoseSmoother`: steady pose from the interpolated `NetCar` (extrapolates late packets, filters rotation quantisation), acceleration for the head |
 | `src/guide/head.rs` | `HeadMotion` (g-forces on the neck) and `Look` (mouse look within a seated range) |
 | `src/guide/tablet.rs` | The tablet: the map + panel rendered into its texture (`TabletImage`), resting on the knees, raised with Space / right mouse, held in the guide's hands |
@@ -94,5 +94,5 @@ link timeout is 12 s (`NetSessionPlugin`) to ride out that load's long frames on
 - A second guide is refused (`max_clients = 1`); after a crash the old slot frees on the 12 s
   timeout, the retry loop covers it.
 - In car: wheel suspension travel and the handbrake aren't replicated (the guide's car shows
-  the wheels at static load); call timing is shown to the guide only.
+  the springs at static load, handbrake off); call timing is shown to the guide only.
 - No relay / NAT traversal (engine limit): LAN or a forwarded port.

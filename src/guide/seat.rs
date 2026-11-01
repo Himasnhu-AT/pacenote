@@ -6,8 +6,8 @@
 //!   [`build_scene`] is the guide's half of `loading.rs`'s build step.
 //! - **The car**: the same model as the driver's (`art::car::spawn`) on a [`GuideCar`] entity,
 //!   posed every frame from the replicated car through [`PoseSmoother`] (no jitter, late
-//!   packets carried on). [`ShownCar`] carries what the model animates from (steer, revs, wheel
-//!   spin) for the car art to read.
+//!   packets carried on), with an `art::car::CarPose` (steer, revs, gear, wheel roll, springs
+//!   at static load) that the car art and the driver's arms animate from.
 //! - **The seat**: the camera sits at the co-driver's eye, opposite the driver (the model's
 //!   `CoDriverEye` node if it has one, else the driver's eye mirrored across the centreline).
 //!   The head is thrown about by the car's acceleration ([`HeadMotion`], scaled by Settings >
@@ -24,6 +24,7 @@ use engine::world::WorldDesc;
 use super::head::{HeadMotion, Look};
 use super::smooth::PoseSmoother;
 use super::{GuideFeed, GuideScreen, GuideStage, GuideView};
+use crate::art::car::CarPose;
 use crate::drive::CarSpec;
 use crate::stage;
 use crate::world::StageWorld;
@@ -34,21 +35,6 @@ pub const EYE_NODE: &str = "CoDriverEye";
 /// The car on the guide's machine (drawn, never simulated).
 #[derive(Component)]
 pub struct GuideCar;
-
-/// What the car model animates from, on a car that isn't simulated here (the guide's).
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
-pub struct ShownCar {
-    /// Road-wheel steer (rad, + = left).
-    pub steer: f32,
-    pub rpm: f32,
-    /// Forward speed (m/s).
-    pub speed: f32,
-    pub gear: i8,
-    /// Wheel rotation angles (rad): FL, FR, RL, RR.
-    pub wheel_angle: [f32; 4],
-    /// Spring compression (m), at static load (not replicated).
-    pub compression: [f32; 4],
-}
 
 /// The co-driver's race suit.
 pub const CODRIVER_SUIT: Color = Color::srgb(0.1, 0.11, 0.14);
@@ -194,7 +180,7 @@ fn spawn_body(mut commands: Commands, ride: Res<Ride>, cars: Query<Entity, With<
 /// The guide's car: model, wheels and the driver silhouette.
 fn spawn_car(world: &mut World, pos: Vec3, rot: Quat) {
     let tf = Transform::from_translation(pos).with_rotation(rot);
-    let car = world.spawn((Name::new("guide car"), GuideCar, ShownCar::default(), tf, Visibility::default(), Actor)).id();
+    let car = world.spawn((Name::new("guide car"), GuideCar, CarPose::default(), tf, Visibility::default(), Actor)).id();
     crate::art::car::spawn(world, car);
     spawn_driver(world, car);
 }
@@ -250,6 +236,11 @@ fn find_eye(
     ride.eye_from_model = true;
 }
 
+/// Spring compression at static load (m): what the guide's car shows (springs aren't sent).
+pub fn static_compression(s: &crate::vehicle::Spec) -> f32 {
+    (s.mass * 9.81 / 4.0 / s.spring).min(s.travel)
+}
+
 /// The driver's eye mirrored across the car's centreline: the co-driver sits opposite.
 pub fn mirrored_eye(spec: &crate::vehicle::Spec) -> Vec3 {
     let d = crate::art::car::cockpit_eye(spec);
@@ -270,7 +261,8 @@ fn ride(
     access: Option<Res<engine::actions::Accessibility>>,
     paused: Option<Res<engine::pause::Paused>>,
     mut ride: ResMut<Ride>,
-    mut cars: Query<(&mut Transform, &mut ShownCar), With<GuideCar>>,
+    spec: Option<Res<CarSpec>>,
+    mut cars: Query<(&mut Transform, &mut CarPose), With<GuideCar>>,
     mut cams: Query<&mut Transform, (With<SeatCamera>, Without<GuideCar>)>,
 ) {
     let dt = time.delta_secs();
@@ -288,6 +280,9 @@ fn ride(
         for i in 0..4 {
             s.wheel_angle[i] = (s.wheel_angle[i] + c.spin[i] * dt).rem_euclid(std::f32::consts::TAU);
         }
+        // Springs and the handbrake aren't replicated: static load, off.
+        s.compression = [static_compression(&spec.as_deref().map(|s| s.0.clone()).unwrap_or_default()); 4];
+        s.handbrake = false;
         shown.set_if_neq(s);
     }
     let shake = access.as_deref().map_or(1.0, |a| if a.reduce_motion { 0.0 } else { a.camera_shake.clamp(0.0, 1.0) });
