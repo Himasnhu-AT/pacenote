@@ -29,8 +29,8 @@ pub const REST_PITCH: f32 = -0.06;
 
 /// How far the head leans when looking round (m): forward past the seat's head wings, and in
 /// towards the car's centre when looking across at the driver.
-pub const LEAN_FORWARD: f32 = 0.17;
-pub const LEAN_INWARD: f32 = 0.07;
+pub const LEAN_FORWARD: f32 = 0.25;
+pub const LEAN_INWARD: f32 = 0.08;
 
 /// Where the head moves for a look `yaw` (rad, + = left), car frame. `centre` is the side the
 /// car's centre is on from this seat: +1 = to the left (right-hand seat), −1 = to the right.
@@ -177,10 +177,10 @@ mod tests {
         assert_eq!(lean(0.0, 1.0), Vec3::ZERO);
         // Right-hand seat looking left at the driver: forward and to the left (−X).
         let l = lean(1.4, 1.0);
-        assert!(l.z < -0.15 && l.x < -0.05, "{l}");
+        assert!(l.z < -0.2 && l.x < -0.05, "{l}");
         // Looking out of the window: forward only.
         let r = lean(-1.4, 1.0);
-        assert!(r.z < -0.15 && r.x == 0.0, "{r}");
+        assert!(r.z < -0.2 && r.x == 0.0, "{r}");
     }
 
     #[test]
