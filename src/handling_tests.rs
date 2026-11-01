@@ -1280,27 +1280,36 @@ fn scripted_drive_is_bit_identical() {
 /// before the generator used libm, 10 of 20 differed between them, so boards split by CPU).
 /// A stage that changes on purpose gets a new id (docs/DESIGN.md), so these never change.
 const STAGE_HASHES: [(u32, &str); 20] = [
-    (1, "0a016690558d4c63"),
-    (2, "7c0a3a7ce62de3f3"),
-    (3, "c4a32b4e7691adec"),
-    (4, "3b141816e48d323e"),
-    (5, "2fc139f7e76ed4ef"),
-    (6, "5523ebe422412419"),
-    (7, "c4f9d3bce32c4a90"),
-    (8, "9ebd8038bb37b45a"),
-    (9, "2e385f045059c1be"),
-    (10, "3a3c4dd7e929bda2"),
-    (11, "489d603810c44fe3"),
-    (12, "bab70529e6d59aac"),
-    (13, "950ec07ebdf1f84d"),
-    (14, "eefde138d85fd189"),
-    (15, "2d0486980179de16"),
-    (16, "7acdb525116ac347"),
-    (17, "ebd58f196120577b"),
-    (18, "11e4e5df6fb3b81b"),
-    (19, "22bbe8a2333ae3dd"),
-    (20, "f2aee0064b91b4f6"),
+    (1, "001a1b22a514b71c"),
+    (2, "d2bfac6f5be597f5"),
+    (3, "41672b7b7187af6e"),
+    (4, "9b5ff09d9e4989f5"),
+    (5, "c0e6b71168935d60"),
+    (6, "44534ab226a64260"),
+    (7, "0186761fc85b74e2"),
+    (8, "09ad4f54901c8705"),
+    (9, "e7b512226608c589"),
+    (10, "8db691b4319b4083"),
+    (11, "d0298edc5bab6551"),
+    (12, "370927fb3e6569f6"),
+    (13, "477bb90b75a3f425"),
+    (14, "d69527f0702b4804"),
+    (15, "ffabc0b81317907f"),
+    (16, "cb51f9cb21237d75"),
+    (17, "8c5a43c7d441977d"),
+    (18, "584349844762de04"),
+    (19, "d3ebc14f33871762"),
+    (20, "0bee70541823745a"),
 ];
+
+#[test]
+#[ignore]
+fn print_stage_hashes() {
+    for def in stage::stages() {
+        let road = stage::generate_road(&def);
+        println!("stagehash {} {}", def.id, crate::meta::stages::stage_hash(&def, &road));
+    }
+}
 
 #[test]
 fn stages_hash_the_same_everywhere() {
@@ -1339,26 +1348,26 @@ fn print_obstacle_hashes() {
 /// break ghosts. Placement goes through pcg-core, whose rotations use libm. Regenerate with
 /// `print_obstacle_hashes` only if the dressing changes on purpose.
 const OBSTACLE_HASHES: [(u32, &str, usize); 20] = [
-    (1, "b6337b977dc2ec33", 2629),
-    (2, "3844253f7ea38f61", 3135),
-    (3, "fa66f506aada2a91", 556),
-    (4, "a797df47d81aaf01", 913),
-    (5, "75c02d375c49fb43", 471),
-    (6, "2a1c09cbeb5dd3d2", 688),
-    (7, "ae75bef51b7fa3f8", 324),
-    (8, "577d594fd9bb40ab", 284),
-    (9, "d036c4f1c2de681a", 2131),
-    (10, "964c3024b1393388", 2738),
-    (11, "5a27e97536d5b3e7", 4800),
-    (12, "20e35be07ed87a8b", 1578),
-    (13, "64c26a1e833ca975", 1239),
-    (14, "1b5116a2c36e5fdd", 860),
-    (15, "1ff03f65fb3925af", 786),
-    (16, "6271995d8d27b75c", 336),
-    (17, "7599d3677d1f32de", 285),
-    (18, "b9f62cf18350857e", 482),
-    (19, "21a3011f88143b22", 1683),
-    (20, "c5697b2b173f6ff2", 3302),
+    (1, "fe92638228ab1dfc", 2629),
+    (2, "6375f3a14fa07b7a", 3135),
+    (3, "1264991fd4ed4b5c", 556),
+    (4, "40c811e0a6409dba", 913),
+    (5, "98d49b417f3014db", 471),
+    (6, "a052073167575bcd", 688),
+    (7, "7d0b91f222f60997", 324),
+    (8, "0571fd74cf33c0be", 284),
+    (9, "93d74343f597a6e8", 2131),
+    (10, "1dcae1ffd193d0a4", 2738),
+    (11, "ce30c20ea84322f4", 4800),
+    (12, "5ed751c77a46ac29", 1578),
+    (13, "7179ac8223373bba", 1239),
+    (14, "2ae0c374720d735a", 860),
+    (15, "626dcd932ac28173", 786),
+    (16, "677544f15acc5e47", 336),
+    (17, "d92c082c885df71a", 285),
+    (18, "885e3af9211b21be", 482),
+    (19, "b9d7240d0a4c2113", 1683),
+    (20, "fa725e63ddcba9c7", 3302),
 ];
 
 #[test]

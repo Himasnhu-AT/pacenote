@@ -5,8 +5,8 @@
 //!   exits, the odd hairpin) grown from the start, kept inside the map and away from itself,
 //!   sampled every [`STEP`] metres. Its height follows the land, smoothed and grade-limited.
 //! - **Terrain**: base hills for the biome, then shaped to the road: flat across the road
-//!   (with banking), a ditch on each side, blended back into the hills (cuttings and
-//!   embankments fall out of it).
+//!   (with banking), a flat shoulder each side, then gentle fills and banks blended back into
+//!   the hills. The road follows the lower ground, so it mostly runs in a shallow cutting.
 //! - **Corners**: runs of curvature graded 1 (hairpin) … 6 (flat-out kink), with crests.
 
 use bevy::math::{Vec2, Vec3};
@@ -483,8 +483,17 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
     curv.truncate(n);
     let n = pts2.len();
     let _ = n;
-    // Height: follow the land, smoothed, grade-limited.
-    let raw: Vec<f32> = pts2.iter().map(|p| base_height(p.x, p.y, def)).collect();
+    // Height: follow the lower ground either side (so the road runs in a shallow cutting
+    // rather than on an embankment), sunk a little, then smoothed and grade-limited.
+    let raw: Vec<f32> = (0..pts2.len())
+        .map(|i| {
+            let p = pts2[i];
+            let d = (pts2[(i + 1).min(pts2.len() - 1)] - pts2[i.saturating_sub(1)]).normalize_or(Vec2::Y);
+            let n = Vec2::new(d.y, -d.x);
+            let side = |o: f32| base_height(p.x + n.x * o, p.y + n.y * o, def);
+            base_height(p.x, p.y, def).min(side(10.0)).min(side(-10.0)) - ROAD_SINK
+        })
+        .collect();
     let mut y = smooth(&raw, 40);
     let max_grade = 0.11 * STEP;
     for i in 1..y.len() {
@@ -598,20 +607,44 @@ fn smooth(v: &[f32], r: usize) -> Vec<f32> {
 }
 
 /// Terrain height at (x, z): hills, shaped to the road.
+///
+/// The road sits in the land, never on a lifted ribbon: a flat shoulder level with the road
+/// (rising a touch, so the edge reads as a lip), then the ground may fall away no faster than
+/// [`FILL_GRADE`] (a car that runs wide can drive back up) and rise no faster than
+/// [`CUT_GRADE`] (a bank), blending into the natural hills [`BLEND`] out.
 pub fn height(x: f32, z: f32, def: &StageDef, road: &Road) -> f32 {
     let base = base_height(x, z, def);
-    let Some(r) = road.nearest(Vec2::new(x, z), 40.0) else { return base };
+    let Some(r) = road.nearest(Vec2::new(x, z), BLEND.1) else { return base };
     let half = road.half_width(&r);
     let d = r.lateral.abs();
     let road_y = road.height_at(&r);
-    if d <= half + 0.6 {
+    let o = d - half - 0.6;
+    if o <= 0.0 {
         return road_y;
     }
-    // Ditch, then blend into the hills.
-    let edge = road_y - (d - half - 0.6).min(1.6) * 0.35;
-    let t = ((d - half - 2.2) / 26.0).clamp(0.0, 1.0);
-    let t = t * t * (3.0 - 2.0 * t);
-    edge + (base - edge) * t
+    let lip = road_y + SHOULDER_RISE * smoothstep((o / SHOULDER).min(1.0));
+    if o <= SHOULDER {
+        return lip;
+    }
+    let out = o - SHOULDER;
+    let shaped = base.clamp(lip - FILL_GRADE * out, lip + CUT_GRADE * out);
+    let t = smoothstep(((d - BLEND.0) / (BLEND.1 - BLEND.0)).clamp(0.0, 1.0));
+    shaped + (base - shaped) * t
+}
+
+/// How far below the lower ground beside it the road is laid (m).
+const ROAD_SINK: f32 = 0.6;
+/// Flat-ish shoulder beyond the road edge (m), rising [`SHOULDER_RISE`] m across it.
+const SHOULDER: f32 = 3.0;
+const SHOULDER_RISE: f32 = 0.15;
+/// Steepest fall (fill) / rise (cut) of the ground beyond the shoulder (rise per metre).
+const FILL_GRADE: f32 = 0.16;
+const CUT_GRADE: f32 = 0.45;
+/// Lateral distances (m) between which the shaped ground blends back into the hills.
+const BLEND: (f32, f32) = (34.0, 52.0);
+
+fn smoothstep(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// What the tyres are on at (x, z).
@@ -773,6 +806,35 @@ mod tests {
     }
 
     #[test]
+    fn running_wide_is_recoverable() {
+        // No lifted ribbon and no ditch: within 20 m of the edge the ground is never further
+        // below the road than a gentle FILL_GRADE slope from the shoulder (the natural hills
+        // may still fall away beyond a bench, but never straight off the road edge).
+        for def in &stages() {
+            let road = generate_road(def);
+            for i in (10..road.len() - 10).step_by(7) {
+                let p = road.pts[i];
+                let n = Vec2::new(road.dir[i].y, -road.dir[i].x);
+                let r = road.nearest(Vec2::new(p.x, p.z), 5.0).unwrap();
+                let (edge, road_y) = (road.half_width(&r) + 0.6, road.height_at(&r));
+                for side in [-1.0f32, 1.0] {
+                    for k in 0..=20 {
+                        let o = k as f32;
+                        let q = Vec2::new(p.x, p.z) + n * side * (edge + o);
+                        // Stop where another stretch of road is nearer (hairpins).
+                        if road.nearest(q, 60.0).is_some_and(|rr| rr.i.abs_diff(i) > 20) {
+                            break;
+                        }
+                        let floor = road_y - FILL_GRADE * (o - SHOULDER).max(0.0) - 0.4;
+                        let h = height(q.x, q.y, def, &road);
+                        assert!(h >= floor, "stage {} station {i}: {:.2} m below the road {o} m off the edge", def.id, road_y - h);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn left_means_left() {
         // A left-hander: the road ahead lies to the left of the start direction (up × dir).
         let def = &stages()[0];
@@ -804,6 +866,30 @@ mod tests {
 #[cfg(test)]
 mod debug {
     use super::*;
+
+    #[test]
+    #[ignore]
+    fn print_relief() {
+        // How far the road sits above (+) / below (-) the natural hills, 10 m and 25 m out.
+        for def in stages() {
+            let r = generate_road(&def);
+            let mut v10 = Vec::new();
+            let mut v25 = Vec::new();
+            for i in (0..r.len()).step_by(5) {
+                let p = r.pts[i];
+                let n = Vec2::new(r.dir[i].y, -r.dir[i].x);
+                for side in [-1.0f32, 1.0] {
+                    let q = Vec2::new(p.x, p.z) + n * side * 10.0;
+                    v10.push(p.y - base_height(q.x, q.y, &def));
+                    let q = Vec2::new(p.x, p.z) + n * side * 25.0;
+                    v25.push(p.y - base_height(q.x, q.y, &def));
+                }
+            }
+            let pct = |v: &mut Vec<f32>, f: f32| { v.sort_by(|a, b| a.total_cmp(b)); v[((v.len() - 1) as f32 * f) as usize] };
+            println!("{:>2} 10m: p5 {:>6.1} p50 {:>5.1} p95 {:>5.1} max {:>5.1} | 25m: p5 {:>6.1} p95 {:>5.1} max {:>5.1}", def.id,
+                pct(&mut v10, 0.05), pct(&mut v10, 0.5), pct(&mut v10, 0.95), pct(&mut v10, 1.0), pct(&mut v25, 0.05), pct(&mut v25, 0.95), pct(&mut v25, 1.0));
+        }
+    }
 
     #[test]
     #[ignore]
