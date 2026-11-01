@@ -127,17 +127,18 @@ def bush(name, seed, cards, half, height):
     for k in range(3):
         a = k * math.pi / 3 + rng.uniform(0, 0.5)
         size = height * 1.05
-        card(np.array([0.0, size / 2 - 0.05, 0.0]), np.array([math.cos(a), 0.0, math.sin(a)]), size, int(rng.integers(4)))
+        # The clumps are round: sink the cards so their lower leaves reach the ground.
+        card(np.array([0.0, size / 2 - 0.2, 0.0]), np.array([math.cos(a), 0.0, math.sin(a)]), size, int(rng.integers(4)))
     # Shell: cards on a half-ellipsoid, facing out (tilted at random), bigger low down.
     for _ in range(cards):
         a = rng.uniform(0, 2 * math.pi)
-        e = rng.uniform(0.05, 1.0) ** 0.8 * math.pi / 2 * 0.95  # elevation
+        e = rng.uniform(-0.1, 1.0) * math.pi / 2 * 0.95  # elevation (a few skirt cards below)
         d = np.array([math.cos(a) * math.cos(e), math.sin(e), math.sin(a) * math.cos(e)])
         c = np.array([d[0] * half * 0.62, d[1] * height * 0.68 + height * 0.12, d[2] * half * 0.62])
         size = rng.uniform(0.6, 0.9) * (1.1 - 0.3 * d[1]) * (half / 0.9)
         n = d + rng.normal(0, 0.35, 3)
         n[1] = max(n[1], -0.1)
-        c[1] = max(c[1], size * 0.42 - 0.05)
+        c[1] = max(c[1], size * 0.3 - 0.12)
         card(c, n, size, int(rng.integers(4)))
     pos, nrm, uv = np.array(pos), np.array(nrm), np.array(uv)
     path = os.path.join(ASSETS, "models", f"{name}.pnm")
@@ -153,5 +154,5 @@ def bush(name, seed, cards, half, height):
 
 
 clumps()
-bush("shrub_a", 3, 30, 0.95, 1.2)
-bush("shrub_b", 8, 22, 0.75, 0.95)
+bush("shrub_a", 3, 32, 0.95, 1.45)
+bush("shrub_b", 8, 24, 0.75, 1.15)
