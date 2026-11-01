@@ -47,6 +47,14 @@ pub struct SeatCamera;
 #[derive(Component)]
 struct SilhouetteArm;
 
+/// The rest of the driver silhouette: helmet, visor, torso (hidden when the model has its own
+/// seated driver, a node named [`DRIVER_BODY_NODE`]).
+#[derive(Component)]
+struct SilhouetteBody;
+
+/// The model's seated driver, if it has one.
+pub const DRIVER_BODY_NODE: &str = "DriverBody";
+
 /// Which stage's scenery is built on this machine (id, weather, time).
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GuideScene {
@@ -331,11 +339,11 @@ fn spawn_driver(world: &mut World, car: Entity) {
     };
     let part = |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, tf: Transform| (Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, Actor, ChildOf(car));
     // Helmet a little behind and above the eye, visor in front of it.
-    world.spawn((Name::new("driver helmet"), part(&head, &helmet, Transform::from_translation(d + Vec3::new(0.0, -0.015, 0.02)))));
-    world.spawn((Name::new("driver visor"), part(&visor_mesh, &visor, Transform::from_translation(d + Vec3::new(0.0, 0.0, -0.075)))));
+    world.spawn((Name::new("driver helmet"), SilhouetteBody, part(&head, &helmet, Transform::from_translation(d + Vec3::new(0.0, -0.015, 0.02)))));
+    world.spawn((Name::new("driver visor"), SilhouetteBody, part(&visor_mesh, &visor, Transform::from_translation(d + Vec3::new(0.0, 0.0, -0.075)))));
     // Torso, leaning back against the seat.
     let chest = d + Vec3::new(0.0, -0.42, 0.14);
-    world.spawn((Name::new("driver torso"), part(&torso, &suit, Transform::from_translation(chest).with_rotation(Quat::from_rotation_x(0.22)))));
+    world.spawn((Name::new("driver torso"), SilhouetteBody, part(&torso, &suit, Transform::from_translation(chest).with_rotation(Quat::from_rotation_x(0.22)))));
     // Arms from the shoulders to the rim at quarter to three.
     let wheel = d + Vec3::new(0.0, -0.28, -0.42);
     for s in [-1.0f32, 1.0] {
@@ -357,13 +365,26 @@ pub fn capsule_between(a: Vec3, b: Vec3, len: f32) -> Transform {
     Transform { translation: (a + b) * 0.5, rotation: Quat::from_rotation_arc(Vec3::Y, d / l), scale: Vec3::new(1.0, (l / len).max(0.2), 1.0) }
 }
 
-/// The silhouette's arms give way to the model's animated arms when those show.
-fn silhouette_arms(cars: Query<Entity, With<GuideCar>>, children: Query<&Children>, arms: Query<&Visibility, With<crate::art::hands::Arms>>, mut ours: Query<&mut Visibility, (With<SilhouetteArm>, Without<crate::art::hands::Arms>)>) {
+/// The silhouette gives way to the model: its arms when the model's animated arms show, all of
+/// it when the model has its own seated driver ([`DRIVER_BODY_NODE`]).
+#[allow(clippy::type_complexity)]
+fn silhouette_arms(
+    cars: Query<Entity, With<GuideCar>>,
+    children: Query<&Children>,
+    names: Query<&Name>,
+    arms: Query<&Visibility, With<crate::art::hands::Arms>>,
+    mut ours: Query<(&mut Visibility, Has<SilhouetteArm>), (Or<(With<SilhouetteArm>, With<SilhouetteBody>)>, Without<crate::art::hands::Arms>)>,
+) {
     let Some(car) = cars.iter().next() else { return };
-    let model_arms = children.iter_descendants(car).any(|e| arms.get(e).is_ok_and(|v| *v != Visibility::Hidden));
-    let want = if model_arms { Visibility::Hidden } else { Visibility::Inherited };
-    for mut v in &mut ours {
-        v.set_if_neq(want);
+    let mut model_arms = false;
+    let mut model_body = false;
+    for e in children.iter_descendants(car) {
+        model_arms |= arms.get(e).is_ok_and(|v| *v != Visibility::Hidden);
+        model_body |= names.get(e).is_ok_and(|n| n.as_str() == DRIVER_BODY_NODE);
+    }
+    for (mut v, is_arm) in &mut ours {
+        let hide = model_body || (is_arm && model_arms);
+        v.set_if_neq(if hide { Visibility::Hidden } else { Visibility::Inherited });
     }
 }
 
