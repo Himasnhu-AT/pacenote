@@ -453,11 +453,14 @@ pub fn drive_stage_traced(def: &stage::StageDef, pace: f32, max_secs: f32, trace
             let why: Vec<String> = log.iter().filter(|l| l.0 > t - 3.0).map(|l| l.1.clone()).collect();
             if upside > 0.5 {
                 let rp2 = road.nearest(Vec2::new(car.pos.x, car.pos.z), 40.0);
+                // Where it rolled: 2 m or more past the road's edge counts as off the road.
+                let away = rp2.is_none_or(|r| r.lateral.abs() > road.half_width(&r) + 2.0);
                 rep.rollovers.push(format!(
-                    "{:.0} m curv {:.3} lat {:.1} [{}]",
+                    "{:.0} m curv {:.3} lat {:.1}{} [{}]",
                     s,
                     road.curv[i],
                     rp2.map_or(99.0, |r| r.lateral),
+                    if away { " OFF THE ROAD" } else { "" },
                     why.join("; ")
                 ));
             }
@@ -1135,16 +1138,17 @@ fn launch_brakes_and_gearing_are_a_rally_cars() {
 #[test]
 fn a_keyboard_player_gets_through_the_stages() {
     // On/off keys every 0.1 s through the game's keyboard ramp, at a steady pace. Not all
-    // stages: a bang-bang bot is a poor driver, but most, and a roll only after a hit or after
-    // leaving the road (since the car takes no damage, a lost bot keeps going over rough
-    // ground and can roll down a bank; it used to be retired first).
+    // stages: a bang-bang bot is a poor driver, but most, and a roll only after a hit or where
+    // the car has left the road (2 m past the edge). Since the car takes no damage, the bot on
+    // stage 7 keeps full power after a hit, wanders 40 m into the moor and rolls down a bank;
+    // with damage it drove that stage cleanly. A roll on the road surface still fails.
     let mut finished = 0;
     for def in stage::stages() {
         let mut keys = Keys::default();
         let r = drive_stage_traced(&def, 0.55, 900.0, None, Some(&mut keys));
         finished += r.done as u32;
         for x in &r.rollovers {
-            assert!(x.contains("obstacle hit") || x.contains("off road"), "stage {} {}: rolled without a trip: {x}", def.id, def.name);
+            assert!(x.contains("obstacle hit") || x.contains("OFF THE ROAD"), "stage {} {}: rolled without a trip: {x}", def.id, def.name);
         }
         assert!(r.hunts <= 4, "stage {} {}: the gearbox hunted {} times", def.id, def.name, r.hunts);
     }

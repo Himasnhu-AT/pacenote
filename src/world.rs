@@ -364,7 +364,13 @@ mod tests {
             total += out.len();
             for o in &out {
                 let rp = w.road.nearest(o.pos, 50.0).unwrap();
-                assert!(rp.lateral.abs() > w.road.half_width(&rp) + 0.5 - o.radius, "obstacle on the road at station {i}: {o:?}");
+                // Trunks, boulders, posts and saplings clear of the road; shrubs may overhang
+                // the edge (cutting a corner puts you in them) but stand beyond it.
+                let clear = match o.give {
+                    Give::Brush { .. } => rp.lateral.abs() > w.road.half_width(&rp) + 0.5,
+                    _ => rp.lateral.abs() > w.road.half_width(&rp) + 1.0 - o.radius,
+                };
+                assert!(clear, "obstacle on the road at station {i}: {o:?}");
             }
         }
         assert!(total > 50, "only {total} obstacles near the road");
