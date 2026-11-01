@@ -217,6 +217,8 @@ impl Plugin for VoicePlugin {
             );
         add_settings_section::<VoiceSettings>(app, "voice");
         register_settings(app);
+        let headless = app.world().get_resource::<engine::flow::Headless>().is_some_and(|h| h.0);
+        app.insert_resource(MicBlocked(mic_blocked(headless, engine::cli::dev_flag("mute"), engine::cli::test_driven(), engine::cli::dev_flag("mic"))));
         if let Some(mut mixer) = app.world_mut().get_resource_mut::<Mixer>() {
             let db = VoiceSettings::default().duck_db;
             mixer.add_snapshot(duck_snapshot(db));
@@ -243,6 +245,17 @@ impl Plugin for VoicePlugin {
         #[cfg(feature = "dev")]
         control::register(app);
     }
+}
+
+/// The microphone must stay closed in this run (see [`mic_blocked`]).
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MicBlocked(pub bool);
+
+/// Never open the Mac's microphone in headless runs, with `--mute`, or in test-driven runs
+/// (control port, `--offscreen`: loopback captures, play.py) unless `--mic` asks for it. The
+/// `--voice-test` source still works there; it doesn't touch the device.
+pub fn mic_blocked(headless: bool, mute: bool, test_driven: bool, mic_flag: bool) -> bool {
+    headless || mute || (test_driven && !mic_flag)
 }
 
 /// The voice systems (`Update`), in case others need to order against them.
@@ -313,12 +326,14 @@ fn start_device_playout(world: &mut World) {
     world.spawn((Name::new("Voice chat"), AudioPlayer::<VoiceStream>(h), PlaybackSettings::ONCE));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn track_role(
     role: Res<NetRole>,
     session_role: Option<Res<crate::net_session::Role>>,
     session: Option<Res<crate::net_session::Session>>,
     client: Option<Res<NetClient>>,
     settings: Res<VoiceSettings>,
+    blocked: Option<Res<MicBlocked>>,
     mut st: ResMut<VoiceState>,
     mut mixer: Option<ResMut<Mixer>>,
 ) {
@@ -342,7 +357,7 @@ fn track_role(
     {
         m.add_snapshot(duck_snapshot(settings.duck_db));
     }
-    let want_mic = settings.enabled && st.role != VoiceRole::Offline && st.test.is_none();
+    let want_mic = settings.enabled && st.role != VoiceRole::Offline && st.test.is_none() && !blocked.is_some_and(|b| b.0);
     if want_mic && st.capture.is_none() {
         let dev = Some(settings.input_device.clone()).filter(|d| !d.is_empty());
         st.capture = Some(Capture::start(dev));
@@ -547,5 +562,20 @@ mod control {
         let spec = p.get("source").and_then(Value::as_str).map(str::to_string);
         w.resource_mut::<VoiceState>().set_test_source(spec.as_deref())?;
         Ok(json!({ "source": spec }))
+    }
+}
+
+#[cfg(test)]
+mod mic_tests {
+    use super::mic_blocked;
+
+    #[test]
+    fn the_mic_stays_closed_in_muted_headless_and_test_runs() {
+        assert!(!mic_blocked(false, false, false, false), "a normal game run may open it");
+        assert!(mic_blocked(true, false, false, false), "headless");
+        assert!(mic_blocked(false, true, false, false), "--mute");
+        assert!(mic_blocked(false, false, true, false), "play.py / --offscreen / control port");
+        assert!(!mic_blocked(false, false, true, true), "--mic opts a test run in");
+        assert!(mic_blocked(false, true, true, true), "--mute wins over --mic");
     }
 }

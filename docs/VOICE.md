@@ -27,7 +27,8 @@ mic (cpal thread, any rate) ─▶ downmix + 7 kHz low-pass + resample ─▶ 16
 
 - **When it runs.** Capture starts only in a net session (`NetRole` ≠ `Offline`) with voice
   enabled, so solo play never opens the microphone (no permission prompt). Leaving the session
-  stops the stream.
+  stops the stream. Headless runs, `--mute` and test-driven runs (control port, `--offscreen`,
+  play.py) never open it either (`MicBlocked`); `--mic` opts a test run in.
 - **Roles.** From the session (`net_session::Role`: driver / guide), and only while the
   partner is connected (`Session::peer_connected`); solo or leaving closes the mic. The
   host sends with `broadcast_except(HOST)` (it never hears itself), clients `to_server`; the
