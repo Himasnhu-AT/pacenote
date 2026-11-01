@@ -34,7 +34,7 @@ Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; 
 
 ### Mercedes-AMG GT3 Evo 2020 (`mercedes_amg_gt3_evo`)
 
-- **Use:** The player's car (`assets/models/rallycar.glb`): body, wheels and its own cabin (seat, dash, cage, yoke steering wheel). Converted by `tools/art/import_sketchfab.py -- car <file> --profile gt3`: scaled to the sim's wheelbase and track, decimated ~496k → ~124k triangles, textures capped at 2048 (opaque ones as JPEG), its steering wheel made the animated `SteeringWheel` node, our shifter and handbrake added, cabin ambient occlusion baked.
+- **Use:** The player's car (`assets/models/rallycar.glb`): body, wheels and its own cabin (seat, dash, cage, yoke steering wheel). Converted by `tools/art/import_sketchfab.py -- car <file> --profile gt3`: scaled to the sim's wheelbase and track, decimated ~496k → ~124k triangles, textures capped at 2048 (opaque ones as JPEG), its steering wheel made the animated `SteeringWheel` node, our shifter and handbrake added, cabin ambient occlusion baked. Rigged: Chassis (body), Hub/Steer/Spin per wheel, detachable MirrorL/R, RearWing, FrontSplitter, Front/RearBumper, RearDiffuser; a passenger seat mirrored from the driver's (the battery box on that floor removed); CoDriverEye/CoDriverTablet anchors.
 - **Path:** `assets_src/sketchfab/mercedes_amg_gt3_evo/mercedes_benz_amg_gt3_red_bull.glb` (from the owner's download `mercedes-amg-gt3-red-bull-racing.zip`, 2026-11-01; the zip's `textures/` folder only repeats the images embedded in the glb)
 - **Source page:** https://sketchfab.com/3d-models/mercedes-amg-gt3-evo-2020-wwwvecarzcom-39e77243109f4e5cb7134b6f31c8f619
 - **Download:** Sketchfab download dialog (login required), by the owner
@@ -42,7 +42,7 @@ Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; 
 - **Licence:** CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/)
 - **Size:** 55.4 MB glb
 - **Resolution / polys:** 496,438 triangles; 57 meshes, 34 materials, 41 images (one 4096², the rest 1024² or less)
-- **Credit line:** REQUIRED: "Mercedes-AMG GT3 Evo 2020 | www.vecarz.com" by vecarz (sketchfab.com/heynic), licensed under CC BY 4.0. Modified: scaled, decimated, wheels split, shifter and handbrake added.
+- **Credit line:** REQUIRED: "Mercedes-AMG GT3 Evo 2020 | www.vecarz.com" by vecarz (sketchfab.com/heynic), licensed under CC BY 4.0. Modified: scaled, decimated, rigged (wheels, suspension, detachable parts), passenger seat mirrored, shifter and handbrake added.
 - **Trademarks:** A real, branded car in a real team livery (Mercedes-Benz star and AMG badges, Red Bull, Michelin, Ravenol, DEKRA, Viaplay, Sparco and others). CC BY covers the model's copyright only, not these trademarks or the car's design; see the note at the end of this file on branded cars. Check with the trademark owners (or replace the livery and badges) before a commercial release.
 
 ### Milano '95 - Low poly model (`milano_95`): former car body, no longer shipped
@@ -795,7 +795,7 @@ Same authors and licence as the models above. ~3.3 MB in total.
 
 - `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures, the `pine_bark` trunk texture, conifer card atlases rendered in Blender from `fir_tree_01` and `pine_tree_01` (`tools/art/render_tree_cards.py`) and the broadleaf card from `island_tree_02` (`tools/art/render_cards.py`; `tools/art/prep_textures.sh`).
 - `assets/models/*.pnm`: decimated rocks, shrubs, ferns, grass and a stump (`tools/art/build_meshes.py`).
-- `assets/models/rallycar.glb`: original procedural rally hatchback with livery and cockpit (`tools/art/build_rallycar.py`); no third-party content.
+- `assets/models/rallycar.glb`: the Mercedes-AMG GT3 Evo (above, CC BY), converted and rigged by `tools/art/import_sketchfab.py --profile gt3`. (The original procedural hatchback, `tools/art/build_rallycar.py`, has no third-party content.)
 - Credits: `assets/credits.txt`.
 
 ## Not found / not downloaded

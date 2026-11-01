@@ -5,8 +5,10 @@
 #   blender -b --factory-startup -P tools/art/import_sketchfab.py -- arms <file|dir> [options]
 #
 # car: a downloaded car body → assets/models/rallycar.glb, with the node names src/art/car.rs
-#   expects (Car root, Body, Interior, Hub<FL|FR|RL|RR>/Spin<..>, SteeringWheel, Tacho, Speedo,
-#   Shifter, Handbrake). Steps: import; bake every transform into the meshes; turn the car to
+#   expects: Car root > Chassis (the sprung body: Body, Interior, detachable parts such as
+#   MirrorL/RearWing, SteeringWheel, Tacho, Speedo, Shifter, Handbrake) and Hub<FL|FR|RL|RR>
+#   (suspension) > Steer<FL|FR> (front knuckle) > Spin<..> (rolling) > Wheel<..>, with
+#   Caliper<..> on the knuckle / rear hub; CoDriverEye, CoDriverTablet on the root. Steps: import; bake every transform into the meshes; turn the car to
 #   face +Y; decimate (per material, --decimate); find the four wheels (by name, else by
 #   shape); scale to the sim's wheelbase (axles at y ±1.275) and track (hubs at x ±0.78:
 #   src/art/car.rs MODEL_HALF_*) with the origin at hub height; then either
@@ -26,6 +28,9 @@
 #              drops clear coat, which the game renders as a pale haze)
 #            --ao-mat REGEX (keep: cabin materials that get baked ambient occlusion)
 #            --interior ours|keep  --steer-mat REGEX  --steer-dz M  --steer-tilt DEG
+#            --parts "Name=x0,x1,y0,y1,z0,z1[@MATREGEX];..." (keep: detachable parts)
+#            --mirror-seat MATREGEX (keep: a passenger seat from the driver's)
+#            --codriver-eye X,Y,Z  --codriver-tablet X,Y,Z (keep: glTF model frame)
 #            --profile NAME (option defaults for a known download, see PROFILES)
 #            --preview DIR  --no-bake  --list
 #
@@ -95,6 +100,24 @@ PROFILES = {
             r"Interior|Cockpit_Console|Pedals|Steering=0.0,0.55",
             r"*=0.0,0.4",
         ]),
+        # The GT3 has no passenger seat: mirror the driver's.
+        "mirror-seat": r"Seat",
+        # Detachable parts (model frame: x right, y forward, z up from hub height).
+        "parts": ";".join([
+            r"MirrorL=-1.1,-0.76,-0.2,0.15,0.42,0.7",
+            r"MirrorR=0.76,1.1,-0.2,0.15,0.42,0.7",
+            r"RearWing=-1.2,1.2,-2.5,-1.6,0.55,1.1",
+            r"FrontSplitter=-1.1,1.1,1.7,2.5,-0.34,-0.17",
+            r"FrontBumper=-1.1,1.1,1.55,2.5,-0.17,0.2@Livery|Exterior_Details|Grille",
+            r"FrontBumper=-1.1,1.1,1.55,2.5,-0.17,0.06@Lights",
+            r"RearBumper=-1.1,1.1,-2.5,-1.6,-0.17,0.32@Livery|Exterior_Details|Grille",
+            r"RearDiffuser=-1.1,1.1,-2.5,-1.5,-0.36,-0.17",
+            # The battery box on the passenger floor would poke through the mirrored seat.
+            r"-=0.1,0.6,-0.8,-0.2,-0.35,0.05@Interior_Details|Interior_Stickers",
+        ]),
+        # Co-driver's eye (the driver's mirrored) and tablet anchor, glTF model frame.
+        "codriver-eye": "0.36,0.595,0.69",
+        "codriver-tablet": "0.33,0.06,0.37",
         # Cabin parts that get baked ambient occlusion (vertex colours).
         "ao-mat": r"Interior|Cockpit_Console|Seat|Net_Share|stitches|Pedals|Steering",
     },
@@ -550,32 +573,57 @@ def car(opts):
     lo, hi = bbox(rest)
     root = bpy.data.objects.new("Car", None)
     link(root)
+    # Everything carried by the sprung body hangs off one node (the game can lean it on top
+    # of the simulated chassis); the wheels hang off the root.
+    chassis = empty("Chassis", (0, 0, 0), root)
+    detached = {}
     if keep_interior:
         rx = re.compile(opts["steer-mat"], re.I)
         steer = [p for p in rest if any(rx.search(mt.name) for mt in used_mats(p))]
-        if "ao-mat" in opts and not opts.get("no-bake"):
-            bake_ao(rest + steer, re.compile(opts["ao-mat"], re.I), glass)
         rest = [p for p in rest if p not in steer]
-        interior_keep(opts, steer, glass, root, r)
+        if "mirror-seat" in opts:
+            rest.append(mirror_seat(rest, re.compile(opts["mirror-seat"], re.I)))
+        if "parts" in opts:
+            detached = split_parts(rest, opts["parts"])
+        if "ao-mat" in opts and not opts.get("no-bake"):
+            bake_ao(rest + steer + [p for ps in detached.values() for p in ps], re.compile(opts["ao-mat"], re.I), glass)
+        interior_keep(opts, steer, glass, chassis, r)
+        codriver_nodes(opts, root)
     else:
         cab = interior_drop(opts, rest, glass, lo)
     select(rest)
     bpy.ops.object.join()
     body = bpy.context.view_layer.objects.active
     body.name = body.data.name = "Body"
-    body.parent = root
-    # Wheels on Hub/Spin nodes (callipers on the hub, not spinning).
+    body.parent = chassis
+    # Detachable parts: one mesh each, its origin at its middle.
+    for name, ps in detached.items():
+        select(ps)
+        if len(ps) > 1:
+            bpy.ops.object.join()
+        o = bpy.context.view_layer.objects.active
+        o.name = o.data.name = name
+        l, h = bbox([o])
+        c = (l + h) / 2
+        o.data.transform(Matrix.Translation(-c))
+        o.location = c
+        o.parent = chassis
+        o.data.calc_loop_triangles()
+        print(f"detachable {name}: {len(o.data.loop_triangles)} triangles at {tuple(round(x, 3) for x in c)}")
+    # Wheels: Hub<k> (suspension travel) > Steer<k> (front: the knuckle, steering) > Spin<k>
+    # (rolling) > Wheel<k> (rim, tyre, disc); the calliper rides the knuckle (rear: the hub).
     for k, ps in corners.items():
         ce = centres[k]
         hub = bpy.data.objects.new(f"Hub{k}", None)
         link(hub)
         hub.parent = root
         hub.location = (ce.x, ce.y, 0.0)
-        spin = bpy.data.objects.new(f"Spin{k}", None)
-        link(spin)
-        spin.parent = hub
+        carrier = hub
+        if k[0] == "F":
+            carrier = empty(f"Steer{k}", (0, 0, 0), hub)
+        spin = empty(f"Spin{k}", (0, 0, 0), carrier)
         for group, name, parent in (([p for p in ps if not is_caliper(p)], f"Wheel{k}", spin),
-                                    ([p for p in ps if is_caliper(p)], f"Caliper{k}", hub)):
+                                    ([p for p in ps if is_caliper(p)], f"Caliper{k}", carrier)):
             if not group:
                 continue
             select(group)
@@ -592,7 +640,7 @@ def car(opts):
         ground = cockpit.G
         y0, y1 = lo.y + 0.12, cab.screen_base[0] + 0.06
         skin = cockpit.inner_skin(body, lambda f, c: f.material_index not in glass_mats and y0 < c.y < y1 and c.z - ground > cab.floor and f.normal.z > -0.5)
-        cockpit.build(root, skin, cab, bake=not opts.get("no-bake"))
+        cockpit.build(chassis, skin, cab, bake=not opts.get("no-bake"))
     small_re = re.compile(opts["small-mat"], re.I) if "small-mat" in opts else None
     shrink_textures(int(opts.get("max-tex", 2048)), int(opts.get("small-tex", 1024)), small_re, jpeg=keep_interior or "small-mat" in opts)
     tris = 0
@@ -656,6 +704,137 @@ def thin_glass(glass, alpha=0.45):
                         mt.node_tree.links.remove(l)
                     b.inputs["Transmission Weight"].default_value = 0.0
                 mt.surface_render_method = "BLENDED"
+
+
+def mirror_seat(rest, rx):
+    """A passenger seat: the driver's (left) half of the parts whose materials match `rx`,
+    mirrored to the right."""
+    out = []
+    for o in [p for p in rest if any(rx.search(m.name) for m in used_mats(p))]:
+        c = o.copy()
+        c.data = o.data.copy()
+        link(c)
+        bm = bmesh.new()
+        bm.from_mesh(c.data)
+        # The seat only: left of the middle, clear of the door (x < -0.68) and the harness
+        # mounts behind the seat.
+        keep = lambda f: all(-0.68 < v.co.x < -0.02 and v.co.y > -1.05 for v in f.verts)
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if not keep(f)], context="FACES")
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
+        bm.transform(Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0)))
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+        bm.to_mesh(c.data)
+        bm.free()
+        if c.data.has_custom_normals:
+            select([c])
+            bpy.ops.mesh.customdata_custom_splitnormals_clear()
+        c.data.shade_smooth()
+        c.data.set_sharp_from_angle(angle=math.radians(40))
+        if len(c.data.polygons):
+            l, h = bbox([c])
+            print(f"  seat copy of {o.name} {[m.name for m in used_mats(c)]}: {len(c.data.polygons)} faces, {tuple(round(x, 2) for x in l)} .. {tuple(round(x, 2) for x in h)}")
+            out.append(c)
+        else:
+            bpy.data.objects.remove(c, do_unlink=True)
+    select(out)
+    if len(out) > 1:
+        bpy.ops.object.join()
+    seat = bpy.context.view_layer.objects.active
+    seat.name = seat.data.name = "PassengerSeat"
+    print(f"passenger seat from {len(out)} parts")
+    return seat
+
+
+def split_parts(rest, spec):
+    """Detachable parts (spec: "Name=x0,x1,y0,y1,z0,z1[@MATREGEX];...", model frame, a name may
+    repeat; the name "-" deletes): every loose piece whose middle is in a box (and whose
+    materials match) goes to that part. Returns {name: [pieces]}; `rest` keeps the others."""
+    boxes = []
+    for item in spec.split(";"):
+        name, v = item.split("=", 1)
+        v, _, mat = v.partition("@")
+        x0, x1, y0, y1, z0, z1 = (float(t) for t in v.split(","))
+        boxes.append((name, Vector((x0, y0, z0)), Vector((x1, y1, z1)), re.compile(mat or ".", re.I)))
+    out = {}
+    for o in list(rest):
+        l, h = bbox([o])
+        if not any(all(l[i] <= b1[i] and h[i] >= b0[i] for i in range(3)) for _, b0, b1, _ in boxes):
+            continue
+        # One part at a time (a separate renumbers the faces left behind).
+        while True:
+            pick = island_pick(o, boxes)
+            if not pick:
+                break
+            name, faces = next(iter(pick.items()))
+            whole = len(faces) == len(o.data.polygons)
+            if whole:
+                rest.remove(o)
+                out.setdefault(name, []).append(o)
+                break
+            select([o])
+            bpy.ops.object.mode_set(mode="EDIT")
+            bm = bmesh.from_edit_mesh(o.data)
+            bm.faces.ensure_lookup_table()
+            for v in bm.verts:
+                v.select = False
+            for e in bm.edges:
+                e.select = False
+            for f in bm.faces:
+                f.select = False
+            for i in faces:
+                bm.faces[i].select_set(True)
+            bm.select_mode = {"FACE"}
+            bm.select_flush_mode()
+            bmesh.update_edit_mesh(o.data)
+            bpy.ops.mesh.separate(type="SELECTED")
+            bpy.ops.object.mode_set(mode="OBJECT")
+            out.setdefault(name, []).extend(x for x in bpy.context.selected_objects if x is not o)
+    for o in out.pop("-", []):
+        print(f"dropped {len(o.data.polygons)} faces ({', '.join(m.name for m in used_mats(o))})")
+        bpy.data.objects.remove(o, do_unlink=True)
+    return out
+
+
+def island_pick(o, boxes):
+    """{part name: set of face indices} for the face islands of `o` whose middle lies in a
+    part's box (first matching box wins; its material must match)."""
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bm.faces.ensure_lookup_table()
+    mats = [m.name if m else "" for m in o.data.materials]
+    seen = set()
+    pick = {}
+    for f0 in bm.faces:
+        if f0.index in seen:
+            continue
+        island, stack = [], [f0]
+        seen.add(f0.index)
+        while stack:
+            f = stack.pop()
+            island.append(f)
+            for e in f.edges:
+                for g in e.link_faces:
+                    if g.index not in seen:
+                        seen.add(g.index)
+                        stack.append(g)
+        co = [v.co for f in island for v in f.verts]
+        c = Vector(tuple((min(p[k] for p in co) + max(p[k] for p in co)) / 2 for k in range(3)))
+        ms = {mats[f.material_index] for f in island if f.material_index < len(mats)}
+        hit = next((n for n, b0, b1, rx in boxes if all(b0[k] <= c[k] <= b1[k] for k in range(3)) and any(rx.search(m) for m in ms)), None)
+        if hit:
+            pick.setdefault(hit, set()).update(f.index for f in island)
+    bm.free()
+    return pick
+
+
+def codriver_nodes(opts, root):
+    """Empties for the co-driver's view (src/guide): the passenger's eye and a tablet on their
+    lap (glTF model frame in the options, like car.rs)."""
+    for name in ("CoDriverEye", "CoDriverTablet"):
+        key = "codriver-eye" if name == "CoDriverEye" else "codriver-tablet"
+        if key in opts:
+            x, y, z = (float(t) for t in opts[key].split(","))
+            empty(name, (x, -z, y), root)
 
 
 def bake_ao(objs, rx, glass, samples=48):
