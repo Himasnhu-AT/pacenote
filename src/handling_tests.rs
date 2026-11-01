@@ -254,8 +254,11 @@ pub struct StageReport {
     pub done: bool,
     /// Upside down (each one recovered), with what happened in the 3 s before.
     pub rollovers: Vec<String>,
+    /// The car was wrecked (damage), which ends the run.
+    pub wrecked: Option<String>,
     pub offs: u32,
     pub hits: u32,
+    pub damage: f32,
     /// Saplings, posts and signs knocked down.
     pub broken: usize,
     pub recovers: u32,
@@ -379,7 +382,7 @@ pub fn drive_stage_traced(def: &stage::StageDef, pace: f32, max_secs: f32, trace
             k.steer = crate::drive::keyboard_steer(k.steer, k.key, car.speed(), DT);
             input = Input { steer: k.steer, throttle: k.gas as u8 as f32, brake: k.brake as u8 as f32, ..Input::default() };
         }
-        let pre = car.knocks.count;
+        let pre = car.damage.worst();
         let gear = car.gear;
         step(&mut car, &spec, input, &w, DT);
         t += DT;
@@ -408,12 +411,12 @@ pub fn drive_stage_traced(def: &stage::StageDef, pace: f32, max_secs: f32, trace
             let near = obs.iter().map(|o| o.pos.distance(Vec2::new(car.pos.x, car.pos.z)) - o.radius).fold(99.0f32, f32::min);
             print!("lat {lat:5.1} tree {near:4.1} ");
             println!(
-                "s {:6.1} β {:5.1} yaw {:5.1} v {:5.1} vt {:5.1} in {:5.2} δ {:5.3} want {:5.2} up {:5.2} fwd.y {:5.2} vy {:5.1} h {:5.2} gnd {:5.2} road {:5.2} cont {}{}{}{} comp {:.2} {:.2} {:.2} {:.2} body {} knocks {}{}",
+                "s {:6.1} β {:5.1} yaw {:5.1} v {:5.1} vt {:5.1} in {:5.2} δ {:5.3} want {:5.2} up {:5.2} fwd.y {:5.2} vy {:5.1} h {:5.2} gnd {:5.2} road {:5.2} cont {}{}{}{} comp {:.2} {:.2} {:.2} {:.2} body {} dmg {:.2}{}",
                 progress, car.vel.dot(left(&car)).atan2(car.speed()).to_degrees(), car.ang.dot(car.up()).to_degrees(), car.speed() * 3.6, vt * 3.6, input.steer, car.steer, steer, car.up().y, car.forward().y, car.vel.y,
                 car.pos.y - w.height(car.pos.x, car.pos.z), w.height(car.pos.x, car.pos.z), ry,
                 wh[0].contact as u8, wh[1].contact as u8, wh[2].contact as u8, wh[3].contact as u8,
                 wh[0].compression, wh[1].compression, wh[2].compression, wh[3].compression,
-                car.body_contact as u8, car.knocks.count, if car.knocks.count > pre { "  <== HIT" } else { "" }
+                car.body_contact as u8, car.damage.worst(), if car.damage.worst() > pre + 0.01 { "  <== HIT" } else { "" }
             );
         }
         if car.impacts > last_impacts + 2.0 {
@@ -447,7 +450,8 @@ pub fn drive_stage_traced(def: &stage::StageDef, pace: f32, max_secs: f32, trace
         }
         upside = if car.up().y < 0.2 { upside + DT } else { 0.0 };
         stuck = if car.speed().abs() < 1.0 { stuck + DT } else { 0.0 };
-        if upside > 0.5 || stuck > 6.0 {
+        let wrecked = car.damage.wrecked();
+        if upside > 0.5 || stuck > 6.0 || wrecked {
             let s = progress;
             let i = road.station(s);
             let why: Vec<String> = log.iter().filter(|l| l.0 > t - 3.0).map(|l| l.1.clone()).collect();
@@ -464,6 +468,10 @@ pub fn drive_stage_traced(def: &stage::StageDef, pace: f32, max_secs: f32, trace
                     why.join("; ")
                 ));
             }
+            if wrecked {
+                rep.wrecked = Some(format!("at {:.0} m after {} hits [{}]", s, car.damage.hits, why.join("; ")));
+                break;
+            }
             rep.recovers += 1;
             let i = road.station(progress + 4.0);
             let d = road.dir[i];
@@ -474,8 +482,9 @@ pub fn drive_stage_traced(def: &stage::StageDef, pace: f32, max_secs: f32, trace
         }
     }
     rep.time = t;
+    rep.damage = car.damage.worst();
     rep.broken = car.broken.len();
-    rep.hits = rep.hits.max(car.knocks.count);
+    rep.hits = rep.hits.max(car.damage.hits);
     rep
 }
 
@@ -562,7 +571,7 @@ fn report() {
 fn stage_report() {
     let pace: f32 = std::env::var("PACE").ok().and_then(|s| s.parse().ok()).unwrap_or(0.55);
     let only: Option<u32> = std::env::var("STAGE").ok().and_then(|s| s.parse().ok());
-    let (mut total, mut done, mut shifts, mut hunts) = (0, 0, 0, 0);
+    let (mut total, mut done, mut wrecks, mut shifts, mut hunts) = (0, 0, 0, 0, 0);
     for def in stage::stages() {
         if only.is_some_and(|o| o != def.id) {
             continue;
@@ -580,17 +589,21 @@ fn stage_report() {
         }
         total += r.rollovers.len();
         done += r.done as usize;
+        wrecks += r.wrecked.is_some() as usize;
         shifts += r.shifts;
         hunts += r.hunts;
         println!(
-            "stage {:2} {:24} {:5.0} m  {:5.0} s  done {}  rolls {}  offs {}  hits {}  broken {}  recovers {}",
-            r.id, r.name, r.length, r.time, r.done, r.rollovers.len(), r.offs, r.hits, r.broken, r.recovers
+            "stage {:2} {:24} {:5.0} m  {:5.0} s  done {}  rolls {}  wrecked {}  offs {}  hits {}  broken {}  recovers {}  damage {:.2}",
+            r.id, r.name, r.length, r.time, r.done, r.rollovers.len(), r.wrecked.is_some(), r.offs, r.hits, r.broken, r.recovers, r.damage
         );
         for x in &r.rollovers {
             println!("    roll: {x}");
         }
+        if let Some(x) = &r.wrecked {
+            println!("    wrecked: {x}");
+        }
     }
-    println!("pace {pace}: finished {done}, rollovers {total}, shifts {shifts}, hunting {hunts}");
+    println!("pace {pace}: finished {done}, rollovers {total}, wrecked {wrecks}, shifts {shifts}, hunting {hunts}");
 }
 
 #[test]
@@ -740,7 +753,7 @@ fn crests_land_on_the_wheels() {
             min_up = min_up.min(car.up().y);
         }
         assert!(min_up > 0.85, "{kmh} km/h over a {h} m crest: tipped to up.y {min_up:.2}");
-        assert!(car.knocks.count == 0, "{kmh} km/h over a {h} m crest: hit the ground {:?}", car.knocks);
+        assert!(car.damage.worst() < 0.1, "{kmh} km/h over a {h} m crest: damage {:?}", car.damage);
         assert!(car.speed() > v * 0.8 && car.pos.z > 60.0 + len * 0.5 && car.pos.x.abs() < 3.0, "{kmh} km/h over a {h} m crest: {:.1} m/s at {:?}", car.speed(), car.pos);
     }
 }
@@ -810,18 +823,19 @@ fn drives_every_stage_without_rolling() {
     // A path-following driver on the road centreline. At a steady pace (55 % of the surface's
     // grip in corners) every stage finishes clean; pushing (70 %) it may go off and hit
     // something, but rarely, and a roll only ever follows a hit (a trip), never a corner.
-    let (mut finished, mut rolls) = (0, 0);
+    let (mut finished, mut rolls, mut wrecks) = (0, 0, 0);
     for def in stage::stages() {
         let r = drive_stage(&def, 0.55, 900.0);
-        assert!(r.done && r.rollovers.is_empty() && r.recovers == 0, "stage {} {} at a steady pace: {r:?}", def.id, def.name);
+        assert!(r.done && r.rollovers.is_empty() && r.wrecked.is_none() && r.recovers == 0, "stage {} {} at a steady pace: {r:?}", def.id, def.name);
         let p = drive_stage(&def, 0.7, 900.0);
         finished += p.done as u32;
         rolls += p.rollovers.len();
+        wrecks += p.wrecked.is_some() as u32;
         for x in &p.rollovers {
             assert!(x.contains("obstacle hit"), "stage {} {}: rolled without a trip: {x}", def.id, def.name);
         }
     }
-    assert!(finished >= 16 && rolls <= 3, "pushing: {finished}/20 finished, {rolls} rollovers");
+    assert!(finished >= 16 && rolls <= 3 && wrecks <= 4, "pushing: {finished}/20 finished, {rolls} rollovers, {wrecks} wrecked");
 }
 
 
@@ -1138,17 +1152,14 @@ fn launch_brakes_and_gearing_are_a_rally_cars() {
 #[test]
 fn a_keyboard_player_gets_through_the_stages() {
     // On/off keys every 0.1 s through the game's keyboard ramp, at a steady pace. Not all
-    // stages: a bang-bang bot is a poor driver, but most, and a roll only after a hit or where
-    // the car has left the road (2 m past the edge). Since the car takes no damage, the bot on
-    // stage 7 keeps full power after a hit, wanders 40 m into the moor and rolls down a bank;
-    // with damage it drove that stage cleanly. A roll on the road surface still fails.
+    // stages: a bang-bang bot is a poor driver, but most, and a roll only after a hit.
     let mut finished = 0;
     for def in stage::stages() {
         let mut keys = Keys::default();
         let r = drive_stage_traced(&def, 0.55, 900.0, None, Some(&mut keys));
         finished += r.done as u32;
         for x in &r.rollovers {
-            assert!(x.contains("obstacle hit") || x.contains("OFF THE ROAD"), "stage {} {}: rolled without a trip: {x}", def.id, def.name);
+            assert!(x.contains("obstacle hit"), "stage {} {}: rolled without a trip: {x}", def.id, def.name);
         }
         assert!(r.hunts <= 4, "stage {} {}: the gearbox hunted {} times", def.id, def.name, r.hunts);
     }

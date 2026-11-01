@@ -13,7 +13,7 @@ use bevy::math::{Vec2, Vec3};
 use super::stream::{BLOCK, Frame, RallySynth};
 use super::{Tracker, car_params};
 use crate::stage::Surface;
-use crate::vehicle::{self, Car, Ground, Input, Obstacle, Spec};
+use crate::vehicle::{self, Car, Damage, Ground, Input, Obstacle, Spec};
 
 /// Test ground: one surface, optional washboard bumps, a crest, a post to hit.
 pub struct Course {
@@ -82,6 +82,7 @@ pub struct Scene {
     pub name: &'static str,
     pub secs: f32,
     pub course: Course,
+    pub damage: Damage,
     /// Bonnet camera (inside).
     pub interior: bool,
     pub script: fn(f32) -> Input,
@@ -99,12 +100,13 @@ pub struct Rendered {
 pub fn render(scene: &Scene, seed: u32) -> Rendered {
     let spec = Spec::default();
     let mut car = Car::new(Vec3::new(0.0, 0.75, 0.0), 0.0);
+    car.damage = scene.damage;
     let mut synth = Box::new(RallySynth::new(seed));
     let mut tr = Tracker::default();
     let mut frame = Frame::default();
     let frames = (scene.secs * 60.0) as usize;
     let mut audio: Vec<f32> = Vec::with_capacity((scene.secs * 48_000.0) as usize * 2 + BLOCK * 4);
-    let mut csv = String::from("t,rpm,gear,throttle,speed,slide_sum,impacts,x,z,up_y,body\n");
+    let mut csv = String::from("t,rpm,gear,throttle,speed,slide_sum,impacts,engine_dmg,x,z,up_y,body\n");
     let dt = 1.0 / 60.0;
     let mut frac = 0.0f64;
     let (mut ns_sum, mut ns_max, mut blocks_n) = (0f64, 0f64, 0usize);
@@ -134,12 +136,13 @@ pub fn render(scene: &Scene, seed: u32) -> Rendered {
         }
         let slide: f32 = frame.car.surfaces.iter().map(|s| s.slide).sum();
         csv.push_str(&format!(
-            "{t:.3},{:.0},{},{:.2},{:.2},{slide:.3},{:.1},{:.1},{:.1},{:.2},{}\n",
+            "{t:.3},{:.0},{},{:.2},{:.2},{slide:.3},{:.1},{:.2},{:.1},{:.1},{:.2},{}\n",
             car.rpm,
             car.gear,
             input.throttle,
             car.vel.length(),
             car.impacts,
+            car.damage.engine,
             car.pos.x,
             car.pos.z,
             car.up().y,
@@ -155,13 +158,14 @@ fn i(throttle: f32, brake: f32, steer: f32, handbrake: bool) -> Input {
 
 /// The scenes the owner listens to.
 pub fn scenes() -> Vec<Scene> {
+    let none = Damage::default();
     vec![
-        Scene { name: "01_idle", secs: 5.0, course: Course::flat(Surface::Gravel), interior: false, script: |_| i(0.0, 0.0, 0.0, false) },
+        Scene { name: "01_idle", secs: 5.0, course: Course::flat(Surface::Gravel), damage: none, interior: false, script: |_| i(0.0, 0.0, 0.0, false) },
         Scene {
             name: "02_full_throttle_gears_tarmac",
             secs: 16.0,
             course: Course::flat(Surface::Tarmac),
-           
+            damage: none,
             interior: false,
             script: |t| if t < 0.7 { i(0.0, 0.0, 0.0, false) } else if t < 12.5 { i(1.0, 0.0, 0.0, false) } else { i(0.0, 0.0, 0.0, false) },
         },
@@ -169,7 +173,7 @@ pub fn scenes() -> Vec<Scene> {
             name: "03_lift_off_pops_gravel",
             secs: 12.0,
             course: Course::flat(Surface::Gravel),
-           
+            damage: none,
             interior: false,
             // Pull, lift, pull, lift: blow-off and overrun crackle each time.
             script: |t| match t {
@@ -184,7 +188,7 @@ pub fn scenes() -> Vec<Scene> {
             name: "04_handbrake_slide_gravel",
             secs: 10.0,
             course: Course::flat(Surface::Gravel),
-           
+            damage: none,
             interior: false,
             script: |t| match t {
                 t if t < 5.5 => i(1.0, 0.0, 0.0, false),
@@ -197,7 +201,7 @@ pub fn scenes() -> Vec<Scene> {
             name: "05_tarmac_skid",
             secs: 10.0,
             course: Course::flat(Surface::Tarmac),
-           
+            damage: none,
             interior: false,
             // Up to speed, then a hard brake with steering (locked/ sliding tyres), then a
             // power slide.
@@ -212,14 +216,15 @@ pub fn scenes() -> Vec<Scene> {
             name: "06_big_impact_post",
             secs: 8.0,
             course: Course { post: Some((Vec2::new(0.0, 70.0), 0.45)), ..Course::flat(Surface::Gravel) },
-           
+            damage: none,
             interior: false,
             script: |t| if t < 6.0 { i(1.0, 0.0, 0.0, false) } else { i(0.0, 0.0, 0.0, false) },
         },
         Scene {
-            name: "07_rough_gravel",
+            name: "07_damaged_engine_rough",
             secs: 10.0,
             course: Course { bumps: (0.05, 2.2), ..Course::flat(Surface::Gravel) },
+            damage: Damage { engine: 0.8, suspension: 0.7, steering: 0.2, ..Damage::default() },
             interior: false,
             script: |t| match t {
                 t if t < 0.5 => i(0.0, 0.0, 0.0, false),
@@ -231,7 +236,7 @@ pub fn scenes() -> Vec<Scene> {
             name: "08_crest_jump_landing",
             secs: 9.0,
             course: Course { crest: Some((110.0, 1.6, 9.0)), ..Course::flat(Surface::Gravel) },
-           
+            damage: none,
             interior: false,
             script: |t| if t < 8.0 { i(1.0, 0.0, 0.0, false) } else { i(0.0, 0.0, 0.0, false) },
         },
@@ -239,7 +244,7 @@ pub fn scenes() -> Vec<Scene> {
             name: "09_cockpit_gravel_run",
             secs: 12.0,
             course: Course { bumps: (0.02, 3.0), ..Course::flat(Surface::Gravel) },
-           
+            damage: none,
             interior: true,
             script: |t| match t {
                 t if t < 0.5 => i(0.0, 0.0, 0.0, false),
@@ -251,7 +256,7 @@ pub fn scenes() -> Vec<Scene> {
             name: "10_chase_gravel_run",
             secs: 12.0,
             course: Course { bumps: (0.02, 3.0), ..Course::flat(Surface::Gravel) },
-           
+            damage: none,
             interior: false,
             script: |t| match t {
                 t if t < 0.5 => i(0.0, 0.0, 0.0, false),
@@ -263,7 +268,7 @@ pub fn scenes() -> Vec<Scene> {
             name: "11_surfaces_snow_then_mud",
             secs: 12.0,
             course: Course { surface_after: Some((70.0, Surface::Mud)), ..Course::flat(Surface::Snow) },
-           
+            damage: none,
             interior: false,
             script: |t| match t {
                 t if t < 9.0 => i(0.75, 0.0, (t * 0.9).sin() * 0.25, false),
@@ -274,7 +279,7 @@ pub fn scenes() -> Vec<Scene> {
             name: "12_roll_scrape",
             secs: 9.0,
             course: Course { crest: Some((80.0, 1.2, 6.0)), ..Course::flat(Surface::Gravel) },
-           
+            damage: none,
             interior: false,
             // Flat out with full lock over a crest: the car lands crossed up and rolls/slides on
             // its body.

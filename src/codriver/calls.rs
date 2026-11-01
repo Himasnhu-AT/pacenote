@@ -165,10 +165,56 @@ pub fn distance(d: f32) -> String {
     format!("{}", ((d / step).round() * step) as u32)
 }
 
-/// What to say after a hit (see [`crate::vehicle::Knocks`]). The car takes no damage, so only
-/// a big one is worth a word. `None`: say nothing.
-pub fn knock_line(k: &crate::vehicle::Knocks) -> Option<Line> {
-    (k.last >= 0.3).then(|| Line::new("Big hit! Car's fine, keep going.", Priority::Warn))
+/// What to say about the car's damage after a hit of severity `sev` (see
+/// [`crate::vehicle::Damage::hit`]), given the damage before and after. `None`: not worth a word.
+pub fn damage_line(before: &crate::vehicle::Damage, after: &crate::vehicle::Damage) -> Option<Line> {
+    if after.wrecked() && !before.wrecked() {
+        let part = worst_part(after);
+        return Some(Line::new(format!("That's it, the {part} is gone. We're out of the stage."), Priority::Urgent));
+    }
+    let sev = after.last;
+    if sev < 0.04 {
+        return None;
+    }
+    let (de, ds, du) = (after.engine - before.engine, after.steering - before.steering, after.suspension - before.suspension);
+    let what = if de >= ds && de >= du {
+        "engine"
+    } else if ds >= du {
+        "steering"
+    } else {
+        "suspension"
+    };
+    let state = |d: f32| {
+        if d > 0.7 {
+            "is badly damaged, nurse it home"
+        } else if d > 0.35 {
+            "is damaged"
+        } else {
+            "took a knock"
+        }
+    };
+    let level = match what {
+        "engine" => after.engine,
+        "steering" => after.steering,
+        _ => after.suspension,
+    };
+    let mut text = if sev > 0.3 { "Big hit! ".to_string() } else { "Ouch. ".to_string() };
+    text.push_str(&format!("The {what} {}", state(level)));
+    if what == "steering" && after.steering > 0.2 && after.pull.abs() > 0.2 {
+        text.push_str(if after.pull > 0.0 { ", it's pulling left" } else { ", it's pulling right" });
+    }
+    text.push('.');
+    Some(Line::new(text, if sev > 0.3 || level > 0.7 { Priority::Urgent } else { Priority::Warn }))
+}
+
+fn worst_part(d: &crate::vehicle::Damage) -> &'static str {
+    if d.engine >= d.steering && d.engine >= d.suspension {
+        "engine"
+    } else if d.steering >= d.suspension {
+        "steering"
+    } else {
+        "suspension"
+    }
 }
 
 #[cfg(test)]
@@ -191,7 +237,7 @@ mod tests {
         late.lead_scale = 0.75;
         assert!(late.lead_scaled(30.0) < Planner::lead(30.0));
     }
-    use crate::vehicle::Knocks;
+    use crate::vehicle::Damage;
 
     fn corner(start: f32, end: f32, turn: Turn, grade: u8) -> Corner {
         Corner { start, end, turn, grade, angle: 60.0, crest: false, narrows: false }
@@ -247,11 +293,18 @@ mod tests {
     }
 
     #[test]
-    fn knock_talk() {
-        let mut k = Knocks::default();
-        k.hit(0.05);
-        assert!(knock_line(&k).is_none());
-        k.hit(0.5);
-        assert!(knock_line(&k).unwrap().text.starts_with("Big hit"));
+    fn damage_talk() {
+        let a = Damage::default();
+        let mut b = a;
+        b.hit(0.02, bevy::math::Vec3::new(0.0, 0.0, -2.0), crate::vehicle::HitZone::Front);
+        assert!(damage_line(&a, &b).is_none());
+        let mut c = a;
+        c.hit(0.5, bevy::math::Vec3::new(-0.8, 0.0, -2.0), crate::vehicle::HitZone::Front);
+        let l = damage_line(&a, &c).unwrap();
+        assert!(l.text.starts_with("Big hit"), "{l:?}");
+        assert_eq!(l.priority, Priority::Urgent);
+        let mut d = c;
+        d.hit(1.2, bevy::math::Vec3::new(0.0, 0.0, -2.0), crate::vehicle::HitZone::Front);
+        assert!(damage_line(&c, &d).unwrap().text.contains("out of the stage"));
     }
 }

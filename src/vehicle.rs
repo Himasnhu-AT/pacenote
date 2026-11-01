@@ -19,8 +19,11 @@
 //!   bounces off), saplings, posts and signs snap when hit hard enough (the car shoves them
 //!   away, losing only the momentum it gives them, and they stay down for the run:
 //!   [`Car::broken`]), and shrubs are brush the car drives through with a little drag.
-//! - No damage: hits never cost power or steering and never end a run. They are counted
-//!   ([`Knocks`]) for sounds, the co-driver and stats.
+//! - Damage ([`Damage`]): hits above walking pace against solid things (trunks, boulders, the
+//!   ground in a roll or a heavy landing) damage the engine (power), the steering (less lock,
+//!   slower, a pull to one side) and the suspension (less grip, wallowing), by where the car
+//!   was hit and how hard, and knock body parts off ([`Damage::off`]). One part fully broken
+//!   retires the car. Snapping a sapling, post or sign and driving through shrubs do none.
 //!
 //! Frame: local +X right, +Y up, −Z forward (Bevy's convention).
 
@@ -239,41 +242,102 @@ pub struct Wheel {
     pub raw: f32,
 }
 
-/// The hits the body has taken this run. The car takes no damage (it never loses power or
-/// steering and is never out): these only feed sounds, the co-driver and stats.
+/// Accumulated damage per part: 0 = as new, 1 = broken (the car is out).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Knocks {
-    /// Hits harder than a nudge so far, and the severity of the last one (see
-    /// [`Knocks::severity`]: 0.03 a knock, 1 a big crash).
-    pub count: u32,
+pub struct Damage {
+    pub engine: f32,
+    pub steering: f32,
+    pub suspension: f32,
+    /// Which way bent steering pulls (+ = left), from the side of the steering hits.
+    pub pull: f32,
+    /// Damaging hits so far, and the severity of the last one (0.03 a knock … ≥ 1 fatal).
+    pub hits: u32,
     pub last: f32,
+    /// Body parts knocked off, one bit per [`PARTS`] entry ([`Damage::off`]).
+    pub detached: u8,
 }
 
-/// Hits slower than this (m/s of closing speed) don't count.
-pub const HIT_FROM: f32 = 4.0;
-/// Closing speed (m/s) of a big crash, severity 1 (~80 km/h head-on into a tree).
-pub const HIT_HARD: f32 = 22.0;
+/// Body parts that can come off, in bit order (`art::car::DETACHABLE` names).
+pub const PARTS: [&str; 7] = ["MirrorL", "MirrorR", "RearWing", "FrontSplitter", "FrontBumper", "RearBumper", "RearDiffuser"];
 
-impl Knocks {
-    /// Severity of a hit at closing speed `v` (m/s): 0 below [`HIT_FROM`], 1 at [`HIT_HARD`],
-    /// quadratic between (energy-like).
+/// Where on the body a hit landed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HitZone {
+    Front,
+    Side,
+    Rear,
+    /// Roof or underside (rolls, heavy landings).
+    Body,
+}
+
+/// Hits slower than this (m/s of closing speed) do no damage.
+pub const DAMAGE_FROM: f32 = 4.0;
+/// Closing speed (m/s) that breaks a part outright head-on (~80 km/h into a tree).
+pub const DAMAGE_FATAL: f32 = 22.0;
+
+impl Damage {
+    /// Severity of a hit at closing speed `v` (m/s): 0 below [`DAMAGE_FROM`], 1 at
+    /// [`DAMAGE_FATAL`], quadratic between (energy-like).
     pub fn severity(v: f32) -> f32 {
-        let x = (v - HIT_FROM).max(0.0) / (HIT_HARD - HIT_FROM);
+        let x = (v - DAMAGE_FROM).max(0.0) / (DAMAGE_FATAL - DAMAGE_FROM);
         x * x
     }
 
-    /// Closing speed (m/s) back from a severity (the inverse of [`Knocks::severity`]).
-    pub fn speed_of(sev: f32) -> f32 {
-        HIT_FROM + sev.max(0.0).sqrt() * (HIT_HARD - HIT_FROM)
+    /// A part is broken: the car can't continue.
+    pub fn wrecked(&self) -> bool {
+        self.engine >= 1.0 || self.steering >= 1.0 || self.suspension >= 1.0
     }
 
-    /// Counts a hit of severity `sev` (nudges below 0.005 don't count).
-    pub fn hit(&mut self, sev: f32) {
+    /// The worst part (0..1).
+    pub fn worst(&self) -> f32 {
+        self.engine.max(self.steering).max(self.suspension).min(1.0)
+    }
+
+    /// Applies a hit of severity `sev` at `local` (body frame, −Z forward) in `zone`.
+    pub fn hit(&mut self, sev: f32, local: Vec3, zone: HitZone) {
         if sev < 0.005 {
             return;
         }
-        self.count += 1;
+        // Front corners hurt the steering more than the middle of the nose.
+        let corner = (local.x.abs() / 0.8).clamp(0.0, 1.0);
+        let front_half = local.z < 0.0;
+        let (e, st, su) = match zone {
+            HitZone::Front => (1.0, 0.35 + 0.5 * corner, 0.25 + 0.2 * corner),
+            HitZone::Side if front_half => (0.15, 0.9, 0.7),
+            HitZone::Side => (0.15, 0.2, 0.9),
+            HitZone::Rear => (0.35, 0.05, 0.6),
+            HitZone::Body => (0.35, 0.3, 0.45),
+        };
+        self.engine = (self.engine + sev * e).min(1.0);
+        self.suspension = (self.suspension + sev * su).min(1.0);
+        let ds = sev * st;
+        self.steering = (self.steering + ds).min(1.0);
+        // Bent on the left (−X) pulls left.
+        if ds > 0.0 && local.x.abs() > 0.2 {
+            self.pull = (self.pull - local.x.signum() * ds * 2.0).clamp(-1.0, 1.0);
+        }
+        self.hits += 1;
         self.last = sev;
+        // Parts that come off: the low, light ones first, by zone and severity
+        // (30 km/h head-on ≈ 0.06, 50 ≈ 0.17, 70 ≈ 0.36).
+        let side = if local.x < 0.0 { "MirrorL" } else { "MirrorR" };
+        let off: &[(&str, f32)] = match zone {
+            HitZone::Front => &[("FrontSplitter", 0.05), ("FrontBumper", 0.2)],
+            HitZone::Side if front_half => &[(side, 0.04)],
+            HitZone::Side => &[],
+            HitZone::Rear => &[("RearDiffuser", 0.05), ("RearBumper", 0.15), ("RearWing", 0.3)],
+            HitZone::Body => &[("RearWing", 0.15), (side, 0.1)],
+        };
+        for &(name, at) in off {
+            if sev >= at {
+                self.detached |= 1 << PARTS.iter().position(|p| *p == name).unwrap_or(0);
+            }
+        }
+    }
+
+    /// Whether body part `name` ([`PARTS`]) has come off.
+    pub fn off(&self, name: &str) -> bool {
+        PARTS.iter().position(|p| *p == name).is_some_and(|i| self.detached & (1 << i) != 0)
     }
 }
 
@@ -296,9 +360,9 @@ pub struct Car {
     pub in_gear: f32,
     /// Seconds held at a standstill on the brake (reverse engages after 0.5 s).
     pub stopped: f32,
-    /// Sum of impact speeds (m/s) against solid obstacles this run (sounds, stats).
+    /// Sum of impact speeds (m/s) against solid obstacles this run: for damage and the HUD.
     pub impacts: f32,
-    pub knocks: Knocks,
+    pub damage: Damage,
     /// Breakable obstacles ([`Give::Breaks`] ids) the car has knocked down this run, in order:
     /// they're gone for the rest of it.
     pub broken: Vec<u32>,
@@ -331,7 +395,7 @@ impl Car {
             in_gear: 0.0,
             stopped: 0.0,
             impacts: 0.0,
-            knocks: Knocks::default(),
+            damage: Damage::default(),
             broken: Vec::new(),
             brush: 0.0,
             body_contact: false,
@@ -364,8 +428,9 @@ impl Car {
 /// engine braking, box-vs-trunk collisions); 4 = steering lock from the direction of travel,
 /// launch clutch slip, gravel gearing, stiffer diffs; 5 = the same bits on every CPU (libm),
 /// bump-stop damping, engine braking either way, hill hold that holds, implicit wheel spin;
-/// 6 = no damage, breakable saplings / posts / signs, shrubs that drag.
-pub const REVISION: u64 = 6;
+/// 6 = no damage, breakable saplings / posts / signs, shrubs that drag; 7 = damage again (from
+/// solid hits only), body parts that come off.
+pub const REVISION: u64 = 7;
 
 /// Fastest the body may spin (rad/s); normal crashes stay under ~15.
 const MAX_SPIN: f32 = 25.0;
@@ -398,7 +463,7 @@ pub fn step(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, dt: 
     }
 }
 
-/// Road-wheel steering angle (rad) at full input for a car doing `speed` m/s.
+/// Road-wheel steering angle (rad) at full input for a car doing `speed` m/s (undamaged).
 ///
 /// Full lock when parking; at speed, the angle that takes the tightest corner the car can
 /// hold (`steer_grip` m/s² of lateral acceleration: wheelbase × a / v²) plus `steer_slip` ×
@@ -447,7 +512,7 @@ pub fn steer_frame(car: &Car, spec: &Spec) -> (f32, f32, f32) {
     let blend = ((-vf.z - 2.0) / 4.0).clamp(0.0, 1.0);
     let travel = libm::atan2f(-vf.x, (-vf.z).max(0.1)).clamp(-spec.max_steer, spec.max_steer) * blend;
     let slip_part = spec.steer_slip * peak;
-    let lock = at_rest + (slip_part.min(at_rest) - at_rest) * blend;
+    let lock = (at_rest + (slip_part.min(at_rest) - at_rest) * blend) * (1.0 - 0.45 * car.damage.steering);
     let hi = (travel + lock).max(0.03).min(spec.max_steer);
     let lo = (travel - lock).min(-0.03).max(-spec.max_steer);
     let align = ((-vf.z - 5.5) / 9.5).clamp(0.0, 1.0) * ALIGN;
@@ -527,9 +592,11 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         *torque += (p - pos).cross(f);
     };
 
-    // Steering: speed-sensitive lock, rate-limited.
-    let want = steer_target(car, spec, input.steer);
-    let rate = spec.steer_rate;
+    // Steering: speed-sensitive lock, rate-limited. Damage takes lock and speed off it and
+    // bends the straight-ahead to one side.
+    let dmg = car.damage;
+    let want = steer_target(car, spec, input.steer) + dmg.pull * dmg.steering * 0.09;
+    let rate = spec.steer_rate * (1.0 - 0.5 * dmg.steering);
     car.steer += (want - car.steer).clamp(-rate * h, rate * h);
 
     // Gearbox (auto) and engine.
@@ -596,8 +663,11 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
     // Traction assist: trim torque when the driven wheels slip far past peak grip.
     let slip = car.wheels.iter().map(|w| w.slip_ratio / w.surface.map_or(0.15, |s| tyre(s).peak_ratio)).fold(0.0f32, f32::max);
     let assist = if spec.traction_assist { (1.0 - (slip - 1.0).max(0.0) * 0.5).clamp(0.35, 1.0) } else { 1.0 };
-    let mut engine = if cut { 0.0 } else { spec.torque * curve * pedal * assist };
+    // A damaged engine makes less power; a wrecked car makes none.
+    // It runs out of breath up the rev range (at low revs on loose ground grip limits anyway).
     let x = (car.rpm / spec.redline).clamp(0.0, 1.0);
+    let health = if dmg.wrecked() { 0.0 } else { (1.0 - dmg.engine * (0.3 + 0.6 * x)).max(0.1) };
+    let mut engine = if cut { 0.0 } else { spec.torque * curve * pedal * assist * health };
     // Engine braking off the throttle (in a forward gear, above idle): it slows the car and
     // moves weight onto the front, which is what makes a lift rotate the car.
     if !reversing && !cut && pedal < 0.05 && car.rpm > spec.idle_rpm * 1.3 {
@@ -659,8 +729,8 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         let axle = i / 2;
         let other = comp[i ^ 1];
         // Dampers are stiffer in rebound than in bump (so a wheel soaks up a bump, and the
-        // inside of a corner doesn't spring up).
-        let damp = spec.damper * if comp_vel > 0.0 { 0.7 } else { 1.3 };
+        // inside of a corner doesn't spring up). Damaged dampers wallow.
+        let damp = spec.damper * (1.0 - 0.5 * dmg.suspension) * if comp_vel > 0.0 { 0.7 } else { 1.3 };
         let x = comp[i];
         let springs = if x >= 0.0 { spec.spring * x + spec.helper_spring * spec.helper_travel } else { spec.helper_spring * (x + spec.helper_travel) };
         let mut fs = springs + damp * comp_vel + spec.arb[axle] * (x - other);
@@ -688,7 +758,8 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         w.surface = Some(surf);
         let ty = tyre(surf);
         let loose = ty.loose;
-        let mu = ty.mu;
+        // Bent suspension: the tyres don't sit square, less grip.
+        let mu = ty.mu * (1.0 - 0.25 * dmg.suspension);
         // Load sensitivity: grip per newton drops with load (~8 % per extra static load).
         let fz = fs.min(14_000.0);
         let nominal = spec.mass * 9.81 * 0.25;
@@ -784,7 +855,8 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
 
     // Aero drag (and a little downforce).
     let v2 = car.vel.length_squared();
-    force += -car.vel * (0.5 * 1.2 * spec.drag * car.vel.length());
+    // Torn bodywork drags.
+    force += -car.vel * (0.5 * 1.2 * spec.drag * (1.0 + 0.4 * dmg.worst()) * car.vel.length());
     force += -up * (0.3 * v2);
 
     // Chassis contact with the ground (rolled, bottomed out) and obstacles.
@@ -890,10 +962,16 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         let n = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();
         car.rot = Quat::from_xyzw(q.x / n, q.y / n, q.z / n, q.w / n);
     }
-    // The body hitting the ground (a roll, nosing into a bank, a heavy landing): a knock on
-    // the first touch. Softer than a tree: the ground gives and the car slides.
-    if let Some((v, _)) = touch {
-        car.knocks.hit(Knocks::severity(v) * 0.6);
+    // The body hitting the ground (a roll, nosing into a bank, a heavy landing): damage on the
+    // first touch. Softer than a tree: the ground gives and the car slides.
+    if let Some((v, local)) = touch {
+        let rel = local - spec.body_centre;
+        let zone = if rel.y > 0.0 || rel.y < -half.y * 0.9 && rel.z.abs() < half.z * 0.5 {
+            HitZone::Body
+        } else {
+            zone_of(local, half)
+        };
+        car.damage.hit(Damage::severity(v) * 0.6, local, zone);
     }
     car.body_contact = body_contact;
     // Obstacles: impulses (a penalty spring can't stop a tonne at speed on a 0.4 m trunk).
@@ -919,8 +997,11 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         }
         if vn < 0.0 {
             if vn < -2.0 {
+                // (A sapling, post or sign below its snapping speed is solid too, but that slow
+                // a hit is under `DAMAGE_FROM`: no damage.)
                 car.impacts += -vn;
-                car.knocks.hit(Knocks::severity(-vn));
+                let local = car.rot.inverse() * r;
+                car.damage.hit(Damage::severity(-vn), local, zone_of(local, half));
             }
             let j = -(1.0 + 0.2) * vn / k;
             let vt = vp - n * vn;
@@ -933,13 +1014,24 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
     }
 }
 
+/// Front, side or rear, from a point in the body frame (−Z forward).
+fn zone_of(local: Vec3, half: Vec3) -> HitZone {
+    if local.z < -half.z * 0.55 {
+        HitZone::Front
+    } else if local.z > half.z * 0.55 {
+        HitZone::Rear
+    } else {
+        HitZone::Side
+    }
+}
+
 /// Puts the car back on the road (the recover button): at `pos`, facing `heading`, stopped.
-/// The run's hits and what it knocked down stay.
+/// The damage and what it knocked down stay.
 pub fn recover(car: &mut Car, pos: Vec3, heading: f32) {
-    let (impacts, knocks, broken) = (car.impacts, car.knocks, std::mem::take(&mut car.broken));
+    let (impacts, damage, broken) = (car.impacts, car.damage, std::mem::take(&mut car.broken));
     *car = Car::new(pos + Vec3::Y * 0.6, heading);
     car.impacts = impacts;
-    car.knocks = knocks;
+    car.damage = damage;
     car.broken = broken;
 }
 
@@ -1118,27 +1210,73 @@ mod tests {
     }
 
     #[test]
-    fn big_trees_stop_the_car_but_never_damage_it() {
-        let spec = Spec::default();
+    fn big_trees_stop_the_car() {
         for kmh in [20.0, 50.0, 90.0] {
             let (car, _) = drive_at(kmh, TREE);
             assert!(car.pos.z < 20.0 - 1.5 && car.speed() < 3.0, "{kmh} km/h: {:?} at {:.1} m/s", car.pos, car.speed());
             assert!(car.broken.is_empty());
-            if kmh > 40.0 {
-                assert!(car.knocks.count >= 1 && car.knocks.last > 0.0, "{kmh} km/h: {:?}", car.knocks);
-            }
-            // Back on the road it drives exactly like a new car (no lost power, no bent steering).
-            let mut hit = car.clone();
-            recover(&mut hit, Vec3::ZERO, 0.0);
-            assert_eq!(hit.knocks, car.knocks);
-            let mut fresh = Car::new(Vec3::ZERO + Vec3::Y * 0.6, 0.0);
-            let g = Flat(0.0, Surface::Gravel);
-            for c in [&mut hit, &mut fresh] {
-                run(c, &spec, Input::default(), &g, 1.0);
-                run(c, &spec, Input { throttle: 1.0, steer: 0.0, ..default() }, &g, 6.0);
-            }
-            assert_eq!((hit.pos, hit.vel, hit.steer), (fresh.pos, fresh.vel, fresh.steer), "{kmh} km/h: the hit changed how it drives");
         }
+    }
+
+    #[test]
+    fn damage_scales_with_the_hit() {
+        let knock = drive_at(20.0, TREE).0.damage;
+        assert!(knock.worst() < 0.08 && !knock.wrecked(), "{knock:?}");
+        let mid = drive_at(50.0, TREE).0.damage;
+        assert!(mid.engine > 0.15 && !mid.wrecked(), "{mid:?}");
+        let big = drive_at(90.0, TREE).0.damage;
+        assert!(big.wrecked(), "{big:?}");
+        // (`last` can be a light knock after the rebound, so check the part it broke.)
+        assert!(big.hits >= 1 && big.engine >= 1.0, "{big:?}");
+    }
+
+    #[test]
+    fn damage_costs_power_and_steering() {
+        let g = Flat(0.0, Surface::Gravel);
+        let spec = Spec::default();
+        let drive = |d: Damage, input: Input| {
+            let mut car = Car::new(Vec3::new(0.0, 0.6, 0.0), 0.0);
+            car.damage = d;
+            run(&mut car, &spec, Input::default(), &g, 1.0);
+            run(&mut car, &spec, input, &g, 9.0);
+            car
+        };
+        let full = Input { throttle: 1.0, ..default() };
+        let ok = drive(Damage::default(), full);
+        let hurt = drive(Damage { engine: 0.7, ..Damage::default() }, full);
+        assert!(hurt.speed() < ok.speed() * 0.85, "{} vs {}", hurt.speed(), ok.speed());
+        let wrecked = drive(Damage { engine: 1.0, ..Damage::default() }, full);
+        assert!(wrecked.speed().abs() < 1.0, "wrecked car drove off: {}", wrecked.speed());
+        // Bent steering pulls left with the wheel straight.
+        let bent = drive(Damage { steering: 0.6, pull: 1.0, ..Damage::default() }, full);
+        assert!(bent.steer > 0.02, "{}", bent.steer);
+        // Recovering keeps the damage.
+        let mut c = hurt.clone();
+        recover(&mut c, Vec3::ZERO, 0.0);
+        assert_eq!(c.damage, hurt.damage);
+    }
+
+    #[test]
+    fn hard_hits_knock_parts_off() {
+        // Into a trunk nose first: the splitter at 30 km/h, the bumper too at 60; a nudge
+        // takes nothing.
+        assert_eq!(drive_at(15.0, TREE).0.damage.detached, 0);
+        let d = drive_at(35.0, TREE).0.damage;
+        assert!(d.off("FrontSplitter") && !d.off("RearWing"), "{d:?}");
+        let d = drive_at(60.0, TREE).0.damage;
+        assert!(d.off("FrontSplitter") && d.off("FrontBumper"), "{d:?}");
+        // Zones: a side hit on the left front takes the left mirror, a hard rear hit the wing.
+        let mut side = Damage::default();
+        side.hit(0.1, Vec3::new(-0.9, 0.0, -0.5), HitZone::Side);
+        assert!(side.off("MirrorL") && !side.off("MirrorR"), "{side:?}");
+        let mut rear = Damage::default();
+        rear.hit(0.4, Vec3::new(0.0, 0.0, 2.0), HitZone::Rear);
+        assert!(rear.off("RearWing") && rear.off("RearBumper") && rear.off("RearDiffuser"), "{rear:?}");
+        // They stay off through a recover.
+        let mut c = drive_at(60.0, TREE).0;
+        let before = c.damage.detached;
+        recover(&mut c, Vec3::ZERO, 0.0);
+        assert_eq!(c.damage.detached, before);
     }
 
     #[test]
@@ -1146,8 +1284,9 @@ mod tests {
         let (car, before) = drive_at(60.0, SAPLING);
         assert_eq!(car.broken, vec![7], "{:?}", car.pos);
         assert!(car.pos.z > 25.0, "stopped at the sapling: {:?}", car.pos);
+        // Snapping it does no damage.
         assert_eq!(car.impacts, 0.0);
-        assert_eq!(car.knocks.count, 0);
+        assert_eq!(car.damage, Damage::default());
         // It costs a little speed (the sapling's momentum), compared with an empty road.
         let free = coast_at(60.0);
         let lost = (free.speed() - car.speed()) * 3.6;
@@ -1159,6 +1298,8 @@ mod tests {
         // Walking pace (5 km/h, under its 3 m/s): it holds and the car stops against it.
         let (car, _) = drive_at(5.0, SAPLING);
         assert!(car.broken.is_empty() && car.pos.z < 20.0 - 1.5, "{:?} {:?}", car.broken, car.pos);
+        // A light hit: under the speed that damages anything.
+        assert_eq!(car.damage.worst(), 0.0, "{:?}", car.damage);
     }
 
     #[test]
@@ -1168,7 +1309,7 @@ mod tests {
         let free = coast_at(60.0);
         let lost = (free.speed() - car.speed()) * 3.6;
         assert!(lost > 0.5 && lost < 6.0, "lost {lost:.2} km/h through a shrub");
-        assert!(car.broken.is_empty() && car.impacts == 0.0 && car.knocks.count == 0);
+        assert!(car.broken.is_empty() && car.impacts == 0.0 && car.damage == Damage::default());
         assert!(car.pos.z > 30.0, "{:?}", car.pos);
     }
 

@@ -39,7 +39,7 @@ pub struct StageRun {
     pub progress: f32,
     /// Split times at each quarter of the stage.
     pub splits: Vec<f32>,
-    /// The driver gave up (retire): the run is over without a time.
+    /// The car was wrecked: the run is over without a time.
     pub retired: bool,
 }
 
@@ -178,6 +178,11 @@ fn simulate(
             continue;
         }
         if run.finished.is_some() || run.retired {
+            continue;
+        }
+        if c.car.damage.wrecked() {
+            info!("retired: car wrecked at {:.0} m ({:?})", run.progress, c.car.damage);
+            run.retired = true;
             continue;
         }
         run.time += dt;

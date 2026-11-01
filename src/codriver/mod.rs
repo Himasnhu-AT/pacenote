@@ -1,5 +1,5 @@
 //! The AI co-driver: when no human guide is in the car, reads the pace notes out loud ahead of
-//! the car, and reports big hits, splits, the finish, going off the road and rolling over. Lines
+//! the car, and reports damage, splits, the finish, going off the road and rolling over. Lines
 //! are spoken with the system's text-to-speech ([`speech`]) and shown as a subtitle.
 //!
 //! On by default for solo runs; quiet while a human guide is connected (they read the notes),
@@ -15,7 +15,7 @@ use engine::pause::Paused;
 
 use crate::drive::{DrivenCar, StageRun};
 use crate::net_session::{Role, Session};
-use crate::vehicle::Knocks;
+use crate::vehicle::Damage;
 use crate::world::StageWorld;
 use calls::{Line, Planner, Priority};
 use speech::Speech;
@@ -38,7 +38,7 @@ pub struct CoDriver {
     planner: Option<Planner>,
     /// Which stage the planner is for.
     stage: u32,
-    last_knocks: Knocks,
+    last_damage: Damage,
     last_progress: f32,
     said_ready: bool,
     splits_said: usize,
@@ -60,7 +60,7 @@ impl Default for CoDriver {
             speech: Speech::default(),
             planner: None,
             stage: 0,
-            last_knocks: Knocks::default(),
+            last_damage: Damage::default(),
             last_progress: 0.0,
             said_ready: false,
             splits_said: 0,
@@ -88,7 +88,7 @@ impl CoDriver {
         self.said_ready = false;
         self.splits_said = 0;
         self.finish_said = false;
-        self.last_knocks = Knocks::default();
+        self.last_damage = Damage::default();
         self.off_road = 0.0;
         self.on_roof = 0.0;
         self.subtitle = None;
@@ -233,13 +233,13 @@ fn talk(
             }
         }
     }
-    // Big hits (the car takes no damage: just reassurance).
-    let k = car.knocks;
-    if k.count > cd.last_knocks.count {
-        if let Some(l) = calls::knock_line(&k) {
+    // Damage.
+    let d = car.damage;
+    if d.hits > cd.last_damage.hits {
+        if let Some(l) = calls::damage_line(&cd.last_damage, &d) {
             cd.say(l);
         }
-        cd.last_knocks = k;
+        cd.last_damage = d;
     }
     if let Some(t) = run.finished
         && !cd.finish_said

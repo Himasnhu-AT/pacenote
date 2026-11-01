@@ -11,6 +11,10 @@
 //!   footprint test runs on its drawn pose (any [`SwayPusher`] without a `DrivenCar`) and knocks
 //!   what it drives into, with the sim's thresholds. Visual only; it matches the driver's screen
 //!   except in near misses.
+//! - **Body parts** (`art::car::DETACHABLE`: mirrors, wing, splitter, bumpers, diffuser) come
+//!   off when the sim says so (`Damage::detached`, set by hard hits in their zone): the part's
+//!   node is hidden and a copy of it tumbles away as debris. A restart puts them back. (The
+//!   guide doesn't get the car's damage over the network, so its view keeps every part.)
 //! - **Shrubs** bend from the car's drawn pose (`SwayPusher` on the car); leaves fly when it
 //!   ploughs in. The drag is the sim's (`vehicle::Give::Brush`), the rustle `audio::body`'s.
 
@@ -18,7 +22,7 @@ use std::sync::Arc;
 
 use bevy::camera::visibility::VisibilityRange;
 use bevy::prelude::*;
-use engine::props::{Breakable, Brushed, DebrisSpec, Fallen, Knock, PropGround, Sway, SwayPusher, Toppled, spawn_debris};
+use engine::props::{Breakable, Brushed, Debris, DebrisSpec, Fallen, Knock, PropGround, Sway, SwayPusher, Toppled, spawn_debris};
 use engine::render_budget::Scenery;
 use engine::vfx::Vfx;
 
@@ -44,7 +48,7 @@ impl Plugin for PropArtPlugin {
         dev::register(app);
         app.add_plugins(engine::props::PropsPlugin)
             .add_systems(Update, (tag_car, knock_from_sim, knock_from_pose, respawn).chain())
-            .add_systems(Update, (on_toppled, on_brushed));
+            .add_systems(Update, (on_toppled, on_brushed, car_parts));
     }
 }
 
@@ -386,7 +390,7 @@ mod dev {
             "props.charge",
             "Aim the car at a prop and send it in (screenshots of things breaking)",
             params(&[
-                ("kind", "string", "post | sign | sapling | shrub"),
+                ("kind", "string", "post | sign | sapling | shrub | tree (a solid trunk)"),
                 ("nth", "integer", "which one along the stage (default 3)"),
                 ("kmh", "number", "speed (default 60)"),
                 ("dist", "number", "metres before it (default 14)"),
@@ -403,7 +407,8 @@ mod dev {
     }
 
     fn charge(world: &mut World, v: Value) -> Result<Value, String> {
-        let kind = match v.get("kind").and_then(Value::as_str).unwrap_or("sapling") {
+        let name = v.get("kind").and_then(Value::as_str).unwrap_or("sapling");
+        let kind = match name {
             "post" => PropKind::Post,
             "sign" => PropKind::Sign,
             "shrub" => PropKind::Shrub,
@@ -414,10 +419,17 @@ mod dev {
         let dist = v.get("dist").and_then(Value::as_f64).unwrap_or(14.0) as f32;
         let stage = world.get_resource::<StageWorld>().ok_or("no stage")?.clone();
         // Along the road, so `nth` counts from the start.
-        let mut found: Vec<(f32, crate::world::Prop)> = stage
-            .props
+        // A solid trunk stands in as a pseudo-prop (id u32::MAX).
+        let trees: Vec<crate::world::Prop> = stage
+            .obstacle_list()
+            .into_iter()
+            .filter(|o| o.1 > 0.2 && o.1 < 0.5)
+            .map(|o| crate::world::Prop { id: u32::MAX, kind, pos: Vec3::new(o.0.x, crate::vehicle::Ground::height(&stage, o.0.x, o.0.y), o.0.y), yaw: 0.0, scale: 1.0, seed: 0 })
+            .collect();
+        let pool: Vec<crate::world::Prop> = if name == "tree" { trees } else { stage.props.iter().copied().filter(|p| p.kind == kind).collect() };
+        let mut found: Vec<(f32, crate::world::Prop)> = pool
             .iter()
-            .filter(|p| p.kind == kind)
+            .filter(|p| stage.road.nearest(Vec2::new(p.pos.x, p.pos.z), 30.0).is_some_and(|r| r.lateral.abs() < 12.0))
             .filter_map(|p| stage.road.nearest(Vec2::new(p.pos.x, p.pos.z), 30.0).map(|r| (r.s, *p)))
             .filter(|(s, _)| *s > 60.0)
             .collect();
@@ -440,5 +452,82 @@ mod dev {
         }
         c.prev = (c.car.pos, c.car.rot);
         Ok(json!({"id": p.id, "s": s, "prop": [p.pos.x, p.pos.y, p.pos.z], "car": [start.x, start.y, start.z]}))
+    }
+}
+
+/// Body parts the sim knocked off: hide the part on the car, throw a copy of it (same meshes)
+/// as debris. Fewer bits than shown (a restart): show them again.
+#[allow(clippy::too_many_arguments)]
+fn car_parts(
+    mut commands: Commands,
+    cars: Query<(Entity, &DrivenCar, &Children)>,
+    rigs: Query<&super::car::CarRig>,
+    kids: Query<&Children>,
+    meshes: Query<(&Mesh3d, &MeshMaterial3d<StandardMaterial>, &GlobalTransform)>,
+    gts: Query<&GlobalTransform>,
+    ground: Option<Res<PropGround>>,
+    mut shown: Local<Vec<(Entity, u8)>>,
+) {
+    for (car_e, c, children) in &cars {
+        let Some(rig) = children.iter().find_map(|k| rigs.get(k).ok()) else { continue };
+        let now = c.car.damage.detached;
+        let i = match shown.iter().position(|s| s.0 == car_e) {
+            Some(i) => i,
+            None => {
+                shown.push((car_e, 0));
+                shown.len() - 1
+            }
+        };
+        let was = shown[i].1;
+        if now == was {
+            continue;
+        }
+        for (bit, name) in crate::vehicle::PARTS.iter().enumerate() {
+            let (on, before) = (now & (1 << bit) != 0, was & (1 << bit) != 0);
+            let Some(part) = rig.part(name) else { continue };
+            if on && !before {
+                let Ok(pg) = gts.get(part) else { continue };
+                // The copy: every mesh under the part, placed relative to the part.
+                let inv = pg.affine().inverse();
+                let mut stack = vec![part];
+                let mut pieces = Vec::new();
+                while let Some(e) = stack.pop() {
+                    if let Ok((m, mat, g)) = meshes.get(e) {
+                        pieces.push((m.clone(), mat.clone(), Transform::from_matrix((inv * g.affine()).into())));
+                    }
+                    if let Ok(k) = kids.get(e) {
+                        stack.extend(k.iter());
+                    }
+                }
+                let (_, rot, pos) = pg.to_scale_rotation_translation();
+                let seed = ((bit as u64 + 1) * 0x9E37_79B9) ^ car_e.to_bits();
+                let side = if seed.is_multiple_of(2) { 1.0 } else { -1.0 };
+                let right = c.car.rot * Vec3::X;
+                let floor = ground.as_ref().map_or(pos.y - 1.0, |g| g.height(pos.x, pos.z));
+                let root = commands
+                    .spawn((
+                        Name::new(format!("{name} (off)")),
+                        Debris {
+                            vel: c.car.vel * 0.6 + Vec3::Y * 2.5 + right * side * 1.5,
+                            spin: Vec3::new(3.0, 5.0 * side, 2.0),
+                            age: 0.0,
+                            life: 12.0,
+                            size: 1.0,
+                            floor,
+                        },
+                        engine::render_budget::Actor,
+                        Transform::from_translation(pos).with_rotation(rot),
+                        Visibility::default(),
+                    ))
+                    .id();
+                for (m, mat, tf) in pieces {
+                    commands.spawn((m, mat, tf, ChildOf(root)));
+                }
+                commands.entity(part).insert(Visibility::Hidden);
+            } else if !on && before {
+                commands.entity(part).insert(Visibility::Inherited);
+            }
+        }
+        shown[i].1 = now;
     }
 }
