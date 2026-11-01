@@ -6,6 +6,7 @@ use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use engine::pcg::PcgCatalog;
+use engine::render_budget::DetailTier;
 use engine::prelude::*;
 
 use super::pbr;
@@ -119,18 +120,26 @@ type NewCover = (Added<MeshMaterial3d<StandardMaterial>>, Without<Cover>);
 pub struct CoverMats(Vec<AssetId<StandardMaterial>>);
 
 /// Ground cover (merged per cell or single plants) gets a dithered fade-out instead of the
-/// budget's far version.
+/// budget's far version. The budget may classify a piece before this runs (PCG spawns late in
+/// the frame): its tier comes off and its flat far twin is despawned (on card bushes the twin
+/// is an untextured box).
 pub fn tag_cover(
     mut commands: Commands,
     mats: Option<Res<CoverMats>>,
-    added: Query<(Entity, &MeshMaterial3d<StandardMaterial>, Has<Name>), NewCover>,
+    added: Query<(Entity, &MeshMaterial3d<StandardMaterial>, Has<Name>, Option<&Children>), NewCover>,
+    tiers: Query<&DetailTier>,
 ) {
     let Some(mats) = mats else { return };
-    for (e, m, merged) in &added {
+    for (e, m, merged, children) in &added {
         if mats.0.contains(&m.id()) {
+            for &c in children.into_iter().flatten() {
+                if tiers.get(c) == Ok(&DetailTier::Far) {
+                    commands.entity(c).despawn();
+                }
+            }
             // Merged cells measure from their centre (≤ 45 m from any plant in a 64 m cell).
             let end = if merged { COVER_END } else { COVER_END - 30.0 };
-            commands.entity(e).insert((Cover, KeepDetail, NotShadowCaster, VisibilityRange { start_margin: 0.0..0.0, end_margin: (end - 15.0)..end, use_aabb: false }));
+            commands.entity(e).remove::<DetailTier>().insert((Cover, KeepDetail, NotShadowCaster, VisibilityRange { start_margin: 0.0..0.0, end_margin: (end - 15.0)..end, use_aabb: false }));
         }
     }
 }
