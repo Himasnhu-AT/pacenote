@@ -74,6 +74,11 @@ model vegetation/fern_02 fern_02 m_fern 512 fern_02_alpha_2k.jpg
 model vegetation/grass_medium_01 grass_medium_01 m_grass1 1024 grass_medium_01_alpha_2k.jpg
 model vegetation/grass_medium_02 grass_medium_02 m_grass2 512 grass_medium_02_alpha_2k.jpg
 model vegetation/tree_stump_01 tree_stump_01 m_stump 512
-# Pine trunk bark (the island tree's branch bark tiles).
-model vegetation/island_tree_02 island_tree_02 bark 512 "" island_tree_02_branches
+# Conifer trunk bark: Poly Haven's `pine_bark` scan (2 m per repeat; ARM = AO, rough, metal).
+B=$SRC/textures/bark/pine_bark
+mkdir -p "$OUT/bark"
+magick "$B/pine_bark_diff_2k.jpg" -resize 1024x1024 -quality 95 "$OUT/bark/color.jpg"
+magick "$B/pine_bark_nor_gl_2k.jpg" -resize 1024x1024 -quality 95 "$OUT/bark/normal.jpg"
+magick "$B/pine_bark_arm_2k.jpg" -resize 1024x1024 -channel G -separate -quality 95 "$OUT/bark/rough.jpg"
+magick "$B/pine_bark_arm_2k.jpg" -resize 1024x1024 -channel R -separate -quality 95 "$OUT/bark/ao.jpg"
 echo "prepared: $(ls "$OUT" | tr '\n' ' ')"

@@ -1,10 +1,12 @@
-//! Trees, built in code from foliage cards (textures rendered from the Poly Haven saplings by
-//! `tools/art/render_cards.py`) and fed by the dressing graph's `trunks` points (the same points
-//! the car collides with).
+//! Trees, built in code from foliage cards and fed by the dressing graph's `trunks` points (the
+//! same points the car collides with). Conifer cards are rendered from Poly Haven's full-size
+//! scanned trees (`pine_tree_01`, `fir_tree_01`) by `tools/art/render_tree_cards.py`: the whole
+//! tree from the side plus three real branches from above ([`Atlas`]). The broadleaf card comes
+//! from `island_tree_02` (`tools/art/render_cards.py`). Trunks use the `pine_bark` scan.
 //!
-//! - **Species**: Scots-pine-like (bare trunk, crown on top), spruce (cone to the ground),
-//!   snowy spruce, birch (white trunk, leafy crown) and an olive-like scrub tree. Each has
-//!   three seeded variants.
+//! - **Species**: Scots pine (long bare trunk, crown on top), spruce/fir (bare lower trunk,
+//!   dense crown), snowy spruce, birch (white trunk, leafy crown) and an olive-like scrub tree.
+//!   Each has three seeded variants.
 //! - **Near** (within [`NEAR_END`] m of the camera): a trunk (bark) and a crown (three crossed
 //!   core cards for the silhouette plus drooping branch cards for depth), two entities per tree
 //!   sharing meshes and materials (Bevy batches them), casting shadows. Spawned per PCG cell
@@ -136,9 +138,47 @@ struct Frame {
     v1: f32,
 }
 
-const FRAME_FIR: Frame = Frame { u0: 0.1755, v0: 0.0098, u1: 0.8245, v1: 0.9902 };
-const FRAME_PINE: Frame = Frame { u0: 0.2028, v0: 0.0098, u1: 0.7972, v1: 0.9902 };
 const FRAME_BROAD: Frame = Frame { u0: 0.0098, v0: 0.1031, u1: 0.9902, v1: 0.8969 };
+
+/// A conifer card atlas (`tools/art/render_tree_cards.py`, from Poly Haven's full-size scans):
+/// the whole tree from the side, three real branches from above (trunk end at the bottom).
+struct Atlas {
+    set: &'static str,
+    tree: Frame,
+    /// Width / height of the tree picture.
+    aspect: f32,
+    /// Where the needles start, as a share of the height.
+    crown: f32,
+    branches: [Frame; 3],
+    /// Width / length of each branch picture.
+    branch_aspect: [f32; 3],
+}
+
+macro_rules! fr {
+    ($u0:expr, $v0:expr, $u1:expr, $v1:expr) => {
+        Frame { u0: $u0, v0: $v0, u1: $u1, v1: $v1 }
+    };
+}
+
+/// `fir_tree_01` (variant a): spruce and snowy spruce.
+const ATLAS_FIR: Atlas = Atlas {
+    set: "card_fir",
+    tree: fr!(0.0034, 0.0233, 0.6841, 1.0),
+    aspect: 0.3485,
+    crown: 0.3619,
+    branches: [fr!(0.6906, 0.0845, 0.9969, 0.333), fr!(0.6906, 0.4756, 0.9969, 0.666), fr!(0.6906, 0.8066, 0.9969, 0.999)],
+    branch_aspect: [0.6167, 0.8044, 0.7965],
+};
+
+/// `pine_tree_01` (variant a): Scots pine.
+const ATLAS_PINE: Atlas = Atlas {
+    set: "card_pine",
+    tree: fr!(0.0034, 0.1529, 0.6841, 1.0),
+    aspect: 0.4018,
+    crown: 0.3557,
+    branches: [fr!(0.6906, 0.1623, 0.9969, 0.333), fr!(0.6906, 0.5294, 0.9969, 0.666), fr!(0.6906, 0.8238, 0.9969, 0.999)],
+    branch_aspect: [0.8973, 1.1209, 0.8741],
+};
 
 impl Frame {
     /// The top part of the picture only (`keep` of its height), e.g. a crown without its trunk.
@@ -224,55 +264,65 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
     let yaw0 = rng.range(0.0, PI);
     match sp {
         Species::Spruce | Species::SnowSpruce => {
-            let h = rng.range(14.0, 19.0);
-            let w = h * rng.range(0.36, 0.44);
-            let base = rng.range(0.3, 1.2);
-            trunk(&mut tr, h * 0.92, 0.24, 0.03, 7, 1.6, Vec2::ZERO);
+            // Tall fir: bare lower trunk with a few dead twigs, dense crown above.
+            let a = &ATLAS_FIR;
+            let h = rng.range(15.0, 20.0);
+            let w = h * a.aspect * rng.range(0.9, 1.1);
+            let crown0 = h * a.crown;
+            trunk(&mut tr, h * 0.9, 0.25, 0.03, 7, 2.0, Vec2::ZERO);
             for k in 0..3 {
-                let a = yaw0 + k as f32 * PI / 3.0;
-                core_card(&mut crown, a, base, h, w, FRAME_FIR);
-                core_card(&mut far, a, base, h, w, FRAME_FIR);
+                let yaw = yaw0 + k as f32 * PI / 3.0;
+                core_card(&mut crown, yaw, -0.05, h, w, a.tree);
+                core_card(&mut far, yaw, -0.05, h, w, a.tree);
             }
-            // Whorls: cone envelope, longer drooping branches low down.
-            let mut y = base + 0.6;
-            while y < h - 1.2 {
-                let t = (y - base) / (h - base);
-                let len = (w * 0.55) * (1.0 - t).powf(0.9) + 0.4;
-                let n = if t < 0.6 { 5 } else { 4 };
+            // Whorls of real branches: longest low down, drooping more there.
+            let mut y = crown0 + 0.4;
+            let mut i = rng.range(0.0, 3.0) as usize;
+            while y < h - 1.5 {
+                let t = (y - crown0) / (h - crown0);
+                let len = w * 0.5 * (1.0 - t).powf(0.8) + 0.5;
+                let n = if t < 0.5 { 4 } else { 3 };
                 let a0 = rng.range(0.0, TAU);
                 for b in 0..n {
-                    let a = a0 + b as f32 * TAU / n as f32 + rng.range(-0.3, 0.3);
-                    branch_card(&mut crown, y, a, len, len * 0.75, rng.range(0.18, 0.42) + 0.25 * (1.0 - t), rng.range(-0.5, 0.5), FRAME_FIR);
+                    let yaw = a0 + b as f32 * TAU / n as f32 + rng.range(-0.3, 0.3);
+                    let k = i % 3;
+                    i += 1;
+                    branch_card(&mut crown, y, yaw, len, len * a.branch_aspect[k], rng.range(0.1, 0.3) + 0.25 * (1.0 - t), rng.range(-0.4, 0.4), a.branches[k]);
                 }
-                y += rng.range(0.75, 1.1);
+                y += rng.range(0.9, 1.3);
             }
         }
         Species::Pine => {
-            let h = rng.range(15.0, 21.0);
-            let crown0 = h * rng.range(0.5, 0.62);
-            let w = h * rng.range(0.3, 0.38);
-            let lean = Vec2::new(rng.range(-0.5, 0.5), rng.range(-0.5, 0.5));
-            trunk(&mut tr, h * 0.94, 0.26, 0.05, 7, 1.6, lean);
+            // Scots pine: long bare trunk, open crown of horizontal branches on top.
+            let a = &ATLAS_PINE;
+            let h = rng.range(16.0, 22.0);
+            let w = h * a.aspect * rng.range(0.85, 1.1);
+            let crown0 = h * a.crown;
+            let lean = Vec2::new(rng.range(-0.4, 0.4), rng.range(-0.4, 0.4));
+            trunk(&mut tr, h * 0.92, 0.27, 0.05, 7, 2.0, lean);
             let leanv = Vec3::new(lean.x, 0.0, lean.y) * 0.7;
             for k in 0..3 {
-                let a = yaw0 + k as f32 * PI / 3.0;
+                let yaw = yaw0 + k as f32 * PI / 3.0;
                 let mut c = Geo::default();
-                core_card(&mut c, a, crown0 - 1.0, h, w, FRAME_PINE);
-                crown.append(&c, 0.0, Vec3::ONE, leanv);
-                far.append(&c, 0.0, Vec3::ONE, leanv);
+                core_card(&mut c, yaw, -0.05, h, w, a.tree);
+                crown.append(&c, 0.0, Vec3::ONE, leanv * 0.5);
+                far.append(&c, 0.0, Vec3::ONE, leanv * 0.5);
             }
-            let mut y = crown0;
+            let mut y = crown0 + 1.0;
+            let mut i = rng.range(0.0, 3.0) as usize;
             while y < h - 1.5 {
                 let t = (y - crown0) / (h - crown0);
-                let len = w * 0.5 * (1.0 - t * 0.7) + 0.6;
+                let len = w * 0.45 * (1.0 - t * 0.6) + 0.5;
                 let a0 = rng.range(0.0, TAU);
                 let mut c = Geo::default();
                 for b in 0..3 {
-                    let a = a0 + b as f32 * TAU / 3.0 + rng.range(-0.4, 0.4);
-                    branch_card(&mut c, y, a, len, len * 0.9, rng.range(-0.15, 0.25), rng.range(-0.6, 0.6), FRAME_PINE);
+                    let yaw = a0 + b as f32 * TAU / 3.0 + rng.range(-0.4, 0.4);
+                    let k = i % 3;
+                    i += 1;
+                    branch_card(&mut c, y, yaw, len, len * a.branch_aspect[k], rng.range(-0.1, 0.2), rng.range(-0.5, 0.5), a.branches[k]);
                 }
                 crown.append(&c, 0.0, Vec3::ONE, leanv * (y / h).powi(2));
-                y += rng.range(1.2, 1.8);
+                y += rng.range(1.3, 1.9);
             }
         }
         Species::Birch => {
@@ -377,8 +427,13 @@ pub struct TreeStats {
 pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
     let wet = world.get_resource::<super::Wet>().is_some_and(|w| w.0);
     let mix = mix(s.def.biome);
+    // Poly Haven's `pine_bark` scan: as is for the pines, greyer for the spruces.
     let bark = pbr(world, "bark", |m| {
-        m.base_color = Color::srgb(0.78, 0.62, 0.52);
+        m.base_color = Color::srgb(1.0, 0.96, 0.92);
+        m.perceptual_roughness = if wet { 0.6 } else { 0.95 };
+    });
+    let spruce_bark = pbr(world, "bark", |m| {
+        m.base_color = Color::srgb(0.74, 0.72, 0.7);
         m.perceptual_roughness = if wet { 0.6 } else { 0.95 };
     });
     let birch_bark = {
@@ -389,9 +444,9 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
     let mut species = HashMap::new();
     for &(sp, _) in mix {
         let (set, tint) = match sp {
-            Species::Pine => ("card_pine_dense", Color::srgb(0.72, 0.8, 0.7)),
-            Species::Spruce => ("card_fir_dense", Color::srgb(0.55, 0.66, 0.58)),
-            Species::SnowSpruce => ("card_fir_dense_snow", Color::srgb(0.85, 0.88, 0.9)),
+            Species::Pine => (ATLAS_PINE.set, Color::srgb(0.9, 0.92, 0.85)),
+            Species::Spruce => ("card_fir", Color::srgb(0.7, 0.78, 0.68)),
+            Species::SnowSpruce => ("card_fir_snow", Color::srgb(0.9, 0.92, 0.94)),
             Species::Birch => ("card_broadleaf", Color::srgb(0.95, 1.0, 0.78)),
             Species::Olive => ("card_broadleaf", Color::srgb(0.85, 0.88, 0.72)),
         };
@@ -409,12 +464,28 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
         let trunk_mat = match sp {
             Species::Olive => None,
             Species::Birch => Some(birch_bark.clone()),
-            _ => Some(bark.clone()),
+            Species::Spruce | Species::SnowSpruce => Some(spruce_bark.clone()),
+            Species::Pine => Some(bark.clone()),
         };
         species.insert(sp, SpeciesKit { variants, trunk_mat, crown_mat, far_mat });
     }
     world.insert_resource(TreeKit { species, mix, view });
     world.insert_resource(TreeField::default());
+}
+
+/// A tree for `seed` drawn from the stage's mix, as near meshes with their materials:
+/// `[(trunk), crown]` (no trunk for species without one). For `crate::props` saplings, which
+/// share the trees' meshes.
+pub fn near_parts(kit: &TreeKit, seed: u64) -> Vec<(Handle<Mesh>, Handle<StandardMaterial>)> {
+    let (sp, v) = pick(kit.mix, seed);
+    let sk = &kit.species[&sp];
+    let kind = &sk.variants[v];
+    let mut out = Vec::with_capacity(2);
+    if let (Some(m), Some(mat)) = (&kind.trunk, &sk.trunk_mat) {
+        out.push((m.clone(), mat.clone()));
+    }
+    out.push((kind.crown.clone(), sk.crown_mat.clone()));
+    out
 }
 
 /// Near trees are out around the camera (true when the stage has no trees).
@@ -600,6 +671,29 @@ mod tests {
                     assert!(t.tris() < 120);
                 }
                 assert!(g.crown.uv.iter().all(|u| (0.0..=1.0).contains(&u.x) && (0.0..=1.0).contains(&u.y)));
+            }
+        }
+    }
+
+    /// The atlas constants match the renderer's `frame.txt` (re-render → update the constants).
+    #[test]
+    fn atlas_constants_match_the_rendered_frames() {
+        for a in [&ATLAS_FIR, &ATLAS_PINE] {
+            let path = format!("{}/assets/textures/{}/frame.txt", env!("CARGO_MANIFEST_DIR"), a.set);
+            let txt = std::fs::read_to_string(&path).expect(&path);
+            let row = |key: &str| -> Vec<f32> {
+                let line = txt.lines().find(|l| l.split_whitespace().next() == Some(key)).unwrap_or_else(|| panic!("{path}: no {key}"));
+                line.split_whitespace().skip(1).map(|v| v.parse().unwrap()).collect()
+            };
+            let close = |f: Frame, r: &[f32]| (f.u0 - r[0]).abs() < 2e-4 && (f.v0 - r[1]).abs() < 2e-4 && (f.u1 - r[2]).abs() < 2e-4 && (f.v1 - r[3]).abs() < 2e-4;
+            let t = row("tree");
+            assert!(close(a.tree, &t), "{}: tree frame {t:?}", a.set);
+            assert!((a.aspect - t[4] / t[5]).abs() < 2e-3, "{}: aspect {}", a.set, t[4] / t[5]);
+            assert!((a.crown - row("crown")[0]).abs() < 2e-3, "{}: crown", a.set);
+            for k in 0..3 {
+                let b = row(&format!("branch{k}"));
+                assert!(close(a.branches[k], &b), "{}: branch{k} frame {b:?}", a.set);
+                assert!((a.branch_aspect[k] - b[4] / b[5]).abs() < 2e-3, "{}: branch{k} aspect {}", a.set, b[4] / b[5]);
             }
         }
     }

@@ -2,7 +2,7 @@
 
 Every file under `assets_src/` is listed here. Only CC0 and CC BY licences are used. No asset comes from or imitates a commercial game. Downloaded 2026-10-28. Poly Haven files come from the public API (`https://api.polyhaven.com/files/<id>`, file URLs under `https://dl.polyhaven.org/file/ph-assets/...`); ambientCG files from `https://ambientcg.com/get?file=<id>_2K-JPG.zip` (only the images were kept: the NormalDX map and the bundled .blend were deleted, the .png is ambientCG's preview).
 
-**Total on disk: 694.6 MB** across 54 assets.
+**Total on disk: 694.6 MB** across 54 assets (2026-10-28), plus 1,449 MB across 3 assets added 2026-11-01 (`fir_tree_01`, `pine_tree_01`, `pine_bark`).
 
 ## Credits that must appear in the game (CC BY)
 
@@ -289,6 +289,21 @@ Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; 
 - **Credit line:** Optional (CC0): "Tarred Gravel" by Dimitrios Savva, Poly Haven
 
 
+## textures/bark
+
+### Pine Bark (`pine_bark`), added 2026-11-01
+
+- **Use:** conifer trunks (`assets/textures/bark`, `tools/art/prep_textures.sh`)
+- **Path:** `assets_src/textures/bark/pine_bark/`
+- **Source page:** https://polyhaven.com/a/pine_bark
+- **Download:** https://api.polyhaven.com/files/pine_bark → `Diffuse`, `nor_gl`, `arm` at 2k jpg; md5-checked
+- **Author:** Dimitrios Savva / Poly Haven
+- **Licence:** CC0 1.0 Universal (Public Domain Dedication)
+- **Size:** 9.6 MB
+- **Resolution / polys:** 2048x2048, 2 m x 2 m
+- **Credit line:** Optional (CC0): "Pine Bark" by Dimitrios Savva, Poly Haven
+
+
 ## textures/decals
 
 ### Ground 017 (`Ground017`)
@@ -449,6 +464,30 @@ Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; 
 
 
 ## models/vegetation
+
+### Fir Tree 01 (`fir_tree_01`), added 2026-11-01
+
+- **Use:** spruce / fir card atlas (variant `fir_tree_01_a_LOD0`, rendered by `tools/art/render_tree_cards.py` into `assets/textures/card_fir` and `card_fir_snow`)
+- **Path:** `assets_src/models/vegetation/fir_tree_01/`
+- **Source page:** https://polyhaven.com/a/fir_tree_01
+- **Download:** https://dl.polyhaven.org/file/ph-assets/Models/gltf/2k/fir_tree_01/fir_tree_01_2k.gltf (+ .bin and textures listed in https://api.polyhaven.com/files/fir_tree_01 under gltf.2k, + `twig_alpha` 2k jpg); md5-checked
+- **Author:** Rob Tuytel, Rico Cilliers / Poly Haven
+- **Licence:** CC0 1.0 Universal (Public Domain Dedication)
+- **Size:** 495 MB
+- **Resolution / polys:** 6,982,937 triangles in the glTF, 3 trees (a: 18.9 m, 4.18M tris; b: 14.1 m; c: 14.5 m) · 2K JPG textures (diff/nor_gl/arm) · glTF 2.0
+- **Credit line:** Optional (CC0): "Fir Tree 01" by Rob Tuytel, Rico Cilliers, Poly Haven
+
+### Pine Tree 01 (`pine_tree_01`), added 2026-11-01
+
+- **Use:** Scots pine card atlas (variant `pine_tree_01_a_LOD0`, rendered by `tools/art/render_tree_cards.py` into `assets/textures/card_pine`)
+- **Path:** `assets_src/models/vegetation/pine_tree_01/`
+- **Source page:** https://polyhaven.com/a/pine_tree_01
+- **Download:** https://dl.polyhaven.org/file/ph-assets/Models/gltf/2k/pine_tree_01/pine_tree_01_2k.gltf (+ .bin and textures listed in https://api.polyhaven.com/files/pine_tree_01 under gltf.2k, + `twig_alpha` 2k jpg); md5-checked
+- **Author:** Rob Tuytel, Rico Cilliers / Poly Haven
+- **Licence:** CC0 1.0 Universal (Public Domain Dedication)
+- **Size:** 944 MB
+- **Resolution / polys:** 17,427,094 triangles in the glTF, 3 trees (a: 20.4 m) · 2K JPG textures (diff/nor_gl/arm) · glTF 2.0
+- **Credit line:** Optional (CC0): "Pine Tree 01" by Rob Tuytel, Rico Cilliers, Poly Haven
 
 ### Dead Tree Trunk (`dead_tree_trunk`)
 
@@ -754,7 +793,7 @@ Same authors and licence as the models above. ~3.3 MB in total.
 
 ### What the game ships (assets/, built by tools/art/)
 
-- `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures and foliage cards rendered in Blender from `fir_sapling`, `pine_sapling_small` and `island_tree_02` (`tools/art/prep_textures.sh`, `tools/art/render_cards.py`).
+- `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures, the `pine_bark` trunk texture, conifer card atlases rendered in Blender from `fir_tree_01` and `pine_tree_01` (`tools/art/render_tree_cards.py`) and the broadleaf card from `island_tree_02` (`tools/art/render_cards.py`; `tools/art/prep_textures.sh`).
 - `assets/models/*.pnm`: decimated rocks, shrubs, ferns, grass and a stump (`tools/art/build_meshes.py`).
 - `assets/models/rallycar.glb`: original procedural rally hatchback with livery and cockpit (`tools/art/build_rallycar.py`); no third-party content.
 - Credits: `assets/credits.txt`.
@@ -778,7 +817,7 @@ When downloading from Sketchfab, pick "glTF" (or "Autoconverted format (glTF)"),
 
 ### Other gaps
 - **Birch trees:** no CC0/CC BY realistic birch was found as a direct download. `island_tree_02` is the deciduous stand-in.
-- **Large conifers:** Poly Haven's full-size `fir_tree_01` (7.9M tris, 510 MB at 2K) and `pine_tree_01` (17.4M tris, 982 MB) were skipped for size. They are only usable if decimated in Blender. The saplings that were downloaded are also heavy (see their triangle counts; each file holds several variants) and need decimation/LODs or impostors. `textures/foliage/PineNeedles001` (needle atlas with opacity) is there for card-based LOD trees.
+- **Large conifers:** solved 2026-11-01: `fir_tree_01` and `pine_tree_01` (above) are downloaded and rendered into card atlases (whole tree + three branch slices) by `tools/art/render_tree_cards.py`; the game never loads their geometry. The saplings (`fir_sapling`, `pine_sapling_small`) are no longer used for cards.
 - **Road sign post:** no CC0/CC BY generic sign model was found (OpenGameArt and RenderHub results were paid or off-topic). Build one procedurally: a pole (a `modular_electricity_poles` part or a cylinder) plus a quad with an original sign texture.
 - **Wooden fence / hay bales:** only the low-poly OpenGameArt models above. Simple procedural boxes/cylinders with `weathered_brown_planks` and `reed_roof_03` are likely to look better.
 - **Barrier:** only concrete barriers and a tyre (`old_tyre`, usable for tyre-stack barriers). There are no tape or plastic rally barriers.

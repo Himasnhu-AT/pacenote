@@ -1,4 +1,5 @@
-# Renders foliage card textures from the Poly Haven vegetation models (Blender, background):
+# Renders foliage card textures from the Poly Haven vegetation models (Blender, background).
+# Now only the broadleaf card; the conifer atlases come from tools/art/render_tree_cards.py.
 #   blender -b --factory-startup -P tools/art/render_cards.py -- <assets_src> <out dir>
 # For each card: an orthographic side view of one model, unlit albedo with alpha (color.png)
 # and the camera-space normal (normal.png: tangent space of a card facing the camera, OpenGL
@@ -14,13 +15,9 @@ argv = sys.argv[sys.argv.index("--") + 1:]
 SRC, OUT = argv[0], argv[1]
 VEG = os.path.join(SRC, "models", "vegetation")
 
-FIR = {"fir_sapling_twigs": "fir_sapling_twigs_alpha_2k.jpg"}
-PINE = {"pine_sapling_small_twig": "pine_sapling_small_twig_alpha_2k.jpg"}
 # name, gltf, object, alpha maps (material name -> alpha image), resolution, copies (rotated
 # about the trunk and composited: a denser silhouette), snow variant (`<name>_snow`)
 CARDS = [
-    ("card_fir_dense", "fir_sapling", "fir_sapling_a", FIR, 1024, 4, True),
-    ("card_pine_dense", "pine_sapling_small", "pine_sapling_small_a", PINE, 1024, 4, False),
     ("card_broadleaf", "island_tree_02", "island_tree_02_LOD0", {"island_tree_02_leaves": "island_tree_02_leaves_alpha_2k.jpg"}, 1024, 1, False),
 ]
 
