@@ -166,8 +166,8 @@ const ATLAS_FIR: Atlas = Atlas {
     tree: fr!(0.0034, 0.0233, 0.6841, 1.0),
     aspect: 0.3485,
     crown: 0.3619,
-    branches: [fr!(0.6906, 0.0845, 0.9969, 0.333), fr!(0.6906, 0.4756, 0.9969, 0.666), fr!(0.6906, 0.8066, 0.9969, 0.999)],
-    branch_aspect: [0.6167, 0.8044, 0.7965],
+    branches: [fr!(0.6906, 0.1125, 0.9969, 0.333), fr!(0.6906, 0.4904, 0.9969, 0.666), fr!(0.6906, 0.8281, 0.9969, 0.999)],
+    branch_aspect: [0.6948, 0.8721, 0.8965],
 };
 
 /// `pine_tree_01` (variant a): Scots pine.
@@ -176,8 +176,19 @@ const ATLAS_PINE: Atlas = Atlas {
     tree: fr!(0.0034, 0.1529, 0.6841, 1.0),
     aspect: 0.4018,
     crown: 0.3557,
-    branches: [fr!(0.6906, 0.1623, 0.9969, 0.333), fr!(0.6906, 0.5294, 0.9969, 0.666), fr!(0.6906, 0.8238, 0.9969, 0.999)],
-    branch_aspect: [0.8973, 1.1209, 0.8741],
+    branches: [fr!(0.6906, 0.1709, 0.9969, 0.333), fr!(0.6906, 0.5345, 0.9969, 0.666), fr!(0.6906, 0.8329, 0.9969, 0.999)],
+    branch_aspect: [0.9453, 1.1647, 0.9222],
+};
+
+/// `tree_small_02`: birch crowns, rendered without the scan's trunk (ours is white, in code);
+/// the three small pictures are leaf clumps seen from the side.
+const ATLAS_BIRCH: Atlas = Atlas {
+    set: "card_birch",
+    tree: fr!(0.0062, 0.0099, 0.6813, 1.0),
+    aspect: 0.6818,
+    crown: 0.4442,
+    branches: [fr!(0.6906, 0.0133, 0.9969, 0.3197), fr!(0.6906, 0.3463, 0.9969, 0.6527), fr!(0.6906, 0.6793, 0.9969, 0.9857)],
+    branch_aspect: [1.0000, 1.0000, 1.0000],
 };
 
 impl Frame {
@@ -272,7 +283,8 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
             trunk(&mut tr, h * 0.9, 0.25, 0.03, 7, 2.0, Vec2::ZERO);
             for k in 0..3 {
                 let yaw = yaw0 + k as f32 * PI / 3.0;
-                core_card(&mut crown, yaw, -0.05, h, w, a.tree);
+                // Near: the crown only (the 3D trunk stands below; less alpha-tested overdraw).
+                core_card(&mut crown, yaw, h * a.crown * 0.8, h, w, a.tree.top(1.0 - a.crown * 0.8));
                 core_card(&mut far, yaw, -0.05, h, w, a.tree);
             }
             // Whorls of real branches: longest low down, drooping more there.
@@ -303,10 +315,12 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
             let leanv = Vec3::new(lean.x, 0.0, lean.y) * 0.7;
             for k in 0..3 {
                 let yaw = yaw0 + k as f32 * PI / 3.0;
-                let mut c = Geo::default();
-                core_card(&mut c, yaw, -0.05, h, w, a.tree);
+                let (mut c, mut f) = (Geo::default(), Geo::default());
+                // Near: the crown only (the 3D trunk stands below); far: the whole tree.
+                core_card(&mut c, yaw, h * a.crown * 0.8, h, w, a.tree.top(1.0 - a.crown * 0.8));
+                core_card(&mut f, yaw, -0.05, h, w, a.tree);
                 crown.append(&c, 0.0, Vec3::ONE, leanv * 0.5);
-                far.append(&c, 0.0, Vec3::ONE, leanv * 0.5);
+                far.append(&f, 0.0, Vec3::ONE, leanv * 0.5);
             }
             let mut y = crown0 + 1.0;
             let mut i = rng.range(0.0, 3.0) as usize;
@@ -326,29 +340,33 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
             }
         }
         Species::Birch => {
+            // Slender crown from a real broadleaf scan over a white trunk; leaf clumps for volume.
+            let a = &ATLAS_BIRCH;
             let h = rng.range(11.0, 15.0);
-            let crown0 = h * rng.range(0.32, 0.42);
-            let w = h * rng.range(0.42, 0.52);
+            let crown0 = h * a.crown;
+            // The scan is a wide small tree: narrowed to a birch's proportions.
+            let w = h * a.aspect * rng.range(0.66, 0.78);
             let lean = Vec2::new(rng.range(-0.4, 0.4), rng.range(-0.4, 0.4));
             trunk(&mut tr, h * 0.85, 0.16, 0.04, 6, 2.2, lean);
             let leanv = Vec3::new(lean.x, 0.0, lean.y) * 0.6;
-            let f = FRAME_BROAD.top(0.7);
+            // The picture's lower part is empty (no trunk): start the cards a little below the
+            // crown so the lowest branches meet our trunk.
+            let f = a.tree.top(1.0 - a.crown * 0.6);
             for k in 0..3 {
-                let a = yaw0 + k as f32 * PI / 3.0;
+                let yaw = yaw0 + k as f32 * PI / 3.0;
                 let mut c = Geo::default();
-                core_card(&mut c, a, crown0, h, w, f);
+                core_card(&mut c, yaw, h * a.crown * 0.6, h, w, f);
                 crown.append(&c, 0.0, Vec3::ONE, leanv);
                 far.append(&c, 0.0, Vec3::ONE, leanv);
             }
-            // Leaf clusters around the crown for volume.
-            for _ in 0..7 {
+            for k in 0..7 {
                 let y = rng.range(crown0 + 1.0, h - 1.5);
-                let a = rng.range(0.0, TAU);
+                let yaw = rng.range(0.0, TAU);
                 let r = w * rng.range(0.15, 0.3);
+                let sz = w * rng.range(0.4, 0.55);
                 let mut c = Geo::default();
-                let s = w * rng.range(0.35, 0.5);
-                core_card(&mut c, a + PI / 2.0, -s * 0.4, s * 0.6, s * 1.2, f);
-                crown.append(&c, 0.0, Vec3::ONE, Vec3::new(a.sin() * r, y, a.cos() * r) + leanv);
+                core_card(&mut c, yaw + PI / 2.0, -sz * 0.5, sz * 0.5, sz * a.branch_aspect[k % 3], a.branches[k % 3]);
+                crown.append(&c, 0.0, Vec3::ONE, Vec3::new(yaw.sin() * r, y, yaw.cos() * r) + leanv);
             }
         }
         Species::Olive => {
@@ -447,7 +465,7 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
             Species::Pine => (ATLAS_PINE.set, Color::srgb(0.9, 0.92, 0.85)),
             Species::Spruce => ("card_fir", Color::srgb(0.7, 0.78, 0.68)),
             Species::SnowSpruce => ("card_fir_snow", Color::srgb(0.9, 0.92, 0.94)),
-            Species::Birch => ("card_broadleaf", Color::srgb(0.95, 1.0, 0.78)),
+            Species::Birch => (ATLAS_BIRCH.set, Color::srgb(0.95, 1.0, 0.88)),
             Species::Olive => ("card_broadleaf", Color::srgb(0.85, 0.88, 0.72)),
         };
         let crown_mat = pbr(world, set, |m| foliage(m, tint, wet));
@@ -678,7 +696,7 @@ mod tests {
     /// The atlas constants match the renderer's `frame.txt` (re-render → update the constants).
     #[test]
     fn atlas_constants_match_the_rendered_frames() {
-        for a in [&ATLAS_FIR, &ATLAS_PINE] {
+        for a in [&ATLAS_FIR, &ATLAS_PINE, &ATLAS_BIRCH] {
             let path = format!("{}/assets/textures/{}/frame.txt", env!("CARGO_MANIFEST_DIR"), a.set);
             let txt = std::fs::read_to_string(&path).expect(&path);
             let row = |key: &str| -> Vec<f32> {

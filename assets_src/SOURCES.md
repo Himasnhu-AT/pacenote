@@ -2,7 +2,7 @@
 
 Every file under `assets_src/` is listed here. Only CC0 and CC BY licences are used. No asset comes from or imitates a commercial game. Downloaded 2026-10-28. Poly Haven files come from the public API (`https://api.polyhaven.com/files/<id>`, file URLs under `https://dl.polyhaven.org/file/ph-assets/...`); ambientCG files from `https://ambientcg.com/get?file=<id>_2K-JPG.zip` (only the images were kept: the NormalDX map and the bundled .blend were deleted, the .png is ambientCG's preview).
 
-**Total on disk: 694.6 MB** across 54 assets (2026-10-28), plus 1,449 MB across 3 assets added 2026-11-01 (`fir_tree_01`, `pine_tree_01`, `pine_bark`).
+**Total on disk: 694.6 MB** across 54 assets (2026-10-28), plus 1,566 MB across 4 assets added 2026-11-01 (`fir_tree_01`, `pine_tree_01`, `tree_small_02`, `pine_bark`).
 
 ## Credits that must appear in the game (CC BY)
 
@@ -477,6 +477,18 @@ Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; 
 - **Resolution / polys:** 6,982,937 triangles in the glTF, 3 trees (a: 18.9 m, 4.18M tris; b: 14.1 m; c: 14.5 m) · 2K JPG textures (diff/nor_gl/arm) · glTF 2.0
 - **Credit line:** Optional (CC0): "Fir Tree 01" by Rob Tuytel, Rico Cilliers, Poly Haven
 
+### Tree Small 02 (`tree_small_02`), added 2026-11-01
+
+- **Use:** birch crown card atlas (rendered without its trunk by `tools/art/render_tree_cards.py` into `assets/textures/card_birch`; the game draws a white birch trunk)
+- **Path:** `assets_src/models/vegetation/tree_small_02/`
+- **Source page:** https://polyhaven.com/a/tree_small_02
+- **Download:** https://dl.polyhaven.org/file/ph-assets/Models/gltf/2k/tree_small_02/tree_small_02_2k.gltf (+ .bin and textures listed in https://api.polyhaven.com/files/tree_small_02 under gltf.2k, + `leaves_alpha` 2k jpg); md5-checked
+- **Author:** Rico Cilliers / Poly Haven
+- **Licence:** CC0 1.0 Universal (Public Domain Dedication)
+- **Size:** 117 MB
+- **Resolution / polys:** 2,062,487 triangles in the glTF, one 4.6 m tree · 2K JPG textures (diff/nor_gl/arm) · glTF 2.0
+- **Credit line:** Optional (CC0): "Tree Small 02" by Rico Cilliers, Poly Haven
+
 ### Pine Tree 01 (`pine_tree_01`), added 2026-11-01
 
 - **Use:** Scots pine card atlas (variant `pine_tree_01_a_LOD0`, rendered by `tools/art/render_tree_cards.py` into `assets/textures/card_pine`)
@@ -793,7 +805,7 @@ Same authors and licence as the models above. ~3.3 MB in total.
 
 ### What the game ships (assets/, built by tools/art/)
 
-- `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures, the `pine_bark` trunk texture, conifer card atlases rendered in Blender from `fir_tree_01` and `pine_tree_01` (`tools/art/render_tree_cards.py`) and the broadleaf card from `island_tree_02` (`tools/art/render_cards.py`; `tools/art/prep_textures.sh`).
+- `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures, the `pine_bark` trunk texture, tree card atlases rendered in Blender from `fir_tree_01`, `pine_tree_01` and `tree_small_02` (`tools/art/render_tree_cards.py`) and the scrub-tree card from `island_tree_02` (`tools/art/render_cards.py`; `tools/art/prep_textures.sh`).
 - `assets/models/*.pnm`: decimated rocks, shrubs, ferns, grass and a stump (`tools/art/build_meshes.py`).
 - `assets/models/rallycar.glb`: the Mercedes-AMG GT3 Evo (above, CC BY), converted and rigged by `tools/art/import_sketchfab.py --profile gt3`. (The original procedural hatchback, `tools/art/build_rallycar.py`, has no third-party content.)
 - Credits: `assets/credits.txt`.
@@ -816,7 +828,7 @@ Rejected because they are real branded cars: Lancia Delta HF Integrale, Ford Pum
 When downloading from Sketchfab, pick "glTF" (or "Autoconverted format (glTF)"), and record the credit line Sketchfab shows ("<title> by <author> is licensed under CC BY 4.0").
 
 ### Other gaps
-- **Birch trees:** no CC0/CC BY realistic birch was found as a direct download. `island_tree_02` is the deciduous stand-in.
+- **Birch trees:** no CC0/CC BY realistic birch was found as a direct download. Since 2026-11-01 the birch crowns come from `tree_small_02` (slender broadleaf, rendered without its trunk) over a white trunk made in code; `island_tree_02` remains the olive-like scrub tree.
 - **Large conifers:** solved 2026-11-01: `fir_tree_01` and `pine_tree_01` (above) are downloaded and rendered into card atlases (whole tree + three branch slices) by `tools/art/render_tree_cards.py`; the game never loads their geometry. The saplings (`fir_sapling`, `pine_sapling_small`) are no longer used for cards.
 - **Road sign post:** no CC0/CC BY generic sign model was found (OpenGameArt and RenderHub results were paid or off-topic). Build one procedurally: a pole (a `modular_electricity_poles` part or a cylinder) plus a quad with an original sign texture.
 - **Wooden fence / hay bales:** only the low-poly OpenGameArt models above. Simple procedural boxes/cylinders with `weathered_brown_planks` and `reed_roof_03` are likely to look better.

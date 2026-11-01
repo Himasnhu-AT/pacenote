@@ -1,4 +1,4 @@
-# Renders tree card atlases from Poly Haven's full-size scanned conifers (Blender, background):
+# Renders tree card atlases from Poly Haven's full-size scanned trees (Blender, background):
 #   memgate -- blender -b --factory-startup -P tools/art/render_tree_cards.py -- <assets_src> <assets/textures> [set ...]
 #
 # Each atlas (1024 x 2048) holds, from the real model:
@@ -25,9 +25,14 @@ TREE_W = 704
 BR_W, BR_H = W - TREE_W, H // 3
 
 # set, model, object, alpha maps (material -> file), branch bands (fraction of the crown
-# height, sector angle in degrees), slice half-thickness (m) and half-angle (rad), snow variant
+# height, sector angle in degrees), slice half-thickness (m) and half-angle (rad), snow variant,
+# options: `height` of the atlas (2048 for tall trees, 1024 for wide ones), `clusters`: the
+# three small pictures are round leaf clumps seen from the side (broadleaf) instead of branch
+# slices from above (conifers); `no_trunk`: the whole-tree picture leaves the trunk out (the
+# game draws its own, e.g. a white birch trunk).
 TREES = [
     ("card_fir", "fir_tree_01", "fir_tree_01_a_LOD0", {"fir_tree_01_twig": "fir_tree_01_twig_alpha_2k.jpg"}, [(0.22, 20), (0.42, 140), (0.62, 260)], 0.55, 0.42, True),
+    ("card_birch", "tree_small_02", "tree_small_02_LOD0", {"tree_small_02_leaves": "tree_small_02_leaves_alpha_2k.jpg"}, [(0.5, 30), (0.68, 150), (0.84, 270)], 0.75, 0.6, False, {"height": 1024, "clusters": True, "no_trunk": True}),
     ("card_pine", "pine_tree_01", "pine_tree_01_a_LOD0", {"pine_tree_01_twig": "pine_tree_01_twig_alpha_2k.jpg"}, [(0.62, 30), (0.74, 150), (0.5, 270)], 0.8, 0.55, False),
 ]
 
@@ -258,7 +263,12 @@ def dilate(rgb, known, steps=32):
     return rgb
 
 
-def build(name, model, obj_name, alphas, bands, dz, da, snow):
+def build(name, model, obj_name, alphas, bands, dz, da, snow, opts=None):
+    global H, BR_H
+    opts = opts or {}
+    H = opts.get("height", 2048)
+    BR_H = H // 3
+    clusters = opts.get("clusters", False)
     s = reset()
     folder = os.path.join(VEG, model)
     bpy.ops.import_scene.gltf(filepath=os.path.join(folder, f"{model}_2k.gltf"))
@@ -280,27 +290,35 @@ def build(name, model, obj_name, alphas, bands, dz, da, snow):
     os.makedirs(tmp, exist_ok=True)
     regions = {}
 
-    # 1) Whole tree, side view (looking along +Y).
+    # Per-face data for the cuts below.
+    npoly = len(me.polygons)
+    cen = np.zeros(npoly * 3, np.float32)
+    me.polygons.foreach_get("center", cen)
+    cen = cen.reshape(-1, 3)
+    mi = np.zeros(npoly, np.int64)
+    me.polygons.foreach_get("material_index", mi)
+    trunk_mats = [k for k, m in enumerate(me.materials) if "trunk" in m.name]
+    not_trunk = ~np.isin(mi, trunk_mats)
+
+    # 1) Whole tree, side view (looking along +Y). The frame keeps the full model's extent so
+    # the picture's base is the ground either way.
     half = max(abs(lo[0] - ax), abs(hi[0] - ax))
     th = hi[2] - lo[2]
     scale = max(th, 2 * half * H / TREE_W) * 1.01
     camera(s, (ax, lo[1] - 20, lo[2] + scale / 2), (math.pi / 2, 0, 0), scale, TREE_W, H)
-    render_passes(s, [tree], alphas, folder, os.path.join(tmp, "tree"))
+    whole = tree
+    if opts.get("no_trunk"):
+        whole = submesh(tree, not_trunk, "crown_only")
+        tree.hide_render = True
+    render_passes(s, [whole], alphas, folder, os.path.join(tmp, "tree"))
+    whole.hide_render = True
     # uv of the tree's extent inside its region (x centred on the trunk, base at the bottom).
     px = scale / H  # metres per pixel
     regions["tree"] = (0.5 * TREE_W - half / px, H - th / px, 0.5 * TREE_W + half / px, H, 2 * half, th)
 
     # 2) Branch slices, from above, trunk end at the bottom of each cell.
-    npoly = len(me.polygons)
-    cen = np.zeros(npoly * 3, np.float32)
-    me.polygons.foreach_get("center", cen)
-    cen = cen.reshape(-1, 3)
     ang = np.arctan2(cen[:, 1] - ay, cen[:, 0] - ax)
     rad = np.hypot(cen[:, 0] - ax, cen[:, 1] - ay)
-    mi = np.zeros(npoly, np.int64)
-    me.polygons.foreach_get("material_index", mi)
-    trunk_mats = [k for k, m in enumerate(me.materials) if "trunk" in m.name]
-    not_trunk = ~np.isin(mi, trunk_mats)
     # Crown: where the twigs start.
     twig_mats = [k for k, m in enumerate(me.materials) if m.name in alphas]
     tz = cen[np.isin(mi, twig_mats), 2]
@@ -319,15 +337,38 @@ def build(name, model, obj_name, alphas, bands, dz, da, snow):
             best = max(best, (n, a))
         a = best[1]
         d = np.angle(np.exp(1j * (ang - a)))
+        dirv = np.array([math.cos(a), math.sin(a)])
+        if clusters:
+            # A round clump around the band's median radius on that side, seen from outside.
+            sel = band & (np.abs(d) < da)
+            rc = float(np.median(rad[sel])) if sel.any() else 0.5
+            p = np.array([ax + dirv[0] * rc, ay + dirv[1] * rc, zc])
+            keep = not_trunk & (np.linalg.norm(cen - p, axis=1) < dz)
+            o = submesh(tree, keep, f"branch{k}")
+            side = np.array([-dirv[1], dirv[0]])
+            rel = cen[keep] - p
+            # Face centres understate the extent of the leaf cards: pad.
+            uh = max(np.abs(rel[:, :2] @ side).max(), np.abs(rel[:, 2]).max(), 0.3) + 0.2
+            sc = 2 * uh * max(1.0, BR_H / BR_W) * 1.02
+            cam = camera(s, (p[0] + dirv[0] * 20, p[1] + dirv[1] * 20, p[2]), (math.pi / 2, 0, a + math.pi / 2), sc, BR_W, BR_H)
+            for oo in bpy.data.objects:
+                if oo.name.startswith("branch"):
+                    oo.hide_render = oo is not o
+            render_passes(s, [o], alphas, folder, os.path.join(tmp, f"branch{k}"))
+            bpx = sc / max(BR_H, BR_W)
+            cx, cy = TREE_W + BR_W / 2, k * BR_H + BR_H / 2
+            regions[f"branch{k}"] = (cx - uh / bpx, cy - uh / bpx, cx + uh / bpx, cy + uh / bpx, 2 * uh, 2 * uh)
+            bpy.data.objects.remove(cam, do_unlink=True)
+            branches.append(o)
+            continue
         keep = not_trunk & (np.abs(cen[:, 2] - zc) < dz) & (np.abs(d) < da) & (rad > 0.12)
         o = submesh(tree, keep, f"branch{k}")
-        dirv = np.array([math.cos(a), math.sin(a)])
         side = np.array([-dirv[1], dirv[0]])
         pts = cen[keep][:, :2] - [ax, ay]
         u = pts @ side
         v = pts @ dirv
-        rmax = max(v.max(), 0.5)
-        uh = max(np.abs(u).max(), 0.3)
+        rmax = max(v.max(), 0.5) + 0.2
+        uh = max(np.abs(u).max(), 0.3) + 0.2
         sc = max(rmax, 2 * uh * BR_H / BR_W) * 1.02
         # Camera above, looking down; image up = outwards (radial direction).
         cx, cy = ax + dirv[0] * sc / 2, ay + dirv[1] * sc / 2
@@ -363,7 +404,7 @@ def build(name, model, obj_name, alphas, bands, dz, da, snow):
     n = np.where(alpha[..., None] > 1e-3, (nor[..., :3] * 2 - 1) / na, 0)
     # Side view: world up is the camera's y; top views: the camera's z.
     up[:, :TREE_W] = n[:, :TREE_W, 1]
-    up[:, TREE_W:] = n[:, TREE_W:, 2]
+    up[:, TREE_W:] = n[:, TREE_W:, 1 if clusters else 2]
     n = 0.55 * n + 0.45 * np.array([0, 0, 1], np.float32)
     n /= np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-6)
     n = dilate(n * 0.5 + 0.5, known)
