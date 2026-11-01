@@ -352,21 +352,22 @@ fn on_toppled(mut commands: Commands, mut events: MessageReader<Toppled>, ids: Q
         };
         spawn_debris(&mut commands, chips, t.base + Vec3::Y * 0.4, t.velocity * 0.5, p.seed);
         vfx.play("snap_dust", at);
-        vfx.play("splinters", Transform::from_translation(t.base + Vec3::Y * 0.4));
+        vfx.play("splinters", at);
+        // (The engine's leaves settle at the height they're played at: play them on the ground.)
         if p.kind == PropKind::Sapling {
-            vfx.play("leaves", Transform::from_translation(t.base + Vec3::Y * props.give[id.0 as usize].1 * 0.7));
+            vfx.play("leaves", at);
         }
     }
 }
 
-/// The car ploughs into a shrub: leaves fly.
-fn on_brushed(mut events: MessageReader<Brushed>, plants: Query<&Sway>, mut vfx: Vfx) {
+/// The car ploughs into a shrub: leaves fly (from its base: they settle where they're played).
+fn on_brushed(mut events: MessageReader<Brushed>, plants: Query<&Transform, With<Sway>>, mut vfx: Vfx) {
     for b in events.read() {
         if b.speed < 3.0 {
             continue;
         }
-        let top = plants.get(b.plant).map_or(0.8, |s| s.height * 0.6);
-        vfx.play("leaves", Transform::from_translation(b.point + Vec3::Y * top * 0.5));
+        let base = plants.get(b.plant).map_or(b.point, |t| t.translation);
+        vfx.play("leaves", Transform::from_translation(base));
     }
 }
 
