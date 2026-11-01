@@ -122,6 +122,9 @@ PROFILES = {
         "cut": ";".join([
             r"-0.32,0.8,-1.2,0.6,-0.4,1.2@Net_Share",
             r"-0.32,0.8,-1.2,0.0,0.16,1.2@stitches|Interior_Stickers",
+            r"-0.2,0.1,-0.45,0.15,0.15,0.45@Interior_Stickers",
+            # The net's strap tags left floating over the console.
+            r"-0.07,0.07,-0.36,0.16,0.24,0.46@Interior_Seat",
             r"0.14,0.72,-0.05,0.62,-0.26,0.12@Interior_Details|Interior_Stickers",
             r"0.14,0.62,0.05,0.55,-0.17,0.25@Interior_Chassis$",
             r"0.14,0.62,0.05,0.55,0.12,0.30@Interior_Details",
@@ -143,8 +146,10 @@ PROFILES = {
         "driver-pedals": "0.33,-0.12",
         # Harness straps laid on the passenger seat (its middle, model x).
         "passenger-harness": "0.36",
-        # Co-driver's eye (the driver's mirrored) and tablet anchor, glTF model frame.
-        "codriver-eye": "0.36,0.595,0.69",
+        # Co-driver's eye and tablet anchor, glTF model frame: in the passenger seat, leaning
+        # in a little (13 cm ahead of the driver's eye, 1.5 cm higher) so the driver's seat
+        # wing doesn't hide the driver.
+        "codriver-eye": "0.34,0.61,0.56",
         "codriver-tablet": "0.33,0.06,0.37",
         # Cabin parts that get baked ambient occlusion (vertex colours).
         "ao-mat": r"Interior|Cockpit_Console|Seat|Net_Share|stitches|Pedals|Steering",
