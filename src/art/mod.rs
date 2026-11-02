@@ -111,7 +111,9 @@ mod dev {
     use crate::world::StageWorld;
 
     pub fn register(app: &mut App) {
-        app.add_control_command("art.stats", "Trees (near/far cells, entities, far triangles)", params(&[]), stats).add_control_command(
+        app.add_control_command("art.stats", "Trees (near/far cells, entities, far triangles)", params(&[]), stats)
+            .add_control_command("art.memory", "Mesh and image memory by entity name (CPU copies; render-only meshes counted, not sized)", params(&[]), memory)
+            .add_control_command(
             "art.place",
             "Put the car on the road `s` metres from the start (clock and progress follow), for views along the stage",
             params(&[("s", "number", "metres along the road"), ("lateral", "number", "metres left of the centre (default 0)")]),
@@ -122,6 +124,39 @@ mod dev {
     fn stats(world: &mut World, _: Value) -> Result<Value, String> {
         let t = world.get_resource::<super::trees::TreeField>().map(|f| f.stats).unwrap_or_default();
         Ok(json!({"trees": t.trees, "cells": t.cells, "near_cells": t.near_cells, "near_entities": t.near_entities, "far_triangles": t.far_triangles}))
+    }
+
+    /// Vertex and index bytes of a mesh still on the CPU (`None`: render-world only).
+    fn mesh_bytes(m: &Mesh) -> Option<usize> {
+        let v: usize = m.try_attributes().ok()?.map(|(_, a)| a.get_bytes().len()).sum();
+        Some(v + m.try_indices_option().ok().flatten().map_or(0, |i| i.len() * 4))
+    }
+
+    fn memory(world: &mut World, _: Value) -> Result<Value, String> {
+        use std::collections::{HashMap, HashSet};
+        let mut q = world.query::<(&Mesh3d, Option<&Name>)>();
+        let meshes = world.resource::<Assets<Mesh>>();
+        // name -> (entities, unique meshes, sized bytes, render-only meshes)
+        let mut by: HashMap<String, (usize, HashSet<AssetId<Mesh>>, usize, usize)> = HashMap::new();
+        for (m, name) in q.iter(world) {
+            let key = name.map_or("(unnamed)".to_string(), |n| n.as_str().to_string());
+            let e = by.entry(key).or_default();
+            e.0 += 1;
+            if e.1.insert(m.0.id()) {
+                match meshes.get(&m.0).and_then(mesh_bytes) {
+                    Some(b) => e.2 += b,
+                    None => e.3 += 1,
+                }
+            }
+        }
+        let mut rows: Vec<_> = by.into_iter().collect();
+        rows.sort_by(|a, b| (b.1.2, b.1.0).cmp(&(a.1.2, a.1.0)));
+        // Compact rows, biggest first: [name, entities, unique meshes, MB on the CPU, render-only meshes].
+        let rows: Vec<_> = rows.into_iter().take(14).map(|(k, (n, u, b, r))| json!([k, n, u.len(), b / 1_000_000, r])).collect();
+        let images = world.resource::<Assets<Image>>();
+        let img_mb: usize = images.iter().map(|(_, i)| i.data.as_ref().map_or(0, |d| d.len())).sum();
+        let all_mb: usize = meshes.iter().filter_map(|(_, m)| mesh_bytes(m)).sum();
+        Ok(json!({"mesh_assets": meshes.len(), "mesh_mb_cpu": all_mb / 1_000_000, "images": images.len(), "image_mb_cpu": img_mb / 1_000_000, "by_name": rows}))
     }
 
     fn place(world: &mut World, p: Value) -> Result<Value, String> {
