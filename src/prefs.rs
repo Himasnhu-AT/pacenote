@@ -48,9 +48,9 @@ pub struct Prefs {
     /// Driving assists (applied to the car before a run starts).
     pub traction_control: bool,
     pub abs: bool,
-    /// A wreck repairs the car and puts it back on the road (+10 s on a timed route) instead
-    /// of retiring the run.
-    pub repair_on_wreck: bool,
+    /// What hits do: 0 none, 1 cosmetic (parts come off, drives as new), 2 simulation
+    /// (`vehicle::DamageMode`).
+    pub damage: u32,
     /// The guide's view: 0 in the car (tablet), 1 the map screen.
     pub guide_view: u32,
 }
@@ -75,7 +75,7 @@ impl Default for Prefs {
             stick_deadzone: 0.05,
             traction_control: true,
             abs: true,
-            repair_on_wreck: true,
+            damage: 2,
             guide_view: 0,
         }
     }
@@ -93,6 +93,10 @@ impl Prefs {
     /// The assists picked.
     pub fn assists(&self) -> crate::meta::stages::Assists {
         crate::meta::stages::Assists { abs: self.abs, traction_control: self.traction_control }
+    }
+    /// The damage mode picked.
+    pub fn damage_mode(&self) -> crate::vehicle::DamageMode {
+        crate::vehicle::DamageMode::ALL[self.damage.min(2) as usize]
     }
     /// Speed for display: (value, unit).
     pub fn speed(&self, mps: f32) -> (f32, &'static str) {
@@ -113,7 +117,7 @@ impl Plugin for PrefsPlugin {
             .settings_panel("Co-driver", codriver_preview)
             .settings_panel("Voice chat", voice_panel)
             .add_systems(Startup, layout)
-            .add_systems(Update, (sync_codriver, sync_steering, sync_wreck, apply_assists, refresh_previews));
+            .add_systems(Update, (sync_codriver, sync_steering, sync_damage, apply_assists, refresh_previews));
         register(app);
     }
 }
@@ -193,14 +197,15 @@ fn register(app: &mut App) {
         .register_setting(toggle("hud_revs", "HUD", "Rev bar", "Engine revs, lighting up to the red line.", |w| b(p(w).hud_revs), |w, v| pm(w).hud_revs = v > 0.5))
         .register_setting(toggle("hud_clock", "HUD", "Stage clock", "Stage time and penalties, bottom left.", |w| b(p(w).hud_clock), |w, v| pm(w).hud_clock = v > 0.5))
         .register_setting(toggle("hud_progress", "HUD", "Stage progress", "Distance done and to go, under the clock.", |w| b(p(w).hud_progress), |w, v| pm(w).hud_progress = v > 0.5))
-        .register_setting(toggle(
-            "repair_on_wreck",
-            "Driving",
-            "Repair after a wreck",
-            "A wreck puts the car back on the road, repaired (+10 s in an event). Off: a wreck ends the run.",
-            |w| b(p(w).repair_on_wreck),
-            |w, v| pm(w).repair_on_wreck = v > 0.5,
-        ))
+        .register_setting(FieldDef {
+            key: "damage",
+            tab: "Driving",
+            label: "Damage",
+            hint: "None: nothing breaks. Cosmetic: parts come off but the car drives as new. Simulation: hits hurt the engine, steering and suspension; a broken car waits for a recover (repaired where it is), and one crash that takes half the car or more is fatal (back home, or the event restarts). In an event, from the next run.",
+            kind: FieldKind::Choice { options: crate::vehicle::DamageMode::ALL.iter().map(|m| m.label()).collect() },
+            get: |w| p(w).damage.min(2) as f32,
+            set: |w, v| pm(w).damage = idx(v, 3),
+        })
         .register_setting(FieldDef {
             key: "steer_speed",
             tab: "Driving",
@@ -254,7 +259,7 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("steer_speed", "Driving", None, None),
     ("traction_control", "Driving", None, None),
     ("abs", "Driving", None, None),
-    ("repair_on_wreck", "Driving", None, None),
+    ("damage", "Driving", None, None),
     ("camera_view", "Driving", None, None),
     ("fov_deg", "Driving", Some("Field of view"), Some("Wider shows more of the road; narrower makes the cockpit feel faster.")),
     ("camera_shake", "Driving", Some("Camera shake"), Some("How much bumps, jumps and landings move the cockpit and bonnet views.")),
@@ -365,11 +370,36 @@ fn sync_codriver(cd: Option<ResMut<CoDriver>>, mut prefs: ResMut<Prefs>, mut las
     *last = Some(cd.enabled);
 }
 
-/// Prefs → the steering input shaping (input only: ghosts and boards don't change).
-fn sync_wreck(prefs: Res<Prefs>, rule: Option<ResMut<crate::drive::WreckRule>>) {
-    let Some(mut rule) = rule else { return };
-    if rule.repair != prefs.repair_on_wreck {
-        rule.repair = prefs.repair_on_wreck;
+/// Prefs → the car's damage mode. In free roam at once (nothing is timed), in an event only
+/// on the line like the assists. Leaving Simulation mends the car (parts that came off stay
+/// off in Cosmetic) and clears a wreck.
+fn sync_damage(
+    prefs: Res<Prefs>,
+    spec: Option<ResMut<crate::drive::CarSpec>>,
+    stage: Option<Res<crate::world::StageWorld>>,
+    run: Option<ResMut<crate::drive::StageRun>>,
+    mut cars: Query<&mut crate::drive::DrivenCar>,
+) {
+    use crate::vehicle::{Damage, DamageMode};
+    let Some(mut spec) = spec else { return };
+    let want = prefs.damage_mode();
+    if spec.0.damage == want {
+        return;
+    }
+    let mid_event = stage.is_some_and(|s| !s.free_roam()) && run.as_ref().is_some_and(|r| r.countdown <= 0.0 || r.time > 0.0);
+    if mid_event {
+        return;
+    }
+    spec.0.damage = want;
+    if want != DamageMode::Simulation {
+        for mut c in &mut cars {
+            let d = c.car.damage;
+            let detached = if want == DamageMode::Cosmetic { d.detached } else { 0 };
+            c.car.damage = Damage { hits: d.hits, detached, ..Damage::default() };
+        }
+        if let Some(mut run) = run {
+            run.down = None;
+        }
     }
 }
 

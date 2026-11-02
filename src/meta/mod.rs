@@ -246,6 +246,7 @@ impl Plugin for MetaPlugin {
             .add_systems(Update, (sync_camera, free_pointer))
             .add_systems(Update, (collect_menu, apply_menu).chain().after(engine::ui::UiSet::Screens))
             .add_systems(Update, (stage_ready, watch_finish, follow_ghost, dress_ghosts).chain().run_if(resource_exists::<StageWorld>))
+            .add_systems(Update, restart_after_death.run_if(resource_exists::<StageRun>))
             .add_systems(OnExit(AppState::InGame), teardown);
         #[cfg(feature = "dev")]
         dev::register(app);
@@ -410,29 +411,32 @@ pub fn restart_stage(world: &mut World) {
     world.write_message(ScreenRequest::Replace(None));
 }
 
-/// The recover button from the pause menu (same as the in-game key: back on the road at
-/// the furthest point reached, +5 s).
+/// The recover button from the pause menu: the same as the in-game key (latched for the next
+/// fixed step, which puts the car back on the road; +5 s in an event; a broken car is
+/// repaired too).
 pub fn recover(world: &mut World) {
-    let Some(stage) = world.get_resource::<StageWorld>().cloned() else { return };
     let run = world.resource::<StageRun>().clone();
     if run.countdown > 0.0 || run.finished.is_some() || run.retired {
         return;
     }
-    let i = stage.road.station(run.progress);
-    let (p, d) = (stage.road.pts[i], stage.road.dir[i]);
-    let heading = d.x.atan2(d.y);
-    let mut q = world.query::<(Entity, &mut DrivenCar)>();
-    let mut done = None;
-    for (e, mut c) in q.iter_mut(world) {
-        crate::vehicle::recover(&mut c.car, p, heading);
-        c.prev = (c.car.pos, c.car.rot);
-        done = Some(e);
-    }
-    if let Some(e) = done {
-        world.resource_mut::<Recorder>().recover(e, p, heading);
-        world.resource_mut::<StageRun>().penalty += 5.0;
+    if let Some(mut r) = world.get_resource_mut::<crate::drive::RecoverPress>() {
+        r.0 = true;
     }
     world.write_message(ScreenRequest::Replace(None));
+}
+
+/// A fatal crash in an event: once "You're dead" has shown, the event restarts from its line.
+/// (Free roam puts the car back at home in the fixed step.)
+fn restart_after_death(world: &mut World) {
+    let Some(stage) = world.get_resource::<StageWorld>() else { return };
+    if stage.free_roam() {
+        return;
+    }
+    let dead = world.get_resource::<StageRun>().is_some_and(|r| matches!(r.down, Some(crate::drive::Down::Dead(t)) if t <= 0.0));
+    if dead {
+        info!("fatal crash: restarting the event");
+        restart_stage(world);
+    }
 }
 
 /// Removes the loaded stage (terrain, road, dressing, car, lights, cameras) so the menus

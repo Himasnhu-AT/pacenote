@@ -211,10 +211,13 @@ records reuse stage code.
 
 Hits above walking pace against solid things damage the engine (power), steering (lock, speed,
 pull) and suspension (grip, wallow) by location and severity, and knock off body parts (mirrors,
-wing, splitter, bumpers, diffuser). A fully broken part wrecks the car: by default (Settings >
-Driving > Repair after a wreck) it is repaired and put back on the road, +10 s in an event or
-stage (recorded in ghosts so replays match); with the setting off, a wreck retires the run.
-Shown on the HUD; spoken by the co-driver (in events).
+wing, splitter, bumpers, diffuser). Settings > Driving > Damage picks the mode, part of the car
+spec (so ghosts replay it): **None** (nothing breaks), **Cosmetic** (parts come off, the car
+drives as new) or **Simulation** (default). In Simulation a fully broken part leaves the car
+**not drivable** until the player recovers it: back on the road where it is, fully repaired
+(+5 s in an event). One crash that takes half the car or more (worst part +50 % in one step)
+is **fatal**: "You're dead" for 2.5 s, then home (free roam) or the event restarts from its
+line. Recovers and repairs are recorded in ghosts so replays match. Damage shows on the HUD (Simulation only); spoken by the co-driver (in events).
 
 ### 5.3 Pace notes and the AI voice (`src/codriver/`)
 

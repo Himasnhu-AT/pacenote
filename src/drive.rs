@@ -6,7 +6,7 @@ use engine::actions::{ActionDef, ActionState, AddAction, Binding, Device};
 use engine::gfx::MainCamera;
 use engine::render_budget::Actor;
 
-use crate::vehicle::{self, Car, Input, Spec};
+use crate::vehicle::{self, Car, DamageMode, Input, Spec};
 use crate::world::StageWorld;
 
 /// The car being driven (on the driver's machine; the guide gets it replicated).
@@ -39,8 +39,10 @@ pub struct StageRun {
     pub progress: f32,
     /// Split times at each quarter of the stage.
     pub splits: Vec<f32>,
-    /// The car was wrecked: the run is over without a time.
+    /// The run is over without a time (dev `meta.retire`, the guide's view of a retired run).
     pub retired: bool,
+    /// The car is out of action: wrecked (waiting for a recover) or the driver is dead.
+    pub down: Option<Down>,
 }
 
 /// The driver's camera, cycled with the camera action: cockpit → bonnet → chase. The choice is
@@ -69,7 +71,6 @@ impl Plugin for DrivePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CarSpec>()
             .init_resource::<SteerSettings>()
-            .init_resource::<WreckRule>()
             .init_resource::<RecoverPress>()
             .init_resource::<StageRun>()
             .init_resource::<CameraView>()
@@ -143,10 +144,8 @@ fn simulate(
     settings: Option<Res<SteerSettings>>,
     mut recover: Option<ResMut<RecoverPress>>,
     auto: Option<Res<AutoInput>>,
-    wreck: Option<Res<WreckRule>>,
 ) {
     let settings = settings.map(|s| *s).unwrap_or_default();
-    let wreck = wreck.map(|w| *w).unwrap_or_default();
     let dt = time.delta_secs();
     // Nothing moves behind the loading screen (the ghost recording starts with the countdown).
     if loading.is_some() {
@@ -155,7 +154,7 @@ fn simulate(
     for (e, mut c, last) in &mut cars {
         let c = &mut *c;
         c.prev = (c.car.pos, c.car.rot);
-        let held = run.countdown > 0.0 || run.finished.is_some() || run.retired;
+        let held = run.countdown > 0.0 || run.finished.is_some() || run.retired || run.down.is_some();
         // Held on the handbrake (the foot brake at a standstill would select reverse).
         let input = if held {
             Input { handbrake: true, ..default() }
@@ -181,6 +180,7 @@ fn simulate(
         if let Some(mut l) = last {
             l.0 = input;
         }
+        let before = c.car.damage.worst();
         vehicle::step(&mut c.car, &spec.0, input, &*stage, dt);
         log.get_or_insert_with(CarLog::open).write(&c.car, input, actions.value("steer"), &stage);
         if run.countdown > 0.0 {
@@ -190,43 +190,50 @@ fn simulate(
         if run.finished.is_some() || run.retired {
             continue;
         }
-        if c.car.damage.wrecked() {
-            if !wreck.repair {
-                info!("retired: car wrecked at {:.0} m ({:?})", run.progress, c.car.damage);
-                run.retired = true;
+        // Damage (Simulation only): a single crash that takes half the car or more kills the
+        // driver (respawn at home, or the event restarts); a broken part stops the car until the
+        // player recovers it (back on the road where it is, repaired).
+        if spec.0.damage == DamageMode::Simulation && run.down.is_none() {
+            if c.car.damage.worst() - before >= DEATH_HIT {
+                info!("dead: one crash took {:.0} % ({:?})", (c.car.damage.worst() - before) * 100.0, c.car.damage);
+                run.down = Some(Down::Dead(DEAD_SECS));
+            } else if c.car.damage.wrecked() {
+                info!("not drivable at {:.0} m ({:?})", run.progress, c.car.damage);
+                run.down = Some(Down::Wrecked);
+            }
+        }
+        match run.down {
+            Some(Down::Dead(t)) => {
+                let t = t - dt;
+                run.down = Some(Down::Dead(t));
+                // An event restarts from its line (`meta::restart_after_death`); free roam
+                // puts the car back at home, repaired.
+                if t <= 0.0 && stage.free_roam() {
+                    let (sp, sd) = stage.open.as_ref().map_or((c.car.pos, Vec2::Y), |o| o.spawn());
+                    let at = Vec3::new(sp.x, stage.heights.height_at(sp.x, sp.z), sp.z);
+                    let h = sd.x.atan2(sd.y);
+                    put_back(&mut c.car, e, at, h, ghost.as_deref_mut());
+                    c.prev = (c.car.pos, c.car.rot);
+                    run.down = None;
+                }
                 continue;
             }
-            // Repair: back on the road (the route at the progress, else the nearest road, facing
-            // the way the car was going), damage cleared; +10 s on a timed route.
-            let p = Vec2::new(c.car.pos.x, c.car.pos.z);
-            let fwd = c.car.rot * Vec3::NEG_Z;
-            let (at, h) = if stage.free_roam() {
-                match stage.nearest_road(p, 400.0) {
-                    Some((road, rp)) => {
-                        let i = rp.i.min(road.len() - 1);
-                        let d = road.dir[i];
-                        let d = if d.dot(Vec2::new(fwd.x, fwd.z)) < 0.0 { -d } else { d };
-                        (road.pts[i], d.x.atan2(d.y))
-                    }
-                    None => (c.car.pos, fwd.x.atan2(-fwd.z)),
+            Some(Down::Wrecked) => {
+                if !stage.free_roam() {
+                    run.time += dt;
                 }
-            } else {
-                let i = stage.road.station(run.progress);
-                let d = stage.road.dir[i];
-                (stage.road.pts[i], d.x.atan2(d.y))
-            };
-            info!("wreck at {:.0} m: repaired and put back on the road", run.progress);
-            vehicle::recover(&mut c.car, at, h);
-            vehicle::repair(&mut c.car);
-            if let Some(g) = ghost.as_deref_mut() {
-                g.recover(e, at, h);
-                g.repair(e);
+                if recover.as_deref_mut().is_some_and(|r| std::mem::take(&mut r.0)) {
+                    let (at, h) = road_here(&stage, &c.car, run.progress);
+                    put_back(&mut c.car, e, at, h, ghost.as_deref_mut());
+                    c.prev = (c.car.pos, c.car.rot);
+                    run.down = None;
+                    if !stage.free_roam() {
+                        run.penalty += 5.0;
+                    }
+                }
+                continue;
             }
-            c.prev = (c.car.pos, c.car.rot);
-            if !stage.free_roam() {
-                run.penalty += REPAIR_PENALTY;
-            }
-            continue;
+            None => {}
         }
         run.time += dt;
         let p = Vec2::new(c.car.pos.x, c.car.pos.z);
@@ -234,19 +241,7 @@ fn simulate(
         // facing the way the car was going.
         if stage.free_roam() {
             if recover.as_deref_mut().is_some_and(|r| std::mem::take(&mut r.0)) {
-                let fwd = c.car.rot * Vec3::NEG_Z;
-                let (at, h) = match stage.nearest_road(p, 400.0) {
-                    Some((road, rp)) => {
-                        let i = rp.i.min(road.len() - 1);
-                        let d = road.dir[i];
-                        let d = if d.dot(Vec2::new(fwd.x, fwd.z)) < 0.0 { -d } else { d };
-                        (road.pts[i], d.x.atan2(d.y))
-                    }
-                    None => {
-                        let (sp, sd) = stage.open.as_ref().unwrap().spawn();
-                        (Vec3::new(sp.x, stage.heights.height_at(sp.x, sp.z), sp.z), sd.x.atan2(sd.y))
-                    }
-                };
+                let (at, h) = road_here(&stage, &c.car, run.progress);
                 vehicle::recover(&mut c.car, at, h);
                 c.prev = (c.car.pos, c.car.rot);
             }
@@ -356,21 +351,57 @@ impl CarLog {
     }
 }
 
-/// What a wreck does (Settings > Driving > Repair after a wreck, `prefs`): repair the car and
-/// put it back on the road (+10 s on a timed route), or retire the run.
-#[derive(Resource, Clone, Copy, Debug, PartialEq)]
-pub struct WreckRule {
-    pub repair: bool,
+/// The car is out of action (Simulation damage only, `StageRun::down`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Down {
+    /// A part broke: the car won't drive until the player recovers it (repaired, back on the
+    /// road where it is; +5 s on a timed route).
+    Wrecked,
+    /// One crash took [`DEATH_HIT`] or more: "You're dead" for the seconds left, then home
+    /// (free roam) or the start line (events).
+    Dead(f32),
 }
 
-impl Default for WreckRule {
-    fn default() -> Self {
-        WreckRule { repair: true }
+/// Damage from one crash (worst part, 0..1) that kills the driver.
+pub const DEATH_HIT: f32 = 0.5;
+/// How long "You're dead" shows before the respawn.
+pub const DEAD_SECS: f32 = 2.5;
+
+/// The road where the car is: the route at the progress on a timed route, else the nearest
+/// road (facing the way the car was going), else home.
+fn road_here(stage: &StageWorld, car: &Car, progress: f32) -> (Vec3, f32) {
+    let fwd = car.rot * Vec3::NEG_Z;
+    if !stage.free_roam() {
+        let i = stage.road.station(progress);
+        let d = stage.road.dir[i];
+        return (stage.road.pts[i], d.x.atan2(d.y));
+    }
+    match stage.nearest_road(Vec2::new(car.pos.x, car.pos.z), 400.0) {
+        Some((road, rp)) => {
+            let i = rp.i.min(road.len() - 1);
+            let d = road.dir[i];
+            let d = if d.dot(Vec2::new(fwd.x, fwd.z)) < 0.0 { -d } else { d };
+            (road.pts[i], d.x.atan2(d.y))
+        }
+        None => match stage.open.as_ref() {
+            Some(o) => {
+                let (sp, sd) = o.spawn();
+                (Vec3::new(sp.x, stage.heights.height_at(sp.x, sp.z), sp.z), sd.x.atan2(sd.y))
+            }
+            None => (car.pos, fwd.x.atan2(-fwd.z)),
+        },
     }
 }
 
-/// Seconds added to a timed run when the car is repaired after a wreck.
-pub const REPAIR_PENALTY: f32 = 10.0;
+/// Puts the car down at `at` facing `heading`, repaired (and records both for the ghost).
+fn put_back(car: &mut Car, e: Entity, at: Vec3, heading: f32, ghost: Option<&mut crate::meta::ghost::Recorder>) {
+    vehicle::recover(car, at, heading);
+    vehicle::repair(car);
+    if let Some(g) = ghost {
+        g.recover(e, at, heading);
+        g.repair(e);
+    }
+}
 
 /// Player steering settings (the Settings page's Driving tab). Input shaping only: it runs
 /// before the input is recorded, so ghosts replay exactly whatever the setting was, and it

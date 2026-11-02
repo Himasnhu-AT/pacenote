@@ -147,6 +147,33 @@ pub struct Spec {
     pub lsd: f32,
     /// Ease the brakes on a locking wheel (on by default).
     pub abs: bool,
+    /// What hits do (Settings > Driving > Damage).
+    pub damage: DamageMode,
+}
+
+/// What hits do to the car (Settings > Driving > Damage). Part of the spec, so a ghost
+/// replays with the mode it was driven in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DamageMode {
+    /// No damage at all: nothing breaks or comes off.
+    None,
+    /// Looks only: body parts come off, the car drives as new.
+    Cosmetic,
+    /// Hits hurt the engine, steering and suspension; a broken part stops the car.
+    #[default]
+    Simulation,
+}
+
+impl DamageMode {
+    pub const ALL: [DamageMode; 3] = [DamageMode::None, DamageMode::Cosmetic, DamageMode::Simulation];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DamageMode::None => "None",
+            DamageMode::Cosmetic => "Cosmetic",
+            DamageMode::Simulation => "Simulation",
+        }
+    }
 }
 
 impl Default for Spec {
@@ -209,6 +236,7 @@ impl Default for Spec {
             // Plated limited-slip diffs: an unloaded wheel can't spin away the drive.
             lsd: 60.0,
             abs: true,
+            damage: DamageMode::Simulation,
         }
     }
 }
@@ -972,7 +1000,7 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         } else {
             zone_of(local, half)
         };
-        car.damage.hit(Damage::severity(v) * 0.6, local, zone);
+        take_hit(car, spec, Damage::severity(v) * 0.6, local, zone);
     }
     car.body_contact = body_contact;
     // Obstacles: impulses (a penalty spring can't stop a tonne at speed on a 0.4 m trunk).
@@ -1002,7 +1030,7 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
                 // a hit is under `DAMAGE_FROM`: no damage.)
                 car.impacts += -vn;
                 let local = car.rot.inverse() * r;
-                car.damage.hit(Damage::severity(-vn), local, zone_of(local, half));
+                take_hit(car, spec, Damage::severity(-vn), local, zone_of(local, half));
             }
             let j = -(1.0 + 0.2) * vn / k;
             let vt = vp - n * vn;
@@ -1016,6 +1044,19 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
 }
 
 /// Front, side or rear, from a point in the body frame (−Z forward).
+/// A hit, as the damage mode has it: nothing, parts off only, or the full damage.
+fn take_hit(car: &mut Car, spec: &Spec, sev: f32, local: Vec3, zone: HitZone) {
+    match spec.damage {
+        DamageMode::None => {}
+        DamageMode::Cosmetic => {
+            let keep = car.damage;
+            car.damage.hit(sev, local, zone);
+            car.damage = Damage { engine: keep.engine, steering: keep.steering, suspension: keep.suspension, pull: keep.pull, ..car.damage };
+        }
+        DamageMode::Simulation => car.damage.hit(sev, local, zone),
+    }
+}
+
 fn zone_of(local: Vec3, half: Vec3) -> HitZone {
     if local.z < -half.z * 0.55 {
         HitZone::Front
@@ -1036,7 +1077,7 @@ pub fn recover(car: &mut Car, pos: Vec3, heading: f32) {
     car.broken = broken;
 }
 
-/// Puts the car right after a wreck (Settings > Driving > Repair after a wreck): no engine,
+/// Puts the car right after a wreck (Simulation damage, recovered or respawned): no engine,
 /// steering or suspension damage and every body part back on. The hit count is kept (it only
 /// grows: the co-driver and telemetry watch it). Applied between steps like [`recover`], and
 /// recorded in ghosts so replays match.
@@ -1192,7 +1233,11 @@ mod tests {
     /// The car already rolling at `kmh` toward `obstacle` 20 m ahead, held at that speed until
     /// 3 m before it, then coasting for the rest of 5 s.
     fn drive_at(kmh: f32, obstacle: Obstacle) -> (Car, f32) {
-        let spec = Spec::default();
+        drive_at_in(kmh, obstacle, DamageMode::Simulation)
+    }
+
+    fn drive_at_in(kmh: f32, obstacle: Obstacle, damage: DamageMode) -> (Car, f32) {
+        let spec = Spec { damage, ..Spec::default() };
         let g = One(obstacle);
         let mut car = Car::new(Vec3::new(0.0, 0.6, 0.0), 0.0);
         run(&mut car, &spec, Input { handbrake: true, ..default() }, &Flat(0.0, Surface::Tarmac), 1.0);
@@ -1237,6 +1282,19 @@ mod tests {
         assert!(big.wrecked(), "{big:?}");
         // (`last` can be a light knock after the rebound, so check the part it broke.)
         assert!(big.hits >= 1 && big.engine >= 1.0, "{big:?}");
+    }
+
+    #[test]
+    fn damage_modes() {
+        // None: a hit that wrecks the car in Simulation leaves no mark.
+        let none = drive_at_in(90.0, TREE, DamageMode::None).0.damage;
+        assert_eq!(none, Damage::default());
+        // Cosmetic: parts come off, the car is as new underneath.
+        let looks = drive_at_in(90.0, TREE, DamageMode::Cosmetic).0.damage;
+        assert!(looks.off("FrontSplitter") && looks.hits >= 1, "{looks:?}");
+        assert!(looks.worst() == 0.0 && !looks.wrecked() && looks.pull == 0.0, "{looks:?}");
+        // Simulation: the same hit breaks it.
+        assert!(drive_at_in(90.0, TREE, DamageMode::Simulation).0.damage.wrecked());
     }
 
     #[test]

@@ -3,7 +3,8 @@
 //! - bottom right: rev bar (segments light up to the red line), speed in km/h or mph, gear;
 //! - bottom left: stage name, stage clock (+ penalties), progress bar with km done / total;
 //! - top right: damage per part, once the car is hurt;
-//! - centre: countdown, GO, FINISH with the time, and the RETIRED plate.
+//! - centre: countdown, GO, FINISH with the time, and the RETIRED, NOT DRIVABLE and YOU'RE
+//!   DEAD plates.
 //!
 //! Each readout can be turned off in Settings > HUD ([`crate::prefs::Prefs`]). Cheap: values
 //! are cached and text / colours / widths are only written when they change (no per-frame
@@ -14,7 +15,7 @@ use std::fmt::Write;
 use bevy::prelude::*;
 use engine::ui::theme::*;
 
-use crate::drive::{CarSpec, DrivenCar, StageRun};
+use crate::drive::{CarSpec, DrivenCar, Down, StageRun};
 use crate::prefs::Prefs;
 use crate::world::StageWorld;
 
@@ -36,6 +37,7 @@ enum HudText {
     Progress,
     CenterBig,
     CenterSmall,
+    DeadNote,
 }
 
 /// A group hidden by a HUD setting.
@@ -47,6 +49,8 @@ enum HudGroup {
     Progress,
     Damage,
     Retired,
+    Wrecked,
+    Dead,
 }
 
 #[derive(Component)]
@@ -182,7 +186,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
             // Centre: retired.
             root.spawn((
                 HudGroup::Retired,
-                Node { position_type: PositionType::Absolute, top: percent(30), left: percent(50), width: px(560), margin: UiRect::left(px(-280)), display: Display::None, ..default() },
+                Node { position_type: PositionType::Absolute, top: percent(30), left: percent(50), width: px(560), margin: UiRect::left(px(-280)), justify_content: JustifyContent::Center, display: Display::None, ..default() },
                 Pickable::IGNORE,
             ))
             .with_children(|w| {
@@ -194,6 +198,37 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
                     c.spawn((Node { column_gap: px(GAP_L), ..default() }, Pickable::IGNORE)).with_children(|k| {
                         key_hint(k, t, "Esc", "Restart or leave");
                     });
+                });
+            });
+            // Centre: the car is broken (Simulation damage), waiting for a recover.
+            root.spawn((
+                HudGroup::Wrecked,
+                Node { position_type: PositionType::Absolute, top: percent(30), left: percent(50), width: px(560), margin: UiRect::left(px(-280)), justify_content: JustifyContent::Center, display: Display::None, ..default() },
+                Pickable::IGNORE,
+            ))
+            .with_children(|w| {
+                w.spawn(accent_panel(t, t.bad, 26.0, GAP_S)).with_children(|c| {
+                    c.spawn(eyebrow("Damage 100 %", t.bad));
+                    c.spawn(title("Car no longer drivable", SIZE_H1, t.text));
+                    c.spawn(text("Recover to put it back on the road here, fully repaired.", body(SIZE_BODY), t.text_muted));
+                    c.spawn(spacer(GAP_XS));
+                    c.spawn((Node { column_gap: px(GAP_L), ..default() }, Pickable::IGNORE)).with_children(|k| {
+                        key_hint(k, t, "R", "Recover");
+                        key_hint(k, t, "Esc", "Menu");
+                    });
+                });
+            });
+            // Centre: one crash took half the car or more.
+            root.spawn((
+                HudGroup::Dead,
+                Node { position_type: PositionType::Absolute, top: percent(30), left: percent(50), width: px(560), margin: UiRect::left(px(-280)), justify_content: JustifyContent::Center, display: Display::None, ..default() },
+                Pickable::IGNORE,
+            ))
+            .with_children(|w| {
+                w.spawn(accent_panel(t, t.bad, 26.0, GAP_S)).with_children(|c| {
+                    c.spawn(eyebrow("Fatal crash", t.bad));
+                    c.spawn(title("You're dead", SIZE_H1, t.text));
+                    c.spawn((HudText::DeadNote, text("", body(SIZE_BODY), t.text_muted)));
                 });
             });
         });
@@ -212,7 +247,8 @@ struct Shown {
     stage: Option<u32>,
     damage: Option<[u32; 3]>,
     center: Option<(u8, u32)>,
-    groups: Option<[bool; 6]>,
+    groups: Option<[bool; 8]>,
+    dead_route: Option<bool>,
 }
 
 fn set_text(t: &mut Text, f: impl FnOnce(&mut String)) {
@@ -241,12 +277,13 @@ fn update_hud(
     let t = &*theme;
     let prefs = prefs.map(|p| p.clone()).unwrap_or_default();
     let d = car.damage;
-    let damaged = d.worst() > 0.02;
+    // Damage only shows in Simulation (Cosmetic and None drive as new).
+    let damaged = d.worst() > 0.02 && spec.0.damage == crate::vehicle::DamageMode::Simulation;
 
     // Groups on / off (settings, damage, retired).
     // Free roam has no route: no clock or progress.
     let route = !stage.free_roam();
-    let want = [prefs.hud_speed, prefs.hud_revs, prefs.hud_clock && route, prefs.hud_progress && route, prefs.hud_damage && damaged, run.retired];
+    let want = [prefs.hud_speed, prefs.hud_revs, prefs.hud_clock && route, prefs.hud_progress && route, prefs.hud_damage && damaged, run.retired, run.down == Some(Down::Wrecked), matches!(run.down, Some(Down::Dead(_)))];
     if shown.groups != Some(want) {
         shown.groups = Some(want);
         for (g, mut n) in &mut groups {
@@ -303,7 +340,7 @@ fn update_hud(
         }
     }
     // Centre: 1 countdown, 2 GO, 3 finish; 0 nothing.
-    let center = if run.retired {
+    let center = if run.retired || run.down.is_some() {
         (0, 0)
     } else if run.countdown > 0.0 {
         (1, run.countdown.ceil() as u32)
@@ -369,6 +406,9 @@ fn update_hud(
                     s.push_str("FINISH");
                 }
             }),
+            HudText::DeadNote if shown.dead_route != Some(route) => set_text(&mut txt, |s| {
+                s.push_str(if route { "Back to the start line…" } else { "Back home…" });
+            }),
             _ => {}
         }
     }
@@ -379,6 +419,7 @@ fn update_hud(
     shown.penalty = Some(pen);
     shown.stage = Some(stage.route_id());
     shown.center = Some(center);
+    shown.dead_route = Some(route);
 }
 
 /// `83.4` → "1:23.400".

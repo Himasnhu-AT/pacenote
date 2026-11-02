@@ -441,7 +441,7 @@ mod tests {
 
     #[test]
     fn run_round_trips_with_splits_and_finish() {
-        let r = StageRun { countdown: 0.0, time: 187.4567, penalty: 5.0, finished: Some(192.4567), progress: 3199.87, splits: vec![45.1234, 96.5, 140.0001], retired: false };
+        let r = StageRun { countdown: 0.0, time: 187.4567, penalty: 5.0, finished: Some(192.4567), progress: 3199.87, splits: vec![45.1234, 96.5, 140.0001], retired: false, down: None };
         let n = NetRun::from_run(&r);
         let (d, len) = round_trip::<NetRun, NetRunCodec>(&n);
         assert_eq!(d.n_splits, 3);
