@@ -230,6 +230,16 @@ mod dev {
     }
 }
 
+/// Drops the event list and the markers; `setup` makes them again from the stage's world
+/// (after the editor changed it).
+pub fn reset(world: &mut World) {
+    let markers: Vec<Entity> = world.query_filtered::<Entity, With<Marker>>().iter(world).collect();
+    for e in markers {
+        world.entity_mut(e).despawn();
+    }
+    world.remove_resource::<Events>();
+}
+
 /// Once per world: the event list and a marker at each start.
 fn setup(world: &mut World) {
     let Some(stage) = world.get_resource::<StageWorld>() else { return };

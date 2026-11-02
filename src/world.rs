@@ -474,7 +474,11 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     crate::art::spawn_stage(world, s);
     if let Some(o) = &s.open {
         let hf = o.heights.clone();
-        crate::open::buildings::spawn(world, &o.buildings, &move |x, z| hf.height_at(x, z));
+        for e in crate::open::buildings::spawn(world, &o.buildings, &move |x, z| hf.height_at(x, z)) {
+            if let Ok(mut e) = world.get_entity_mut(e) {
+                e.insert(crate::open::live::LiveBuilding);
+            }
+        }
         // Traffic shares its solids with the car's ground (the same Arc).
         world.insert_resource(o.traffic.clone());
         if crate::art::visual(world) {

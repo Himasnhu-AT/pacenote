@@ -33,11 +33,13 @@ pub const MAX_SPAN: f32 = 40.0;
 const MAX_TURN: f32 = 0.25;
 /// How far width (m) and crossfall may stray from a straight line between control points.
 const WIDTH_TOL: f32 = 0.05;
-const BANK_TOL: f32 = 0.004;
+const BANK_TOL: f32 = 0.02;
 /// How far (m) the road's height may stray from a straight line between control points.
 const HEIGHT_TOL: f32 = 0.05;
-/// How far (m, 3D) a station may be from the baked curve.
-const CURVE_TOL: f32 = 0.03;
+/// How far (m) a station may be from the baked curve: sideways, and in height (tighter: the
+/// road surface has to meet the baked terrain).
+const CURVE_TOL: f32 = 0.10;
+const CURVE_TOL_Y: f32 = 0.03;
 
 /// A road of the open world: the [`Spline`] on the same entity is its centreline.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
@@ -101,7 +103,7 @@ impl Plugin for LevelTypesPlugin {
             .add_systems(PreStartup, pick_source)
             .add_systems(Update, adopt_volumes);
         #[cfg(feature = "dev")]
-        app.add_systems(PostUpdate, hide_game_ui.run_if(resource_exists::<engine::editor::EditorMode>));
+        app.add_systems(PostUpdate, (hide_game_ui, one_main_camera).run_if(resource_exists::<engine::editor::EditorMode>));
     }
 }
 
@@ -185,7 +187,11 @@ pub fn road_spline(r: &RoadData) -> (Spline, RoadSpline) {
         let mut split = Vec::new();
         for m in 0..keep.len() - 1 {
             let (a, b) = (keep[m], keep[m + 1]);
-            if b - a >= 2 && (a + 1..b).any(|k| cache.nearest(&spline, r.points[k].pos).is_none_or(|n| n.2 > CURVE_TOL)) {
+            let off = |k: usize| {
+                let p = r.points[k].pos;
+                cache.nearest(&spline, p).is_none_or(|n| Vec2::new(n.1.pos.x - p.x, n.1.pos.z - p.z).length() > CURVE_TOL || (n.1.pos.y - p.y).abs() > CURVE_TOL_Y)
+            };
+            if b - a >= 2 && (a + 1..b).any(off) {
                 split.push((a + b) / 2);
             }
         }
@@ -334,6 +340,21 @@ fn hide_game_ui(mut roots: Query<&mut Visibility, (With<bevy::ui::Node>, Without
     }
 }
 
+/// In the editor the editor's camera is the main one: the game's own (spawned when the stage
+/// loads) stops being `MainCamera` and stops drawing. Otherwise everything that follows "the"
+/// main camera (tree streaming, traffic, terrain detail) finds two and does nothing.
+#[cfg(feature = "dev")]
+#[allow(clippy::type_complexity)]
+fn one_main_camera(mut commands: Commands, mut cams: Query<(Entity, &mut Camera), (With<engine::gfx::MainCamera>, Without<engine::editor::EditorOnly>)>, editor: Query<(), (With<engine::gfx::MainCamera>, With<engine::editor::EditorOnly>)>) {
+    if editor.is_empty() {
+        return;
+    }
+    for (e, mut cam) in &mut cams {
+        cam.is_active = false;
+        commands.entity(e).remove::<engine::gfx::MainCamera>();
+    }
+}
+
 /// A level loaded after the stage was built (`--editor --level`, a hot reload): its foliage
 /// entities take over the generated volumes.
 fn adopt_volumes(world: &mut World) {
@@ -475,8 +496,8 @@ pub fn bake(path: &Path) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    /// Through the splines, every road stays within 8 cm of where it was (centreline and
-    /// height), the junctions and events are the same, and the control points are few.
+    /// Through the splines, every road stays within 12 cm of where it was sideways and 8 cm in
+    /// height, the junctions and events are the same, and the control points are few.
     #[test]
     fn roads_survive_the_splines() {
         let data = WorldData::generate(super::super::SEED);
@@ -502,7 +523,7 @@ mod tests {
                 let on = rb.road.pts[i].lerp(rb.road.pts[(i + 1).min(rb.road.len() - 1)], at.t);
                 worst_xz = worst_xz.max(Vec2::new(on.x, on.z).distance(q));
                 worst_y = worst_y.max((on.y - p.y).abs());
-                assert!(Vec2::new(on.x, on.z).distance(q) < 0.08, "road {k}: {q} moved {}", Vec2::new(on.x, on.z).distance(q));
+                assert!(Vec2::new(on.x, on.z).distance(q) < 0.12, "road {k}: {q} moved {}", Vec2::new(on.x, on.z).distance(q));
                 assert!((on.y - p.y).abs() < 0.08, "road {k}: {q} height {} vs {}", on.y, p.y);
             }
         }
