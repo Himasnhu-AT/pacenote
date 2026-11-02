@@ -3,6 +3,7 @@
 //! drives on (`vehicle::Ground`).
 
 pub mod roads;
+pub mod traffic;
 
 use std::sync::Arc;
 
