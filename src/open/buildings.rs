@@ -299,7 +299,7 @@ fn row(out: &mut Vec<Building>, rng: &mut Rng, st: &RowStyle, ring: u32, lo: Vec
             _ => (Vec2::new(hi.x - set - depth * 0.5, mid), 0),
         };
         let half = if side < 2 { Vec2::new(w * 0.5, depth * 0.5) } else { Vec2::new(depth * 0.5, w * 0.5) };
-        out.push(building(rng, st.use_, ring, centre, Vec2::X, half, front, y, y));
+        out.push(building(rng, st.use_, ring, centre, Vec2::X, half, front, y, y - 0.3));
         a += w;
         // A gap, unless it would leave too little for the next building of a filled row.
         let gap = if rng.chance(st.gap.0) { rng.range(st.gap.1, st.gap.2) } else { 0.0 };
@@ -378,7 +378,7 @@ pub fn layout(net: &RoadNet) -> Layout {
                         } else {
                             (c + Vec2::new(sign * off, 0.0), Vec2::new(depth * 0.5, len * 0.5), if s == 0 { 2 } else { 0 })
                         };
-                        buildings.push(building(&mut rng, Use::Apartment, ring, centre, Vec2::X, half, front, y, y));
+                        buildings.push(building(&mut rng, Use::Apartment, ring, centre, Vec2::X, half, front, y, y - 0.3));
                     }
                 }
                 LotKind::Tower => {
@@ -387,7 +387,7 @@ pub fn layout(net: &RoadNet) -> Layout {
                     // Its front faces the town centre.
                     let to = -c;
                     let front = if to.x.abs() > to.y.abs() { if to.x > 0.0 { 0 } else { 2 } } else if to.y > 0.0 { 1 } else { 3 };
-                    buildings.push(building(&mut rng, Use::Tower, ring, c, Vec2::X, Vec2::splat(s), front, y, y));
+                    buildings.push(building(&mut rng, Use::Tower, ring, c, Vec2::X, Vec2::splat(s), front, y, y - 0.3));
                 }
                 LotKind::Plaza | LotKind::Park | LotKind::Parking | LotKind::Farm => {}
             }
@@ -739,6 +739,16 @@ mod render {
             self.face(Vec3::new(0.0, y, 0.0), Vec3::NEG_Z, Vec3::Y, &p, cell, pick);
         }
 
+        /// [`Buf::ground`] draped on the terrain: every vertex `lift` m above `height(x, z)`.
+        pub fn draped(&mut self, height: &dyn Fn(f32, f32) -> f32, lift: f32, poly: &[Vec2], cell: Vec2, pick: impl FnMut(i32, i32) -> (Tile, [f32; 4])) {
+            let start = self.pos.len();
+            self.ground(0.0, poly, cell, pick);
+            let o = self.origin;
+            for v in &mut self.pos[start..] {
+                v[1] = height(v[0] + o.x, v[2] + o.z) + lift - o.y;
+            }
+        }
+
         pub fn into_mesh(self) -> Mesh {
             let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
             m.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.pos);
@@ -946,24 +956,25 @@ mod render {
         buf.ground(b.ground + h, &b.corners(), Vec2::splat(4.0), |_, _| (Tile::RoofFlat, lin(ROOFS[3], 0.9)));
     }
 
-    /// Sidewalks round a town block and its lot's paving.
-    pub(super) fn add_lot(buf: &mut Buf, blk: &Block, y: f32) {
+    /// Sidewalks round a town block and its lot's paving, draped on the ground (beside the
+    /// streets the terrain has a shoulder, 0.15 m high).
+    pub(super) fn add_lot(buf: &mut Buf, blk: &Block, height: &dyn Fn(f32, f32) -> f32) {
         let paving = |_: i32, _: i32| (Tile::Paving, lin([0.86, 0.85, 0.82], 1.0));
         let (lo, hi) = (blk.min, blk.max);
         let (olo, ohi) = (lo - Vec2::splat(SIDEWALK), hi + Vec2::splat(SIDEWALK));
         let rect = |a: Vec2, b: Vec2| [Vec2::new(a.x, a.y), Vec2::new(b.x, a.y), Vec2::new(b.x, b.y), Vec2::new(a.x, b.y)];
-        let ys = y + 0.05;
-        buf.ground(ys, &rect(olo, Vec2::new(ohi.x, lo.y)), Vec2::splat(2.0), paving);
-        buf.ground(ys, &rect(Vec2::new(olo.x, hi.y), ohi), Vec2::splat(2.0), paving);
-        buf.ground(ys, &rect(Vec2::new(olo.x, lo.y), Vec2::new(lo.x, hi.y)), Vec2::splat(2.0), paving);
-        buf.ground(ys, &rect(Vec2::new(hi.x, lo.y), Vec2::new(ohi.x, hi.y)), Vec2::splat(2.0), paving);
+        let lift = 0.05;
+        buf.draped(height, lift, &rect(olo, Vec2::new(ohi.x, lo.y)), Vec2::splat(2.0), paving);
+        buf.draped(height, lift, &rect(Vec2::new(olo.x, hi.y), ohi), Vec2::splat(2.0), paving);
+        buf.draped(height, lift, &rect(Vec2::new(olo.x, lo.y), Vec2::new(lo.x, hi.y)), Vec2::splat(2.0), paving);
+        buf.draped(height, lift, &rect(Vec2::new(hi.x, lo.y), Vec2::new(ohi.x, hi.y)), Vec2::splat(2.0), paving);
         match blk.kind {
             LotKind::Plaza | LotKind::Tower => {
-                buf.ground(y + 0.04, &rect(lo, hi), Vec2::splat(3.0), |i, j| (Tile::Paving, lin([0.9, 0.86, 0.78], 0.93 + 0.07 * hash(7, i, j))));
+                buf.draped(height, lift - 0.01, &rect(lo, hi), Vec2::splat(2.0), |i, j| (Tile::Paving, lin([0.9, 0.86, 0.78], 0.93 + 0.07 * hash(7, i, j))));
             }
             LotKind::Parking => {
                 // Rows of bays (5.5 m deep, 2.5 m wide), back to back, with aisles between.
-                buf.ground(y + 0.04, &rect(lo, hi), Vec2::new(2.5, 5.5), move |_, j| {
+                buf.draped(height, lift - 0.01, &rect(lo, hi), Vec2::new(2.5, 5.5), move |_, j| {
                     let bay = j.rem_euclid(3) != 2;
                     (if bay { Tile::Parking } else { Tile::Asphalt }, lin([1.0, 1.0, 1.0], 1.0))
                 });
@@ -1083,16 +1094,17 @@ mod render {
             }
             4 | 5 => {
                 // Shopfront (5: with a door in the middle).
-                if v >= 0.74 && v <= 0.93 {
+                if (0.74..=0.93).contains(&v) {
                     return (Vec3::new(0.86, 0.84, 0.78) * (0.9 + 0.05 * n1), 0.7);
                 }
-                if tile == 5 && inside(u, v, 0.34, 0.66, 0.0, 0.70) {
-                    if let Some(w) = window(u, v, [0.37, 0.63, 0.0, 0.67], 0.03, false, None, dark_frame) {
-                        if (u - 0.6).abs() < 0.01 && (v - 0.33).abs() < 0.08 {
-                            return (Vec3::splat(0.7), 0.3);
-                        }
-                        return w;
+                if tile == 5
+                    && inside(u, v, 0.34, 0.66, 0.0, 0.70)
+                    && let Some(w) = window(u, v, [0.37, 0.63, 0.0, 0.67], 0.03, false, None, dark_frame)
+                {
+                    if (u - 0.6).abs() < 0.01 && (v - 0.33).abs() < 0.08 {
+                        return (Vec3::splat(0.7), 0.3);
                     }
+                    return w;
                 }
                 if let Some(w) = window(u, v, [0.04, 0.96, 0.08, 0.69], 0.025, false, Some(0.55), dark_frame) {
                     return w;
@@ -1190,13 +1202,13 @@ mod render {
     }
 
     /// Builds a block's mesh (local to the block's centre) or `None` if it has nothing.
-    pub(super) fn block_mesh(layout: &Layout, k: usize) -> Option<(Vec3, Buf)> {
+    pub(super) fn block_mesh(layout: &Layout, k: usize, height: &dyn Fn(f32, f32) -> f32) -> Option<(Vec3, Buf)> {
         let blk = &layout.blocks[k];
         let c = blk.centre();
         let origin = Vec3::new(c.x, layout.town_y, c.y);
         let mut buf = Buf { origin, ..default() };
         if blk.cell.is_some() {
-            add_lot(&mut buf, blk, layout.town_y);
+            add_lot(&mut buf, blk, height);
         }
         for &i in &blk.buildings {
             add_building(&mut buf, &layout.buildings[i]);
@@ -1206,9 +1218,10 @@ mod render {
 
     /// Spawns every block's mesh: one entity per town block and farm, all sharing one material,
     /// casting shadows. Static scenery kept at full detail (the far blocks are a few thousand
-    /// triangles each; Bevy's per-cascade culling keeps their shadows cheap). Returns the
-    /// entities (for despawning). Nothing in headless runs.
-    pub fn spawn(world: &mut World, layout: &Layout) -> Vec<Entity> {
+    /// triangles each; Bevy's per-cascade culling keeps their shadows cheap). `height` is the
+    /// rendered terrain's height (`OpenWorld::heights`): sidewalks and lot paving lie on it.
+    /// Returns the entities (for despawning). Nothing in headless runs.
+    pub fn spawn(world: &mut World, layout: &Layout, height: &dyn Fn(f32, f32) -> f32) -> Vec<Entity> {
         if !crate::art::visual(world) {
             return Vec::new();
         }
@@ -1227,7 +1240,7 @@ mod render {
         });
         let mut out = Vec::new();
         for k in 0..layout.blocks.len() {
-            let Some((origin, buf)) = block_mesh(layout, k) else { continue };
+            let Some((origin, buf)) = block_mesh(layout, k, height) else { continue };
             let mesh = buf.into_mesh();
             let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&mesh);
             let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
@@ -1246,7 +1259,7 @@ mod render {
         let mut verts = 0;
         let mut meshes = 0;
         for k in 0..layout.blocks.len() {
-            if let Some((_, b)) = block_mesh(layout, k) {
+            if let Some((_, b)) = block_mesh(layout, k, &|_, _| layout.town_y) {
                 tris += b.idx.len() / 3;
                 verts += b.pos.len();
                 meshes += 1;
@@ -1399,12 +1412,59 @@ mod tests {
         assert!(near.is_empty(), "spawn point is clear");
     }
 
+    /// Flat town ground with the buildings' wall cylinders.
+    struct Town(f32, ObstacleGrid);
+    impl crate::vehicle::Ground for Town {
+        fn height(&self, _: f32, _: f32) -> f32 {
+            self.0
+        }
+        fn normal(&self, _: f32, _: f32) -> Vec3 {
+            Vec3::Y
+        }
+        fn surface(&self, _: f32, _: f32) -> crate::stage::Surface {
+            crate::stage::Surface::Tarmac
+        }
+        fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
+            out.clear();
+            self.1.query(p, r, out);
+        }
+    }
+
+    #[test]
+    fn the_car_stops_at_the_wall() {
+        use crate::vehicle::{Car, Input, Spec, step};
+        let n = net();
+        let l = layout(&n);
+        let g = Town(n.town_y, ObstacleGrid::new(&obstacles(&l), 10.0));
+        let spec = Spec::default();
+        // Head on and at 35° into a shop facing −z (the car at heading 0 drives towards +z),
+        // from the middle of the street in front of it.
+        let b = l.buildings.iter().find(|b| b.use_ == Use::Shop && b.front == 3 && b.half.x > 5.0).unwrap();
+        let street_z = b.centre.y - b.half.y - SIDEWALK - RoadKind::Street.width() * 0.5;
+        for (kmh, heading) in [(60.0f32, 0.0f32), (110.0, 0.0), (90.0, 0.6), (90.0, -0.6)] {
+            let start = Vec3::new(b.centre.x - libm::sinf(heading) * 20.0, n.town_y + 0.6, street_z - 12.0);
+            let mut car = Car::new(start, heading);
+            car.vel = car.forward() * kmh / 3.6;
+            for w in &mut car.wheels {
+                w.spin = kmh / 3.6 / spec.wheel_radius;
+            }
+            let mut deepest = f32::MIN;
+            for _ in 0..240 {
+                step(&mut car, &spec, Input { throttle: 1.0, ..Default::default() }, &g, 1.0 / 60.0);
+                deepest = deepest.max(car.pos.z - (b.centre.y - b.half.y));
+            }
+            assert!(car.impacts > 0.0, "{kmh} km/h at {heading}: no hit");
+            // The car's centre stays a good metre outside the wall (it's ~2 m to its nose).
+            assert!(deepest < -1.2, "{kmh} km/h at {heading}: centre {deepest:.2} m from the wall");
+        }
+    }
+
     #[test]
     fn mesh_budget() {
         let l = layout(&net());
         let (meshes, tris, verts) = render::triangles(&l);
         eprintln!("meshes {meshes}, triangles {tris}, vertices {verts}");
-        assert!(meshes >= 30 && meshes <= 80);
+        assert!((30..=80).contains(&meshes));
         assert!(tris < 600_000, "{tris} triangles");
     }
 }
