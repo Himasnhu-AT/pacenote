@@ -198,7 +198,8 @@ records reuse stage code.
   per-wheel spring/damper/anti-roll bar/bump stop, combined-slip tyre model per surface,
   torque curve, engine braking, 5-speed auto gearbox, 4WD with limited-slip diffs, handbrake.
 - Tuned to a ~1,250 kg 4WD R5-class rally car (sources and measurements in `HANDLING.md`).
-  Note: the **visual** car is currently a GT3 model (section 9.1), not a rally hatchback.
+  The visual car is "Talus", an original 5-door rally hatch made for it
+  (`docs/cars/rally_hatch.md`, `tools/art/build_rallycar.py`).
 - The world is accessed only through `vehicle::Ground` (height, normal, surface, obstacles),
   which is why the open world could be plugged in without touching the sim.
 - Collisions: chassis corners vs ground, and vertical cylinders (`Obstacle`): solid (trunks,
@@ -365,11 +366,10 @@ exists**. The open world keeps ~145k trees resident and ~2.4 GB at High.
 
 ### 9.1 Legal / IP (blocker for a commercial release)
 
-- **The player car is a "Mercedes-AMG GT3 Evo 2020" Sketchfab model with Red Bull Racing
-  livery** (CC BY 4.0, credited). The CC licence covers the 3D model's copyright, **not the
-  Mercedes, AMG or Red Bull trademarks** (badges, logos, livery, recognisable design). Shipping
-  it on Steam risks takedowns. `docs/DESIGN.md` lists "licensed cars or brands" as a non-goal.
-  Needs an original or de-branded car.
+- ~~The player car was a branded Sketchfab GT3 model~~: replaced (2 Nov 2026) by the
+  original Talus rally hatch (`docs/cars/rally_hatch.md`). Still to do: the Steam store
+  screenshots in `packaging/steam/store-assets/screenshots/` show the old car and must be
+  retaken.
 - The genre pivot must stay original (no recognisable map, festival theme, UI or names from
   any existing open-world racing game).
 
