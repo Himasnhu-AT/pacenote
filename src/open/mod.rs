@@ -2,6 +2,7 @@
 //! the roads, and (in later steps) buildings, traffic and events. [`OpenWorld`] is what the car
 //! drives on (`vehicle::Ground`).
 
+pub mod buildings;
 pub mod events;
 pub mod roads;
 
