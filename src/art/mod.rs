@@ -42,6 +42,7 @@ impl Plugin for ArtPlugin {
         if !app.is_plugin_added::<bevy::pbr::MaterialPlugin<StandardMaterial>>() {
             return;
         }
+        trees::register(app);
         app.add_systems(Update, (trees::ingest, trees::stream).chain())
             .add_systems(Update, dressing::tag_cover)
             .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin));
@@ -93,7 +94,7 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     ground::spawn_road(world, s);
     let cat = dressing::catalog(world, s.def.biome, wet(&s.def));
     world.insert_resource(cat);
-    trees::setup(world, s, view);
+    trees::setup(world, s, view, q);
     props::spawn(world, s);
     let (graph, inputs) = crate::world::dressing(s);
     let half = stage::half_size(&s.def);
@@ -155,7 +156,7 @@ mod dev {
             g.1 += *n as u64;
         }
         let mut rows: Vec<_> = by.into_iter().collect();
-        rows.sort_by(|a, b| b.1.1.cmp(&a.1.1));
+        rows.sort_by_key(|r| std::cmp::Reverse(r.1.1));
         let rows: Vec<_> = rows.into_iter().take(10).map(|(k, (n, t))| json!([k, n, t])).collect();
         Ok(json!({"visible_meshes": visible.len(), "triangles": total, "unknown_meshes": unknown, "by_name": rows}))
     }
@@ -163,7 +164,7 @@ mod dev {
     pub fn register(app: &mut App) {
         app.init_resource::<MeshTris>().add_systems(Last, note_tris);
         app.add_control_command("art.triangles", "Triangles the main camera draws this frame (no shadow passes), by name", params(&[]), triangles);
-        app.add_control_command("art.stats", "Trees (near/far cells, entities, far triangles)", params(&[]), stats)
+        app.add_control_command("art.stats", "Trees (cells, LOD0/LOD1 entities, impostor chunks and triangles, LOD distances)", params(&[]), stats)
             .add_control_command("art.textures", "Load state of every material texture (counts, and the first paths per state)", params(&[]), textures)
             .add_control_command(
                 "ui.click_at",
@@ -182,7 +183,8 @@ mod dev {
 
     fn stats(world: &mut World, _: Value) -> Result<Value, String> {
         let t = world.get_resource::<super::trees::TreeField>().map(|f| f.stats).unwrap_or_default();
-        Ok(json!({"trees": t.trees, "cells": t.cells, "near_cells": t.near_cells, "near_entities": t.near_entities, "far_triangles": t.far_triangles}))
+        let lods = t.lods.map(|l| json!({"lod0": l.lod0, "lod1": l.lod1, "reach": l.reach, "thin": l.thin}));
+        Ok(json!({"trees": t.trees, "cells": t.cells, "near_cells": t.near_cells, "near_entities": t.near_entities, "lod0_entities": t.lod0_entities, "lod1_entities": t.lod1_entities, "chunks": t.chunks, "chunks_total": t.chunks_total, "far_triangles": t.far_triangles, "lods": lods}))
     }
 
     fn textures(world: &mut World, _: Value) -> Result<Value, String> {
