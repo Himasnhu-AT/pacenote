@@ -69,6 +69,8 @@ impl Plugin for Pacenote {
         app.add_plugins(autopilot::AutopilotPlugin);
         #[cfg(feature = "dev")]
         app.add_systems(Update, keep_game_focused.run_if(resource_exists::<Messages<bevy::window::WindowFocused>>));
+        #[cfg(feature = "dev")]
+        app.add_systems(Update, full_rate_while_measuring);
     }
 }
 
@@ -125,6 +127,18 @@ fn keep_game_focused(
     if focus.read().last().is_some_and(|e| e.focused && e.window != game) {
         // Bevy synced `focused = false` from the event; setting it back calls focus_window.
         window.focused = true;
+    }
+}
+
+/// Unfocused, the engine paces menus at 8 updates/s to save power, and the metrics window then
+/// shows "Waiting (vsync / cap)" and a frozen-looking game whenever you look at another app.
+/// While the metrics window is open (dev builds), menus keep their focused rate.
+#[cfg(feature = "dev")]
+fn full_rate_while_measuring(view: Option<Res<engine::devtools::MetricsView>>, pacing: Option<ResMut<engine::render_budget::FramePacing>>) {
+    let (Some(view), Some(mut pacing)) = (view, pacing) else { return };
+    let want = if view.open { pacing.menus.focused_mode } else { engine::render_budget::FramePacing::default().menus.unfocused_mode };
+    if pacing.menus.unfocused_mode != want {
+        pacing.menus.unfocused_mode = want;
     }
 }
 
