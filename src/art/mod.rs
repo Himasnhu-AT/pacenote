@@ -29,6 +29,10 @@ use pcg_core::Area;
 use crate::stage::{self, StageDef, Weather};
 use crate::world::StageWorld;
 
+/// How far from the camera (m) rocks, bushes and ground cover are generated and kept (the
+/// engine streams the dressing volume's cells in and out around it).
+pub const DRESSING_REACH: f32 = 600.0;
+
 /// The stage is wet (rain): darker, glossier materials.
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct Wet(pub bool);
@@ -97,9 +101,15 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     world.insert_resource(cat);
     trees::setup(world, s, view, q);
     props::spawn(world, s);
-    let (graph, inputs) = crate::world::dressing(s);
     let half = stage::half_size(&s.def);
-    world.spawn(PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area: Area::new(Vec2::splat(-half), Vec2::splat(half)), cell: 64.0 });
+    let area = Area::new(Vec2::splat(-half), Vec2::splat(half));
+    // Rocks, bushes, ground cover: evaluated and kept only near the camera (the engine drops far
+    // cells). Its own "trunks" points are ignored by the trees.
+    let (graph, inputs) = crate::world::dressing(s);
+    world.spawn((PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area, cell: 64.0 }, engine::pcg::PcgStreaming::radius(DRESSING_REACH)));
+    // Trees: every cell (far impostors reach the fog), from the tree part of the same graph.
+    let (graph, inputs) = crate::world::tree_graph(s);
+    world.spawn((PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area, cell: 64.0 }, trees::TreeVolume));
     spray::setup(world, &s.def);
 }
 

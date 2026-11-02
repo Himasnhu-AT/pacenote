@@ -803,13 +803,18 @@ fn chunk_of(cell: IVec2) -> IVec2 {
 
 /// Takes the dressing graph's `trunks` points as PCG cells finish. Only data is kept here:
 /// [`stream`] makes entities and meshes for what is in range.
-pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit: Option<Res<TreeKit>>, mut field: Option<ResMut<TreeField>>) {
+/// The volume the trees come from (every cell, unstreamed: `world::tree_graph`).
+#[derive(Component)]
+pub struct TreeVolume;
+
+pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit: Option<Res<TreeKit>>, mut field: Option<ResMut<TreeField>>, tree_volumes: Query<(), With<TreeVolume>>) {
     let (Some(kit), Some(field)) = (kit, field.as_deref_mut()) else {
         events.clear();
         return;
     };
     for e in events.read() {
-        if e.port != "trunks" {
+        // Only the trees volume (the streamed dressing volume emits trunks too).
+        if e.port != "trunks" || !tree_volumes.contains(e.volume) {
             continue;
         }
         let p = &e.points;

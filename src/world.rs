@@ -467,6 +467,17 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
     (g, inputs)
 }
 
+/// Only the tree part of [`dressing`] (same node ids and seed, so the same trunk points), for a
+/// volume that covers the whole area unstreamed: far tree impostors need every cell's trees,
+/// while rocks and bushes stream near the camera (`engine::pcg::PcgStreaming`).
+pub fn tree_graph(w: &StageWorld) -> (Graph, Inputs) {
+    let (full, inputs) = dressing(w);
+    let keep = ["area", "road", "tree_pts", "forest", "trees_in", "trees_clear", "trees_tf", "trees_on", "trunks"];
+    let mut g = full;
+    g.nodes.retain(|n| keep.contains(&n.id.as_str()));
+    (g, inputs)
+}
+
 /// Spawns the stage: terrain, road, dressing volume.
 pub fn spawn(world: &mut World, s: &StageWorld) {
     let half = stage::half_size(&s.def);
