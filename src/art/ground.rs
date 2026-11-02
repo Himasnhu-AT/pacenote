@@ -127,7 +127,7 @@ pub fn spawn_road(world: &mut World, s: &StageWorld) {
     let roads: Vec<Road> = s.roads().into_iter().cloned().collect();
     for (k, road) in roads.iter().enumerate() {
         // The surface most of the road has (the open world's roads differ; a stage's is its own).
-        let main = if s.is_open() { majority(&road.surface) } else { s.def.surface };
+        let main = if s.in_world() { majority(&road.surface) } else { s.def.surface };
         // Roads crossing at a junction would draw at the same height and flicker: each road a
         // few millimetres apart.
         spawn_one_road(world, s, road, main, (k % 8) as f32 * 0.004);

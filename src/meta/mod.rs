@@ -222,7 +222,7 @@ struct MenuQueue(Vec<&'static str>);
 
 /// The run currently on screen was already written to the board.
 #[derive(Resource, Default)]
-struct Finished(bool);
+pub(crate) struct Finished(pub(crate) bool);
 
 pub struct MetaPlugin;
 
@@ -385,7 +385,9 @@ pub fn restart_stage(world: &mut World) {
         c.car = start.clone();
         c.prev = (start.pos, start.rot);
     }
-    world.insert_resource(StageRun { countdown: 3.0, ..default() });
+    // Free roam has no countdown (nothing to race).
+    let countdown = if stage.free_roam() { 0.0 } else { 3.0 };
+    world.insert_resource(StageRun { countdown, ..default() });
     world.resource_mut::<Recorder>().reset();
     world.resource_mut::<Finished>().0 = false;
     // Race the best ghost again (the run just finished may have replaced it).
@@ -466,10 +468,15 @@ pub fn teardown(world: &mut World) {
 /// A stage just loaded: note its hash, pick and spawn the ghost.
 fn stage_ready(world: &mut World) {
     let stage = world.resource::<StageWorld>();
-    if world.get_resource::<StageNow>().is_some_and(|s| s.id == stage.def.id) {
+    // Keyed by the route: the stage, or the open world's running event (its own records).
+    if world.get_resource::<StageNow>().is_some_and(|s| s.id == stage.route_id()) {
         return;
     }
-    let (def, road) = (stage.def.clone(), stage.road.clone());
+    let (mut def, road) = (stage.def.clone(), stage.road.clone());
+    if let Some(e) = &stage.event {
+        def.id = e.id;
+        def.name = e.name.clone();
+    }
     let road_hash = world
         .resource::<StageCatalog>()
         .info(def.id)

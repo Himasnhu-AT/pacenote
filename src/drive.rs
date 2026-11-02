@@ -99,7 +99,7 @@ pub fn spawn_car(world: &mut World) {
     let tf = Transform::from_translation(car.pos).with_rotation(car.rot);
     let id = world.spawn((Name::new("car"), DrivenCar { prev: (car.pos, car.rot), car }, DriverInput::default(), CarBody, tf, Visibility::default(), Actor)).id();
     crate::art::car::spawn(world, id);
-    world.insert_resource(StageRun { countdown: if s.is_open() { 0.0 } else { 3.0 }, ..default() });
+    world.insert_resource(StageRun { countdown: if s.free_roam() { 0.0 } else { 3.0 }, ..default() });
     // The view is the player's choice (Settings > Game > Camera view, kept in meta::Profile).
 }
 
@@ -196,7 +196,7 @@ fn simulate(
         let p = Vec2::new(c.car.pos.x, c.car.pos.z);
         // Free roam: no route, so no progress, splits or finish; recover onto the nearest road,
         // facing the way the car was going.
-        if stage.is_open() {
+        if stage.free_roam() {
             if recover.as_deref_mut().is_some_and(|r| std::mem::take(&mut r.0)) {
                 let fwd = c.car.rot * Vec3::NEG_Z;
                 let (at, h) = match stage.nearest_road(p, 400.0) {

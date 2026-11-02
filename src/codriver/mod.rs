@@ -169,12 +169,12 @@ fn talk(
         }
     }
     // No co-driver in free roam: the voice reads pace notes for events only.
-    if stage.is_open() {
+    if stage.free_roam() {
         return;
     }
-    if cd.planner.is_none() || cd.stage != stage.def.id {
+    if cd.planner.is_none() || cd.stage != stage.route_id() {
         cd.planner = Some(Planner::new(&stage.corners, &stage.crests, stage.road.length()));
-        cd.stage = stage.def.id;
+        cd.stage = stage.route_id();
         cd.reset(0.0);
     }
     if let Some(p) = &mut cd.planner {

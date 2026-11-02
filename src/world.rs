@@ -86,16 +86,28 @@ pub struct StageWorld {
     /// Trunks, boulders and props near the road: 8 m grid.
     obstacles: Arc<HashMap<(i32, i32), Vec<Obstacle>>>,
     /// The open world (`def.id == open::ID`): every road, its surfaces. `road` is then the
-    /// street the car starts on.
+    /// street the car starts on, or the running event's route.
     pub open: Option<Arc<crate::open::OpenWorld>>,
+    /// The event being driven in the open world (`road`, `corners`, `crests` are its route).
+    pub event: Option<crate::open::events::EventRef>,
 }
 
 const OBS_CELL: f32 = 8.0;
 
 impl StageWorld {
-    /// Free roam in the open world (no route, clock or finish).
-    pub fn is_open(&self) -> bool {
+    /// In the open world (free roam or an event).
+    pub fn in_world(&self) -> bool {
         self.open.is_some()
+    }
+
+    /// Free roam: in the open world with no event running (no route, clock or finish).
+    pub fn free_roam(&self) -> bool {
+        self.open.is_some() && self.event.is_none()
+    }
+
+    /// What the route's records, ghosts and pace notes are keyed by: the event, else the stage.
+    pub fn route_id(&self) -> u32 {
+        self.event.as_ref().map_or(self.def.id, |e| e.id)
     }
 
     /// Every road: the stage's one, or the open world's network.
@@ -171,6 +183,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
         props: Arc::new(Vec::new()),
         obstacles: Arc::new(HashMap::new()),
         open: None,
+        event: None,
     };
     // Collision for the car: the same points the dressing spawns, evaluated in a band along
     // the road (the trees far away can't be reached).
@@ -242,6 +255,7 @@ fn generate_open(def: &StageDef) -> StageWorld {
         props: Arc::new(Vec::new()),
         obstacles: Arc::new(HashMap::new()),
         open: Some(Arc::new(open)),
+        event: None,
     };
     let (graph, inputs) = dressing(&world);
     let net = world.open.as_ref().unwrap().net.clone();

@@ -245,7 +245,7 @@ fn update_hud(
 
     // Groups on / off (settings, damage, retired).
     // Free roam has no route: no clock or progress.
-    let route = !stage.is_open();
+    let route = !stage.free_roam();
     let want = [prefs.hud_speed, prefs.hud_revs, prefs.hud_clock && route, prefs.hud_progress && route, prefs.hud_damage && damaged, run.retired];
     if shown.groups != Some(want) {
         shown.groups = Some(want);
@@ -316,7 +316,7 @@ fn update_hud(
     };
     let center_changed = shown.center != Some(center);
     let clock_changed = shown.clock_ms != Some(ms) || shown.penalty != Some(pen);
-    let stage_changed = shown.stage != Some(stage.def.id);
+    let stage_changed = shown.stage != Some(stage.route_id());
 
     for (kind, mut txt, mut col) in &mut texts {
         match kind {
@@ -334,7 +334,15 @@ fn update_hud(
                 }
             }),
             HudText::Stage if stage_changed => set_text(&mut txt, |s| {
-                let _ = write!(s, "{:02}  {}", stage.def.id, stage.def.name.to_uppercase());
+                match (&stage.event, stage.in_world()) {
+                    (Some(e), _) => {
+                        let _ = write!(s, "{}", e.name.to_uppercase());
+                    }
+                    (None, true) => s.push_str("FREE ROAM"),
+                    (None, false) => {
+                        let _ = write!(s, "{:02}  {}", stage.def.id, stage.def.name.to_uppercase());
+                    }
+                }
             }),
             HudText::Clock if clock_changed => set_text(&mut txt, |s| clock_into(s, total)),
             HudText::Penalty if clock_changed => set_text(&mut txt, |s| {
@@ -369,7 +377,7 @@ fn update_hud(
     shown.gear = Some(car.gear);
     shown.clock_ms = Some(ms);
     shown.penalty = Some(pen);
-    shown.stage = Some(stage.def.id);
+    shown.stage = Some(stage.route_id());
     shown.center = Some(center);
 }
 

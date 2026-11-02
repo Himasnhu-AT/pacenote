@@ -292,6 +292,10 @@ pub fn on_menu(world: &mut World, id: &'static str) {
             }
         }
         "retry" | "restart" => super::restart_stage(world),
+        "roam" => {
+            crate::open::events::leave(world);
+            world.write_message(ScreenRequest::Replace(None));
+        }
         "recover" => super::recover(world),
         "next" => {
             let cur = world.get_resource::<StageNow>().map_or(1, |s| s.id);
@@ -1058,6 +1062,7 @@ fn build_results(world: &mut World, root: Entity) {
     let names = ["Split 1", "Split 2", "Split 3", "Finish"];
     let conditions = world.get_resource::<crate::world::StageWorld>().map(|s| (s.def.weather, s.def.time));
     let next_name = crate::stage::stages().into_iter().find(|d| d.id == crate::demo::next_stage(r.stage, stage_count())).map(|d| d.name).unwrap_or_default();
+    let in_event = world.get_resource::<crate::world::StageWorld>().is_some_and(|s| s.event.is_some());
     world.commands().entity(root).with_children(|p| {
         menu_backdrop(p, &t, 0.72, 1.0);
         p.spawn(menu_column(GAP_S)).with_children(|c| {
@@ -1111,7 +1116,12 @@ fn build_results(world: &mut World, root: Entity) {
             c.spawn(spacer(GAP_M));
             c.spawn((Node { column_gap: px(GAP_M), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|b| {
                 action_button(b, &t, "Retry", MenuAction::Custom("retry"), Some(1), true, 220.0);
-                action_button(b, &t, &format!("Next: {next_name}"), MenuAction::Custom("next"), Some(2), false, 300.0);
+                // An open-world event goes back to free roam; a stage offers the next stage.
+                if in_event {
+                    action_button(b, &t, "Free roam", MenuAction::Custom("roam"), Some(2), false, 300.0);
+                } else {
+                    action_button(b, &t, &format!("Next: {next_name}"), MenuAction::Custom("next"), Some(2), false, 300.0);
+                }
                 action_button(b, &t, "Menu", MenuAction::Custom("menu"), Some(3), false, 160.0);
                 if crate::demo::ACTIVE {
                     action_button(b, &t, crate::demo::store_button(), MenuAction::Custom("wishlist_end"), Some(4), false, 300.0);
