@@ -13,7 +13,7 @@ memory budgets. The rules are in `docs/ASSETS_BRIEF.md` (§0 licences and tradem
 | The shipped-asset manifest | `assets/manifest.toml` |
 | Generated attribution table | `ATTRIBUTION.md` (repo root) |
 | In-game credits (must include every CC BY item) | `assets/credits.txt` |
-| Builders | `tools/art/` (textures, meshes, tree cards, bushes, cars), `tools/audio/cook_car.py`, engine cook (`engine/tools/cook`, KTX2 BC7/BC5) |
+| Builders | `tools/art/` (textures, meshes, tree cards, bushes, cars), `tools/audio/cook_car.py`, `tools/audio/cook_voice.py` (co-driver phrase bank, Piper at build time), engine cook (`engine/tools/cook`, KTX2 BC7/BC5) |
 
 ## Adding or changing an asset
 

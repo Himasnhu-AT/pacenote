@@ -24,6 +24,7 @@ pub mod samples;
 mod scenes;
 pub mod stream;
 pub mod tyres;
+pub mod voice;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -420,8 +421,9 @@ fn gather(
         amb: mixer.effective_gain(BusId::AMBIENCE),
         car_lp: chain_lowpass(&mixer, car_bus),
         amb_lp: chain_lowpass(&mixer, BusId::AMBIENCE),
-        talk: codriver.is_some_and(|c| c.speaking()),
+        talk: codriver.as_deref().is_some_and(|c| c.os_speaking()),
     };
+    f.voice = codriver.as_deref().map_or_else(Default::default, |c| c.utterance(mixer.effective_gain(BusId::VOICE)));
     stats.car_gain = f.mix.car;
     stats.amb_gain = f.mix.amb;
     for i in 0..car::SURFACES {

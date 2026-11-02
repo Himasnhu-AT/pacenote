@@ -318,6 +318,17 @@ credits = [
   { title = "Car Antilag (No cleanup, 32float)", author = "modusmogulus", url = "https://freesound.org/people/modusmogulus/sounds/797835/", licence = "CC0 1.0" },
 ]
 
+# ---------------------------------------------------------------- co-driver voice
+
+[[asset]]
+name = "codriver_phrase_bank"
+paths = ["sounds/voice/*.ogg", "sounds/voice/bank.txt"]
+kind = "sound"
+sources = ["piper_cori"]
+collision = "none"
+lod = "n/a"
+built_by = "tools/audio/cook_voice.py (Piper TTS at build time)"
+
 # ---------------------------------------------------------------- text
 
 [[asset]]

@@ -828,15 +828,16 @@ Same authors and licence as the models above. ~3.3 MB in total.
 
 Recordings for the car: engine, tyres, impacts, scrape, pops. All **CC0** (Creative Commons 0, https://creativecommons.org/publicdomain/zero/1.0/), checked on each Freesound page on 2026-11-02; no credit is required. Downloaded as Freesound's HQ Ogg previews (96 or 44.1 kHz, ~190 kbps; no login needed for CC0 sounds) from `https://cdn.freesound.org/previews/<id/1000>/<id>_<user id>-hq.ogg` into `assets_src/audio_car/freesound/<id>_<name>.ogg` (`meta.tsv` there lists every download with its page and file URL). 25 MB on disk, including candidates that were not used.
 
-Cooked by `tools/audio/cook_car.py` into `assets/sounds/car/*.ogg` (mono, 48 kHz, Ogg Vorbis via `oggenc`, loudness-normalised, loops crossfaded into themselves so they wrap seamlessly): 22 files, 868 KB.
+Cooked by `tools/audio/cook_car.py` into `assets/sounds/car/*.ogg` (mono, 48 kHz, Ogg Vorbis via `oggenc`, loudness-normalised, loops crossfaded into themselves so they wrap seamlessly): 63 files, ~1 MB.
 
 | Shipped file(s) | Source | Author | Part used |
 |---|---|---|---|
-| `engine_idle_bay`, `engine_idle_exh` | [21_500_4062.wav](https://freesound.org/people/Chippy569/sounds/162516/), [21_500_D6.wav](https://freesound.org/people/Chippy569/sounds/162515/) | Chippy569 | whole loop (measured ~1006 rpm, no load) |
-| `engine_off_lo_bay`, `engine_off_lo_exh` | [21_2500_4062.wav](https://freesound.org/people/Chippy569/sounds/162519/), [21_2500_D6.wav](https://freesound.org/people/Chippy569/sounds/162518/) | Chippy569 | whole loop (~2431 rpm, no load) |
-| `engine_off_hi_bay`, `engine_off_hi_exh` | [21_6500_4062.wav](https://freesound.org/people/Chippy569/sounds/162522/), [21_6500_D6.wav](https://freesound.org/people/Chippy569/sounds/162521/) | Chippy569 | whole loop (~6297 rpm, no load) |
-| `engine_on_lo_bay`, `engine_on_lo_exh` | [19_2500_4062.wav](https://freesound.org/people/Chippy569/sounds/162510/), [19_2500_D6.wav](https://freesound.org/people/Chippy569/sounds/162509/) | Chippy569 | whole loop (~2556 rpm, full load) |
-| `engine_on_hi_bay`, `engine_on_hi_exh` | [20_6500_4062.wav](https://freesound.org/people/Chippy569/sounds/162513/), [20_6500_D6.wav](https://freesound.org/people/Chippy569/sounds/162512/) | Chippy569 | whole loop (~6208 rpm, full load) |
+| `engine_idle_{bay,exh}` | [21_500_4062.wav](https://freesound.org/people/Chippy569/sounds/162516/), [21_500_D6.wav](https://freesound.org/people/Chippy569/sounds/162515/) | Chippy569 | 2.6 s of whole firings (measured ~1006 rpm, no load) |
+| `engine_off_2431_{bay,exh}` | [21_2500_4062.wav](https://freesound.org/people/Chippy569/sounds/162519/), [21_2500_D6.wav](https://freesound.org/people/Chippy569/sounds/162518/) | Chippy569 | 2.6 s (~2431 rpm, no load) |
+| `engine_off_6297_{bay,exh}` | [21_6500_4062.wav](https://freesound.org/people/Chippy569/sounds/162522/), [21_6500_D6.wav](https://freesound.org/people/Chippy569/sounds/162521/) | Chippy569 | whole loop (~6297 rpm, no load) |
+| `engine_on_2556_{bay,exh}` | [19_2500_4062.wav](https://freesound.org/people/Chippy569/sounds/162510/), [19_2500_D6.wav](https://freesound.org/people/Chippy569/sounds/162509/) | Chippy569 | 2.6 s (~2556 rpm, full load) |
+| `engine_on_6208_{bay,exh}` | [20_6500_4062.wav](https://freesound.org/people/Chippy569/sounds/162513/), [20_6500_D6.wav](https://freesound.org/people/Chippy569/sounds/162512/) | Chippy569 | whole loop (~6208 rpm, full load) |
+| `engine_on_<rpm>_*` (10 more: 1450–7200), `engine_off_<rpm>_*` (11 more: 1166–7300) | the recordings above | Chippy569 | re-synthesised at cook time by pitch-synchronous overlap-add from the two recordings of the same load that bracket the rpm (idle at the bottom of both) |
 | `gravel_slide` | [S36-15 Car skids; dirt.wav](https://freesound.org/people/craigsmith/sounds/675282/) | craigsmith | the bodies of nine skids, joined |
 | `tarmac_squeal` | [Chrysler LHS tire squeal 03](https://freesound.org/people/audible-edge/sounds/71738/) + [AE0090 Volvo 740 GLE handbrake turn 01](https://freesound.org/people/audible-edge/sounds/76804/) | audible-edge | 6.0–9.3 s + 7.55–8.95 s, high-passed 350 Hz |
 | `scrape` | [MetalScrape_6.wav](https://freesound.org/people/deerlord/sounds/534851/) | deerlord | 12–18 s |
@@ -845,9 +846,20 @@ Cooked by `tools/audio/cook_car.py` into `assets/sounds/car/*.ogg` (mono, 48 kHz
 | `snap` | [Crack of branch 3.wav](https://freesound.org/people/deleted_user_2104797/sounds/164472/) | (account since deleted) | 0.04–0.59 s |
 | `pop1`, `pop2`, `pop3` | [Car Antilag (No cleanup, 32float)](https://freesound.org/people/modusmogulus/sounds/797835/) | modusmogulus | three bangs at 1.57, 2.17 and 5.27 s |
 
-About the engine: a Mercedes-Benz 190E 2.3-16V (2.3 l 16-valve 4-cylinder) on a dyno, recorded for "the Kickstarter Dyno Session" with three mics at once: a DPA 4062 on the radiator support above the headlight (`_4062`, shipped as `_bay`), an Audix D6 a foot behind the exhaust (`_D6`, shipped as `_exh`) and a Rode NT1a 30 ft in front (`_Distant`, downloaded, not used). The files named "500" are ~1000 rpm (no load) and ~2580 rpm (full load) by their firing frequency; the full-load "500" set and the sweeps (`162499`–`162504`) were downloaded but not used. The recording is of an engine, not a branded product: nothing in the shipped sound identifies the car.
+About the engine: a Mercedes-Benz 190E 2.3-16V (2.3 l 16-valve 4-cylinder) on a dyno, recorded for "the Kickstarter Dyno Session" with three mics at once: a DPA 4062 on the radiator support above the headlight (`_4062`, shipped as `_bay`), an Audix D6 a foot behind the exhaust (`_D6`, shipped as `_exh`) and a Rode NT1a 30 ft in front (`_Distant`, downloaded, not used). The files named "500" are ~1000 rpm (no load) and ~2580 rpm (full load) by their firing frequency; the full-load "500" set and the sweeps (`162499`–`162504`) were downloaded but not used. Checked again on 2026-11-02 (all CC0): the session's steady recordings are only the 500/2500/6500 sets; the sweeps are a 4.3 s and a 2.4 s acceleration pull (engine bay and exhaust mic from different takes, ~1000–3700 rpm) and two "deceleration" sweeps under load (6500→1350 rpm in ~4 s on the bay mic; 3450→1300 rpm in ~8 s on the exhaust, another take). Too fast and too mismatched for steady loops, so the extra rpm points are re-synthesised from the steady sets instead (`tools/audio/cook_car.py`). The recording is of an engine, not a branded product: nothing in the shipped sound identifies the car.
 
 Downloaded and not used (all CC0): Chippy569's distant-mic loops and sweeps; TRP 577504; felix.blume 685233; loganzsound 784177; kyles 637192, 637161; Marschal 718299; orlandorizo 591079; audible-edge 71736; craigsmith 675286; mwchristian95 725428; qubodup 332056, 332058; LPA134 329516; Logicogonist 807437; squareal 237375; P%C3%B3l 385935; CeebFrack 105351; conicity 697837; alegemaate 364699; selfdestructbutton 569571 (a GarageBand piece, not a recording).
+
+## voice_piper (co-driver phrase bank, added 2026-11-02)
+
+The co-driver's voice: 130 clips (numbers, pace-note words, damage and recovery lines), rendered once at build time by `tools/audio/cook_voice.py` with Piper into `assets/sounds/voice/*.ogg` (mono 24 kHz Ogg Vorbis, silence trimmed, levelled; `bank.txt` lists the words each clip says), ~1 MB. Model downloaded into `assets_src/voice_piper/` (114 MB, not shipped).
+
+### Piper voice en_GB-cori-high (`piper_cori`)
+- **Source page:** https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/cori/high
+- **Author:** Bryce Beattie (voice model; trained from scratch on public-domain LibriVox recordings, ~24 h of one reader)
+- **Licence:** Public domain (model card: dataset "public domain"; the author's page https://brycebeattie.com/files/tts/ lists Cori as public domain: "Feel free to use these for any legal and ethical purpose"). Checked 2026-11-02.
+- **Used for:** `assets/sounds/voice/*.ogg` (the co-driver's phrase bank).
+- Notes: picked because it is trained from scratch. Most other English Piper voices are fine-tuned from `en_US-lessac` (Blizzard 2013 data, non-commercial) or trained on CC BY-NC data (`ryan`, `hfc_male`), so they were not used. The Piper program (OHF-Voice/piper1-gpl, GPL-3.0) only runs at build time; its output is not covered by its licence. `norman` (US male, also public domain, from scratch) is the alternative if a male voice is wanted.
 
 ## Not found / not downloaded
 

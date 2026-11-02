@@ -15,18 +15,6 @@ use super::dsp::RATE;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
 pub enum Id {
-    /// Engine loops: the engine bay mic (intake, valve train, block: the cockpit sound) and
-    /// the exhaust mic, recorded together, so a loop's two mics share one play position.
-    IdleBay,
-    IdleExh,
-    OffLoBay,
-    OffLoExh,
-    OffHiBay,
-    OffHiExh,
-    OnLoBay,
-    OnLoExh,
-    OnHiBay,
-    OnHiExh,
     /// Tyres sliding (loops).
     GravelSlide,
     TarmacSqueal,
@@ -44,16 +32,6 @@ pub const COUNT: usize = Id::Pop3 as usize + 1;
 
 /// File stems, by [`Id`].
 pub const FILES: [&str; COUNT] = [
-    "engine_idle_bay",
-    "engine_idle_exh",
-    "engine_off_lo_bay",
-    "engine_off_lo_exh",
-    "engine_off_hi_bay",
-    "engine_off_hi_exh",
-    "engine_on_lo_bay",
-    "engine_on_lo_exh",
-    "engine_on_hi_bay",
-    "engine_on_hi_exh",
     "gravel_slide",
     "tarmac_squeal",
     "scrape",
@@ -69,42 +47,65 @@ pub const FILES: [&str; COUNT] = [
 /// its layer is silent.
 pub struct Bank {
     clips: Vec<Box<[f32]>>,
+    /// Engine loops by index into [`super::powertrain::LOOPS`]: (engine bay mic, exhaust mic).
+    engine: Vec<[Box<[f32]>; 2]>,
 }
 
 impl std::fmt::Debug for Bank {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let secs: f32 = self.clips.iter().map(|c| c.len() as f32 / RATE).sum();
-        write!(f, "Bank({} sounds, {secs:.1} s)", self.clips.len())
+        write!(f, "Bank({} sounds + {} engine loops, {:.1} s)", self.clips.len(), self.engine.len(), self.seconds())
     }
+}
+
+/// Decodes `path` to mono at its own rate (empty, with a warning, if it's missing or bad).
+pub fn load_mono(path: &Path) -> (Box<[f32]>, u32) {
+    match std::fs::read(path).map_err(|e| e.to_string()).and_then(|b| engine::sound::SoundClip::decode(&b)) {
+        Ok(clip) => {
+            let ch = (clip.channels() as usize).max(1);
+            (clip.samples().chunks_exact(ch).map(|f| f.iter().sum::<f32>() / ch as f32).collect(), clip.rate())
+        }
+        Err(e) => {
+            bevy::log::warn!("audio: can't load {}: {e}", path.display());
+            (Box::default(), RATE as u32)
+        }
+    }
+}
+
+fn load_48k(path: &Path) -> Box<[f32]> {
+    let (mono, rate) = load_mono(path);
+    to_mono_48k(&mono, 1, rate)
 }
 
 impl Bank {
     /// Reads and decodes `dir/sounds/car/*.ogg` (blocking: ~2 MB of Vorbis).
     pub fn load(assets: &Path) -> Bank {
         let dir = assets.join("sounds/car");
-        let clips = FILES
+        let clips = FILES.iter().map(|name| load_48k(&dir.join(format!("{name}.ogg")))).collect();
+        let engine = super::powertrain::LOOPS
             .iter()
-            .map(|name| {
-                let path = dir.join(format!("{name}.ogg"));
-                match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| engine::sound::SoundClip::decode(&b)) {
-                    Ok(clip) => to_mono_48k(clip.samples(), clip.channels() as usize, clip.rate()),
-                    Err(e) => {
-                        bevy::log::warn!("car audio: can't load {}: {e}", path.display());
-                        Box::default()
-                    }
-                }
-            })
+            .map(|(stem, _, _)| [load_48k(&dir.join(format!("engine_{stem}_bay.ogg"))), load_48k(&dir.join(format!("engine_{stem}_exh.ogg")))])
             .collect();
-        Bank { clips }
+        Bank { clips, engine }
     }
 
     pub fn get(&self, id: Id) -> &[f32] {
         &self.clips[id as usize]
     }
 
+    /// Engine loop `i` (index into [`super::powertrain::LOOPS`]): engine bay mic, exhaust mic.
+    pub fn engine(&self, i: usize) -> (&[f32], &[f32]) {
+        self.engine.get(i).map_or((&[], &[]), |[b, e]| (&b[..], &e[..]))
+    }
+
     /// Every sound decoded (none missing).
     pub fn complete(&self) -> bool {
-        self.clips.iter().all(|c| !c.is_empty())
+        self.clips.iter().all(|c| !c.is_empty()) && self.engine.iter().flatten().all(|c| !c.is_empty())
+    }
+
+    /// Seconds of audio held (mono, [`RATE`], f32: 192 KB a second).
+    pub fn seconds(&self) -> f32 {
+        let n: usize = self.clips.iter().chain(self.engine.iter().flatten()).map(|c| c.len()).sum();
+        n as f32 / RATE
     }
 }
 
@@ -138,8 +139,14 @@ pub fn start_loading(assets: PathBuf) {
     let spawned = std::thread::Builder::new().name("car-audio-load".into()).spawn(move || {
         let t0 = std::time::Instant::now();
         let bank = Bank::load(&assets);
-        bevy::log::info!("car audio: {} sounds decoded in {:.0} ms", COUNT, t0.elapsed().as_secs_f32() * 1000.0);
+        bevy::log::info!(
+            "car audio: {:?} decoded in {:.0} ms ({:.1} MB)",
+            bank,
+            t0.elapsed().as_secs_f32() * 1000.0,
+            bank.seconds() * RATE * 4.0 / 1e6
+        );
         let _ = BANK.set(bank);
+        super::voice::load(&assets);
     });
     if let Err(e) = spawned {
         bevy::log::warn!("car audio: can't start the loader: {e}");
@@ -160,7 +167,7 @@ pub fn bank() -> Option<&'static Bank> {
 
 /// 4-point Hermite read at a fractional position, wrapping around (for loops).
 #[inline]
-fn read_wrap(x: &[f32], pos: f64) -> f32 {
+pub(crate) fn read_wrap(x: &[f32], pos: f64) -> f32 {
     let n = x.len();
     let i = pos as usize;
     let t = (pos - i as f64) as f32;
@@ -171,7 +178,7 @@ fn read_wrap(x: &[f32], pos: f64) -> f32 {
 
 /// 4-point Hermite read, zero outside the clip (for one-shots).
 #[inline]
-fn read_clamped(x: &[f32], pos: f64) -> f32 {
+pub(crate) fn read_clamped(x: &[f32], pos: f64) -> f32 {
     let i = pos as isize;
     let t = (pos - i as f64) as f32;
     let at = |k: isize| if k >= 0 && (k as usize) < x.len() { x[k as usize] } else { 0.0 };
@@ -217,6 +224,7 @@ impl Looper {
         self.pos += rate.clamp(0.0, 4.0) as f64;
         v
     }
+
 
     /// The sample `offset` (0..1 of the loop) ahead of this position, without moving (a
     /// second, decorrelated read of the same loop: the other stereo channel).
@@ -296,7 +304,24 @@ mod tests {
             assert!(b.clips[i].len() > 4800, "{name} is missing or shorter than 0.1 s");
             assert!(b.clips[i].iter().all(|v| v.is_finite() && v.abs() <= 1.0), "{name}");
         }
+        for (i, (stem, _, _)) in super::super::powertrain::LOOPS.iter().enumerate() {
+            let (bay, exh) = b.engine(i);
+            assert!(bay.len() > 24_000 && bay.len() == exh.len(), "engine {stem}: {} / {}", bay.len(), exh.len());
+            assert!(bay.iter().chain(exh).all(|v| v.is_finite() && v.abs() <= 1.0), "engine {stem}");
+            // Seamless: the wrap is no bigger a step than the loop's own steps.
+            for x in [bay, exh] {
+                let p99 = {
+                    let mut d: Vec<f32> = x.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+                    d.sort_by(f32::total_cmp);
+                    d[d.len() * 99 / 100]
+                };
+                let wrap = (x[0] - x[x.len() - 1]).abs();
+                assert!(wrap <= p99 * 1.5, "engine {stem}: wrap step {wrap} vs p99 {p99}");
+            }
+        }
         assert!(b.complete());
+        // Memory: everything decoded stays well inside the audio budget (60 MB on Low).
+        assert!(b.seconds() * RATE * 4.0 < 25e6, "{b:?}");
     }
 
     #[test]

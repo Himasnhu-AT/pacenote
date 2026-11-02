@@ -17,6 +17,7 @@ use bevy::reflect::TypePath;
 use super::ambience::{AmbParams, AmbienceSynth};
 use super::car::{CarEvent, CarParams, CarSynth};
 use super::dsp::{Biquad, Dynamics, OnePole, RATE, Smooth, finite, soft_clip};
+use super::voice::{Utterance, VoicePlayer};
 
 pub const BLOCK: usize = 256;
 pub const MAX_EVENTS: usize = 16;
@@ -29,8 +30,8 @@ pub struct Mix {
     /// Lowest low-pass on the bus chain (Hz; ≥ 19 kHz = off), e.g. the pause snapshot.
     pub car_lp: f32,
     pub amb_lp: f32,
-    /// Someone is talking that the engine mixer doesn't know about (the co-driver's system
-    /// voice): the car ducks a little so the words stay clear.
+    /// Someone is talking outside this stream (the co-driver's OS voice, a dev fallback): the
+    /// car and ambience duck as for the co-driver's own voice.
     pub talk: bool,
 }
 
@@ -40,12 +41,16 @@ impl Default for Mix {
     }
 }
 
-/// Car gain while [`Mix::talk`] (≈ −4 dB).
-pub const TALK_DUCK: f32 = 0.63;
+/// Car gain while the co-driver talks (−5 dB: engine, tyres, wind, impacts).
+pub const TALK_DUCK: f32 = 0.562;
+/// Ambience gain while the co-driver talks (−3 dB).
+pub const TALK_DUCK_AMB: f32 = 0.708;
 
 /// Everything the synth needs for the next stretch of audio.
 #[derive(Clone, Copy, Debug)]
 pub struct Frame {
+    /// The co-driver's current line (a new serial starts it).
+    pub voice: Utterance,
     pub car: CarParams,
     pub amb: AmbParams,
     pub mix: Mix,
@@ -55,7 +60,7 @@ pub struct Frame {
 
 impl Default for Frame {
     fn default() -> Self {
-        Frame { car: CarParams::default(), amb: AmbParams::default(), mix: Mix::default(), events: [CarEvent::Shift(true); MAX_EVENTS], n_events: 0 }
+        Frame { voice: Utterance::default(), car: CarParams::default(), amb: AmbParams::default(), mix: Mix::default(), events: [CarEvent::Shift(true); MAX_EVENTS], n_events: 0 }
     }
 }
 
@@ -82,6 +87,10 @@ pub struct RallySynth {
     amb_lp: [OnePole; 2],
     dc: [Biquad; 2],
     pub dynamics: Dynamics,
+    /// The co-driver (mono, centre), mixed after the car's dynamics.
+    pub voice: VoicePlayer,
+    /// The OS voice (dev fallback) talking: 0..1, smoothed like the voice's own duck.
+    talk: Smooth,
     car_buf: [f32; BLOCK * 2],
     amb_buf: [f32; BLOCK * 2],
     out: [f32; BLOCK * 2],
@@ -99,6 +108,8 @@ impl RallySynth {
             amb_lp: [OnePole::new(20_000.0); 2],
             dc: [Biquad::highpass(22.0, 0.7); 2],
             dynamics: Dynamics::default(),
+            voice: VoicePlayer::default(),
+            talk: Smooth::new(0.0, 0.03, 0.25, RATE),
             car_buf: [0.0; BLOCK * 2],
             amb_buf: [0.0; BLOCK * 2],
             out: [0.0; BLOCK * 2],
@@ -112,8 +123,8 @@ impl RallySynth {
             self.car.event(*e);
         }
         let g = |v: f32| if v.is_finite() { v.clamp(0.0, 4.0) } else { 0.0 };
-        let duck = if f.mix.talk { TALK_DUCK } else { 1.0 };
-        self.mix = Mix { car: g(f.mix.car) * duck, amb: g(f.mix.amb), car_lp: f.mix.car_lp, amb_lp: f.mix.amb_lp, talk: f.mix.talk };
+        self.mix = Mix { car: g(f.mix.car), amb: g(f.mix.amb), car_lp: f.mix.car_lp, amb_lp: f.mix.amb_lp, talk: f.mix.talk };
+        self.voice.set(&f.voice);
         for lp in &mut self.car_lp {
             lp.set(self.mix.car_lp.min(20_000.0));
         }
@@ -130,9 +141,13 @@ impl RallySynth {
         self.amb.render(&mut self.amb_buf);
         let car_filtered = self.mix.car_lp < 19_000.0;
         let amb_filtered = self.mix.amb_lp < 19_000.0;
+        let bank = super::voice::bank();
         for i in 0..BLOCK {
-            let gc = self.car_gain.next(self.mix.car);
-            let ga = self.amb_gain.next(self.mix.amb);
+            let v = self.voice.next(bank);
+            // Duck under the co-driver: car −5 dB, ambience −3 dB (30 ms down, 250 ms back).
+            let duck = self.voice.duck().max(self.talk.next(if self.mix.talk { 1.0 } else { 0.0 }));
+            let gc = self.car_gain.next(self.mix.car * (1.0 - (1.0 - TALK_DUCK) * duck));
+            let ga = self.amb_gain.next(self.mix.amb * (1.0 - (1.0 - TALK_DUCK_AMB) * duck));
             let mut lr = [0.0; 2];
             for (ch, out) in lr.iter_mut().enumerate() {
                 // DC blocker on the car before its gain, so a mute is silent at once.
@@ -147,8 +162,8 @@ impl RallySynth {
                 *out = finite(c * gc + a * ga);
             }
             let (l, r) = self.dynamics.run(lr[0], lr[1]);
-            self.out[i * 2] = soft_clip(l);
-            self.out[i * 2 + 1] = soft_clip(r);
+            self.out[i * 2] = soft_clip(l + v);
+            self.out[i * 2 + 1] = soft_clip(r + v);
         }
         for f in &mut self.dc {
             f.settle();
@@ -321,6 +336,32 @@ mod tests {
         };
         let ratio = render(true) / render(false);
         assert!((ratio - TALK_DUCK).abs() < 0.08, "duck ratio {ratio}");
+    }
+
+    #[test]
+    fn co_driver_voice_plays_and_ducks_the_car_5_db() {
+        let bank = crate::audio::voice::bank().unwrap();
+        let render = |say: bool, gain: f32| {
+            let mut s = RallySynth::new(2);
+            let mut f = Frame { car: CarParams { active: true, rpm: 4000.0, throttle: 0.5, ..CarParams::default() }, ..Frame::default() };
+            if say {
+                let (mut u, unknown) = bank.plan("Over crest, left four long, into right two.", 1.0);
+                assert!(unknown.is_empty(), "{unknown:?}");
+                u.serial = 1;
+                u.gain = gain;
+                f.voice = u;
+            }
+            s.apply(&f);
+            let mut out = Vec::new();
+            s.render_into(48_000, &mut out);
+            // 0.25..0.75 s: words, after the duck's attack.
+            (out[24_000..72_000].iter().map(|v| v * v).sum::<f32>() / 48_000.0).sqrt()
+        };
+        let quiet = render(false, 0.0);
+        let ducked = render(true, 0.0) / quiet;
+        assert!((ducked - TALK_DUCK).abs() < 0.06, "car under the voice ×{ducked}");
+        let with_voice = render(true, 1.0);
+        assert!(with_voice > quiet * 1.3, "voice heard: {with_voice} vs car {quiet}");
     }
 
     #[test]
