@@ -5,6 +5,7 @@
 pub mod buildings;
 pub mod events;
 pub mod roads;
+pub mod traffic;
 
 use std::sync::Arc;
 
