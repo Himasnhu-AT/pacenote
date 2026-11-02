@@ -402,7 +402,7 @@ pub fn restart_stage(world: &mut World) {
     }
     if netlink::role(world) != Role::Guide
         && let Some(hash) = world.get_resource::<StageNow>().map(|s| s.hash.clone())
-        && let Some(g) = pick_ghost(world, stage.def.id, &hash)
+        && let Some(g) = pick_ghost(world, stage.route_id(), &hash)
     {
         spawn_ghost(world, g, &stage.road, &hash);
     }
