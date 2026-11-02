@@ -42,7 +42,7 @@ pub enum Biome {
     SnowForest,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, bevy::reflect::Reflect)]
 pub enum Surface {
     Gravel,
     Tarmac,
@@ -69,7 +69,7 @@ impl Surface {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, bevy::reflect::Reflect)]
 pub enum TimeOfDay {
     Morning,
     Noon,

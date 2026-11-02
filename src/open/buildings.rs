@@ -31,7 +31,7 @@ pub const WALL_INSET: f32 = 1.05;
 pub const WALL_STEP: f32 = 1.6;
 
 /// What a building is (sets its size, storeys, roof and facade).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
 pub enum Use {
     /// Downtown: offices over shops, 5–8 storeys, joined in rows.
     Downtown,
@@ -129,7 +129,7 @@ impl Building {
 }
 
 /// What a lot holds.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
 pub enum LotKind {
     /// Buildings in rows along the block's edges.
     Rows(Use),
@@ -311,6 +311,26 @@ fn row(out: &mut Vec<Building>, rng: &mut Rng, st: &RowStyle, ring: u32, lo: Vec
 
 /// Builds the layout for a road network (its seed and town height).
 pub fn layout(net: &RoadNet) -> Layout {
+    layout_with(net, &[])
+}
+
+/// A town block's kind set in the world data (`open::data::WorldData::lots`): block (`i`,
+/// `j`) of the 6×6 grid, west to east and north to south.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
+pub struct LotData {
+    pub i: u32,
+    pub j: u32,
+    pub kind: LotKind,
+}
+
+/// The town's block kinds as [`layout`] picks them (for the world data).
+pub fn lots(layout: &Layout) -> Vec<LotData> {
+    layout.blocks.iter().filter_map(|b| b.cell.map(|(i, j)| LotData { i, j, kind: b.kind })).collect()
+}
+
+/// [`layout`] with the block kinds in `lots` instead of the generated ones (a block's
+/// buildings come from its own seed, so the other blocks don't change). Farms stay generated.
+pub fn layout_with(net: &RoadNet, lots: &[LotData]) -> Layout {
     let seed = net.seed;
     let y = net.town_y;
     let n = (2.0 * TOWN / BLOCK).round() as u32;
@@ -340,6 +360,13 @@ pub fn layout(net: &RoadNet) -> Layout {
         shuffle(&mut rng, &mut cells);
         for (c, k) in cells.into_iter().zip(list) {
             kinds.insert(c, k);
+        }
+    }
+    for l in lots {
+        if let Some(k) = kinds.get_mut(&(l.i, l.j))
+            && l.kind != LotKind::Farm
+        {
+            *k = l.kind;
         }
     }
     let mut blocks = Vec::new();

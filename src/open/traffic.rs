@@ -305,7 +305,7 @@ impl LaneGraph {
                 segs.push((a.0, b.0 + n, a.1, b.1));
             }
             let off = lane_offset(nr.kind);
-            let lim = limit(nr.kind);
+            let lim = nr.limit.unwrap_or_else(|| limit(nr.kind));
             for (a, b, na, nb) in segs {
                 let ta = (trim[na] / STEP).ceil() as usize;
                 let tb = (trim[nb] / STEP).ceil() as usize;

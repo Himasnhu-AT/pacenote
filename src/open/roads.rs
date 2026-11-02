@@ -18,7 +18,7 @@ pub const PLATEAU: (f32, f32) = (400.0, 640.0);
 /// Mean radius of the highway ring (m).
 pub const RING_R: f32 = 1450.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
 pub enum RoadKind {
     Street,
     Highway,
@@ -44,6 +44,8 @@ pub struct NetRoad {
     pub road: Road,
     /// The last point joins the first (the ring).
     pub closed: bool,
+    /// Traffic speed limit (m/s) when set in the world data; else by kind (`traffic::limit`).
+    pub limit: Option<f32>,
     /// Bounding box (XZ) grown by the widest reach anyone asks for, for quick rejects.
     lo: Vec2,
     hi: Vec2,
@@ -76,13 +78,13 @@ pub struct NetPos {
 const REACH: f32 = 60.0;
 
 impl NetRoad {
-    fn new(kind: RoadKind, road: Road, closed: bool) -> NetRoad {
+    pub(crate) fn new(kind: RoadKind, road: Road, closed: bool) -> NetRoad {
         let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
         for p in &road.pts {
             lo = lo.min(Vec2::new(p.x, p.z));
             hi = hi.max(Vec2::new(p.x, p.z));
         }
-        NetRoad { kind, road, closed, lo: lo - REACH, hi: hi + REACH }
+        NetRoad { kind, road, closed, limit: None, lo: lo - REACH, hi: hi + REACH }
     }
 }
 
@@ -107,6 +109,66 @@ impl RoadNet {
     pub fn length(&self) -> f32 {
         self.roads.iter().map(|r| r.road.length()).sum()
     }
+}
+
+/// The junctions of a set of roads, found from where they meet: a station of one road lying
+/// on another (within [`JOIN`] m). Used when the network comes from the world data
+/// (`open::data`), where only the roads are stored. Sorted by position, one per meeting point.
+pub fn find_junctions(roads: &[NetRoad]) -> Vec<Junction> {
+    let mut out: Vec<Junction> = Vec::new();
+    for (a, ra) in roads.iter().enumerate() {
+        for (i, p3) in ra.road.pts.iter().enumerate() {
+            let p = Vec2::new(p3.x, p3.z);
+            for (b, rb) in roads.iter().enumerate() {
+                if b == a || p.x < rb.lo.x || p.y < rb.lo.y || p.x > rb.hi.x || p.y > rb.hi.y {
+                    continue;
+                }
+                let Some(at) = rb.road.nearest(p, JOIN) else { continue };
+                if at.lateral.abs() > JOIN {
+                    continue;
+                }
+                // The station of `b` nearest the point (the end of the segment past half way).
+                let j = if at.t < 0.5 { at.i } else { (at.i + 1).min(rb.road.len() - 1) };
+                let q = rb.road.pts[j];
+                if Vec2::new(q.x, q.z).distance(p) > JOIN {
+                    continue;
+                }
+                // Only where `a` meets `b`: an end of `a`, or a crossing (`a` runs on along
+                // both sides of the point, so it doesn't just touch).
+                let end = !ra.closed && (i == 0 || i + 1 == ra.road.len());
+                let at_end_of_b = !rb.closed && (j == 0 || j + 1 == rb.road.len());
+                if !end && !at_end_of_b && !crosses(&ra.road, i, &rb.road, j) {
+                    continue;
+                }
+                let k = match out.iter().position(|o| o.pos.distance(p) <= JOIN) {
+                    Some(k) => k,
+                    None => {
+                        out.push(Junction { pos: p, roads: Vec::new() });
+                        out.len() - 1
+                    }
+                };
+                for rs in [(a, i), (b, j)] {
+                    if !out[k].roads.iter().any(|r| r.0 == rs.0) {
+                        out[k].roads.push(rs);
+                    }
+                }
+            }
+        }
+    }
+    for j in &mut out {
+        j.roads.sort_unstable();
+    }
+    out.sort_by(|x, y| x.pos.x.total_cmp(&y.pos.x).then(x.pos.y.total_cmp(&y.pos.y)));
+    out
+}
+
+/// How close (m) a station must be to another road to join it.
+pub const JOIN: f32 = 0.75;
+
+/// Whether road `a` crosses road `b` at their stations `i` and `j` (rather than running
+/// alongside it): `a`'s direction there isn't along `b`'s.
+fn crosses(a: &Road, i: usize, b: &Road, j: usize) -> bool {
+    a.dir[i].dot(b.dir[j]).abs() < 0.9
 }
 
 /// Hills before the roads shape them; flat in town.

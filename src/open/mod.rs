@@ -3,9 +3,11 @@
 //! drives on (`vehicle::Ground`).
 
 pub mod buildings;
+pub mod data;
 pub mod events;
 pub mod forest;
 pub mod junctions;
+pub mod placeable;
 pub mod roads;
 pub mod tour;
 pub mod traffic;
@@ -47,6 +49,8 @@ pub const SPACING: f32 = 2.0;
 /// The world as the sim sees it.
 #[derive(Clone)]
 pub struct OpenWorld {
+    /// What the world is made from (`data`): roads, events, lots, home, overrides.
+    pub data: Arc<data::WorldData>,
     pub net: Arc<RoadNet>,
     pub heights: Arc<Heightfield>,
     /// Town and farm buildings, and their walls as solid cylinders for the car.
@@ -61,20 +65,33 @@ pub struct OpenWorld {
 }
 
 impl OpenWorld {
-    /// Builds the network and the terrain (a second or two).
+    /// The world the seed makes (a second or two): captured as data, then built from it.
     pub fn generate(seed: u64) -> OpenWorld {
-        let net = roads::generate(seed);
+        OpenWorld::from_data(data::WorldData::generate(seed))
+    }
+
+    /// Builds the network, the terrain and the town from the world data.
+    pub fn from_data(data: data::WorldData) -> OpenWorld {
+        let net = data.net();
         let n = (2.0 * roads::HALF / SPACING) as u32 + 1;
         let origin = Vec2::splat(-roads::HALF);
         let heights = Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z));
-        let layout = buildings::layout(&net);
+        let layout = buildings::layout_with(&net, &data.lots);
         let walls = buildings::ObstacleGrid::new(&buildings::obstacles(&layout), 10.0);
-        OpenWorld { net: Arc::new(net), heights: Arc::new(heights), buildings: Arc::new(layout), walls: Arc::new(walls), traffic: traffic::TrafficSolids::default(), traffic_solid: Arc::new(std::sync::atomic::AtomicBool::new(true)) }
+        OpenWorld {
+            data: Arc::new(data),
+            net: Arc::new(net),
+            heights: Arc::new(heights),
+            buildings: Arc::new(layout),
+            walls: Arc::new(walls),
+            traffic: traffic::TrafficSolids::default(),
+            traffic_solid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        }
     }
 
-    /// Where the car starts and which way it faces.
+    /// Where the car starts and which way it faces (home).
     pub fn spawn(&self) -> (Vec3, Vec2) {
-        roads::spawn(&self.net)
+        (self.data.home.pos, self.data.home.dir)
     }
 }
 

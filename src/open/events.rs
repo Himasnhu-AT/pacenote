@@ -30,7 +30,7 @@ pub struct EventRef {
     pub name: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
 pub enum EventKind {
     Rally,
     Sprint,
@@ -54,6 +54,9 @@ pub struct EventDef {
     pub name: String,
     pub kind: EventKind,
     pub route: Arc<Road>,
+    /// The road of the network it runs on, and the station it starts at.
+    pub road: usize,
+    pub from: usize,
 }
 
 const RALLY_NAMES: [&str; 4] = ["Fernhollow", "Blackpine", "Mossgate", "Cold Spring"];
@@ -74,21 +77,41 @@ fn lap(road: &Road, from: usize) -> Road {
     Road::from_centreline(&pts, &y, idx.iter().map(|&i| road.width[i]).collect(), idx.iter().map(|&i| road.surface[i]).collect())
 }
 
-/// Every event of the world, in a fixed order (their ids).
+/// Every event of the world, in a fixed order (their ids): the generated set
+/// ([`specs`]) built on `net`.
 pub fn list(net: &RoadNet) -> Vec<EventDef> {
+    build(net, &specs(net))
+}
+
+/// An event as data (`open::data::WorldData`): a stretch of one road of the network.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
+pub struct EventData {
+    pub id: u32,
+    pub name: String,
+    pub kind: EventKind,
+    /// Index into the network's roads.
+    pub road: u32,
+    /// First and last station (inclusive). A lap (`EventKind::Lap`) runs once round a closed
+    /// road from `from` and ignores `to`.
+    pub from: u32,
+    pub to: u32,
+}
+
+/// The events the generator puts on `net` (as data).
+pub fn specs(net: &RoadNet) -> Vec<EventData> {
     let mut out = Vec::new();
     let mut id = FIRST_ID;
-    let mut push = |name: String, kind: EventKind, route: Road| {
-        out.push(EventDef { id, name, kind, route: Arc::new(route) });
+    let mut push = |name: String, kind: EventKind, road: usize, from: usize, to: usize| {
+        out.push(EventData { id, name, kind, road: road as u32, from: from as u32, to: to as u32 });
         id += 1;
     };
     // Rallies: each forest road from just off the ring to its end.
-    for (k, r) in net.roads.iter().filter(|r| r.kind == RoadKind::Forest).enumerate() {
+    for (k, (ri, r)) in net.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::Forest).enumerate() {
         let from = (16.0 / STEP) as usize;
-        push(format!("{} rally", RALLY_NAMES[k % RALLY_NAMES.len()]), EventKind::Rally, slice(&r.road, from, r.road.len() - 1));
+        push(format!("{} rally", RALLY_NAMES[k % RALLY_NAMES.len()]), EventKind::Rally, ri, from, r.road.len() - 1);
     }
     // Sprints: the gravel country roads, town to ring.
-    for r in net.roads.iter().filter(|r| r.kind == RoadKind::Country && r.road.surface.iter().filter(|s| **s != Surface::Tarmac).count() * 2 > r.road.len()) {
+    for (ri, r) in net.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::Country && r.road.surface.iter().filter(|s| **s != Surface::Tarmac).count() * 2 > r.road.len()) {
         let p = r.road.pts[0];
         let dir = if p.x.abs() > p.z.abs() {
             if p.x > 0.0 { "East" } else { "West" }
@@ -98,16 +121,54 @@ pub fn list(net: &RoadNet) -> Vec<EventDef> {
             "North"
         };
         let from = (16.0 / STEP) as usize;
-        push(format!("{dir} road sprint"), EventKind::Sprint, slice(&r.road, from, r.road.len() - 1 - from));
+        push(format!("{dir} road sprint"), EventKind::Sprint, ri, from, r.road.len() - 1 - from);
     }
     // A lap of the ring from where the east country road joins it.
-    if let Some(ring) = net.roads.iter().find(|r| r.kind == RoadKind::Highway) {
+    if let Some((ri, ring)) = net.roads.iter().enumerate().find(|(_, r)| r.kind == RoadKind::Highway) {
         let from = ring.road.nearest(Vec2::new(super::roads::RING_R, 0.0), 400.0).map_or(0, |p| p.i);
         // Start a little past the junction.
         let from = (from + (40.0 / STEP) as usize) % ring.road.len();
-        push("Ring lap".into(), EventKind::Lap, lap(&ring.road, from));
+        push("Ring lap".into(), EventKind::Lap, ri, from, from);
     }
     out
+}
+
+/// The events described by `data`, built on `net`. Ones that don't fit the network (a road
+/// that isn't there, a range off its end, a lap on an open road) are left out with a warning.
+pub fn build(net: &RoadNet, data: &[EventData]) -> Vec<EventDef> {
+    let mut out = Vec::new();
+    for d in data {
+        let Some(nr) = net.roads.get(d.road as usize) else {
+            warn!("event {} \"{}\": no road {}", d.id, d.name, d.road);
+            continue;
+        };
+        let (from, to, n) = (d.from as usize, d.to as usize, nr.road.len());
+        let route = match d.kind {
+            EventKind::Lap if nr.closed && from < n => lap(&nr.road, from),
+            EventKind::Lap => {
+                warn!("event {} \"{}\": a lap needs a closed road", d.id, d.name);
+                continue;
+            }
+            _ if from < to && to < n => slice(&nr.road, from, to),
+            _ => {
+                warn!("event {} \"{}\": stations {from}..={to} don't fit road {} ({n})", d.id, d.name, d.road);
+                continue;
+            }
+        };
+        out.push(EventDef { id: d.id, name: d.name.clone(), kind: d.kind, route: Arc::new(route), road: d.road as usize, from });
+    }
+    out
+}
+
+/// Where station `station` of road `road` is along event `e`'s route (m), if the route
+/// covers it.
+pub fn route_s(e: &EventDef, net: &RoadNet, road: usize, station: usize) -> Option<f32> {
+    if road != e.road {
+        return None;
+    }
+    let n = net.roads.get(road)?.road.len();
+    let k = if e.kind == EventKind::Lap { (station + n - e.from) % n } else { station.checked_sub(e.from)? };
+    (k < e.route.len()).then_some(k as f32 * STEP)
 }
 
 /// The events of the world loaded now.
@@ -168,7 +229,7 @@ fn setup(world: &mut World) {
     if world.contains_resource::<Events>() {
         return;
     }
-    let events = list(&open.net);
+    let events = build(&open.net, &open.data.events);
     if crate::art::visual(world) {
         let mesh = world.resource_mut::<Assets<Mesh>>().add(Cylinder::new(MARKER_R * 0.55, 7.0));
         for e in &events {
@@ -189,6 +250,7 @@ fn setup(world: &mut World) {
             world.spawn((
                 Name::new(format!("event marker: {}", e.name)),
                 Marker,
+                super::placeable::EventStart { event: e.id },
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat),
                 Transform::from_translation(p + Vec3::Y * 3.5),
@@ -240,7 +302,12 @@ pub fn start(world: &mut World, id: u32) {
     let Some(e) = world.get_resource::<Events>().and_then(|ev| ev.0.iter().find(|e| e.id == id).cloned()) else { return };
     {
         let mut s = world.resource_mut::<StageWorld>();
-        s.corners = Arc::new(stage::corners(&e.route));
+        let open = s.open.clone();
+        let mut corners = stage::corners(&e.route);
+        if let Some(o) = &open {
+            o.data.apply_grades(&e, &o.net, &mut corners);
+        }
+        s.corners = Arc::new(corners);
         s.crests = Arc::new(stage::crests(&e.route));
         s.road = e.route.clone();
         s.event = Some(EventRef { id: e.id, name: e.name.clone() });
