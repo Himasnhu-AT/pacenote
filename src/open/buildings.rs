@@ -964,10 +964,22 @@ mod render {
         let (olo, ohi) = (lo - Vec2::splat(SIDEWALK), hi + Vec2::splat(SIDEWALK));
         let rect = |a: Vec2, b: Vec2| [Vec2::new(a.x, a.y), Vec2::new(b.x, a.y), Vec2::new(b.x, b.y), Vec2::new(a.x, b.y)];
         let lift = 0.05;
-        buf.draped(height, lift, &rect(olo, Vec2::new(ohi.x, lo.y)), Vec2::splat(2.0), paving);
-        buf.draped(height, lift, &rect(Vec2::new(olo.x, hi.y), ohi), Vec2::splat(2.0), paving);
-        buf.draped(height, lift, &rect(Vec2::new(olo.x, lo.y), Vec2::new(lo.x, hi.y)), Vec2::splat(2.0), paving);
-        buf.draped(height, lift, &rect(Vec2::new(hi.x, lo.y), Vec2::new(ohi.x, hi.y)), Vec2::splat(2.0), paving);
+        // Sidewalks sit up level with the kerb (`art::junctions`), their outer corners rounded
+        // to the kerb's fillet at the junctions.
+        let town_y = buf.origin.y;
+        let walk = |x: f32, z: f32| height(x, z).max(town_y + crate::open::junctions::SIDEWALK_TOP - lift);
+        let r = crate::open::junctions::TOWN_KERB_R;
+        buf.draped(&walk, lift, &rect(Vec2::new(olo.x + r, olo.y), Vec2::new(ohi.x - r, lo.y)), Vec2::splat(2.0), paving);
+        buf.draped(&walk, lift, &rect(Vec2::new(olo.x + r, hi.y), Vec2::new(ohi.x - r, ohi.y)), Vec2::splat(2.0), paving);
+        buf.draped(&walk, lift, &rect(Vec2::new(olo.x, olo.y + r), Vec2::new(lo.x, ohi.y - r)), Vec2::splat(2.0), paving);
+        buf.draped(&walk, lift, &rect(Vec2::new(hi.x, olo.y + r), Vec2::new(ohi.x, ohi.y - r)), Vec2::splat(2.0), paving);
+        for (k, into) in [(olo, Vec2::new(1.0, 1.0)), (Vec2::new(ohi.x, olo.y), Vec2::new(-1.0, 1.0)), (ohi, Vec2::new(-1.0, -1.0)), (Vec2::new(olo.x, ohi.y), Vec2::new(1.0, -1.0))] {
+            for corner in crate::open::junctions::sidewalk_corner_pieces(k, into, SIDEWALK) {
+                if corner.len() >= 3 {
+                    buf.draped(&walk, lift, &corner, Vec2::splat(2.0), paving);
+                }
+            }
+        }
         match blk.kind {
             LotKind::Plaza | LotKind::Tower => {
                 buf.draped(height, lift - 0.01, &rect(lo, hi), Vec2::splat(2.0), |i, j| (Tile::Paving, lin([0.9, 0.86, 0.78], 0.93 + 0.07 * hash(7, i, j))));
