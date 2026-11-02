@@ -11,6 +11,7 @@ pub mod car;
 pub mod dressing;
 pub mod ground;
 pub mod hands;
+pub mod junctions;
 pub mod look;
 pub mod meshfile;
 pub mod props;
@@ -125,7 +126,64 @@ mod dev {
             "Put the car on the road `s` metres from the start (clock and progress follow), for views along the stage",
             params(&[("s", "number", "metres along the road"), ("lateral", "number", "metres left of the centre (default 0)")]),
             place,
-        );
+        )
+            .add_control_command(
+                "art.teleport",
+                "Put the car at world (x, z) facing `heading` degrees (0 = +z, 90 = +x), on the ground; for screenshots of the open world",
+                params(&[("x", "number", "world x (m)"), ("z", "number", "world z (m)"), ("heading", "number", "degrees, 0 = +z (default 0)")]),
+                teleport,
+            )
+            .add_control_command(
+                "art.overhead",
+                "Hold the camera at `eye` looking at `at` (heights above the ground at `at`; screenshots from above); no params: back to the car",
+                params(&[("eye", "array", "[x, y, z]"), ("at", "array", "[x, y, z]")]),
+                overhead,
+            )
+            .init_resource::<Overhead>()
+            .add_systems(PostUpdate, hold_overhead.before(bevy::transform::TransformSystems::Propagate));
+    }
+
+    /// Where `art.overhead` holds the camera.
+    #[derive(Resource, Default)]
+    struct Overhead(Option<(Vec3, Vec3)>);
+
+    fn hold_overhead(o: Res<Overhead>, mut cams: Query<&mut Transform, With<engine::gfx::MainCamera>>) {
+        if let Some((eye, at)) = o.0
+            && let Ok(mut t) = cams.single_mut()
+        {
+            let up = if (at - eye).normalize_or_zero().y.abs() > 0.99 { Vec3::NEG_Z } else { Vec3::Y };
+            *t = Transform::from_translation(eye).looking_at(at, up);
+        }
+    }
+
+    fn vec3(v: Option<&Value>) -> Option<Vec3> {
+        let a = v?.as_array()?;
+        Some(Vec3::new(a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32))
+    }
+
+    fn overhead(world: &mut World, p: Value) -> Result<Value, String> {
+        // Heights are above the ground at `at`.
+        let ground = |at: Vec3| world.get_resource::<StageWorld>().map_or(0.0, |s| s.heights.height_at(at.x, at.z));
+        let v = vec3(p.get("eye")).zip(vec3(p.get("at"))).map(|(e, a)| {
+            let g = ground(a);
+            (e + Vec3::Y * g, a + Vec3::Y * g)
+        });
+        world.resource_mut::<Overhead>().0 = v;
+        Ok(json!({"held": v.is_some()}))
+    }
+
+    fn teleport(world: &mut World, p: Value) -> Result<Value, String> {
+        let x = p.get("x").and_then(Value::as_f64).ok_or("`x` is required")? as f32;
+        let z = p.get("z").and_then(Value::as_f64).ok_or("`z` is required")? as f32;
+        let h = (p.get("heading").and_then(Value::as_f64).unwrap_or(0.0) as f32).to_radians();
+        let stage = world.get_resource::<StageWorld>().ok_or("no stage")?.clone();
+        let y = stage.heights.height_at(x, z);
+        let mut q = world.query::<&mut DrivenCar>();
+        let mut c = q.single_mut(world).map_err(|e| e.to_string())?;
+        crate::vehicle::recover(&mut c.car, Vec3::new(x, y, z), h);
+        c.prev = (c.car.pos, c.car.rot);
+        let pos = c.car.pos;
+        Ok(json!({"pos": [pos.x, pos.y, pos.z]}))
     }
 
     fn stats(world: &mut World, _: Value) -> Result<Value, String> {
