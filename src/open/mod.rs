@@ -4,6 +4,7 @@
 
 pub mod buildings;
 pub mod events;
+pub mod forest;
 pub mod junctions;
 pub mod roads;
 pub mod tour;

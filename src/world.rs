@@ -90,6 +90,8 @@ pub struct StageWorld {
     pub open: Option<Arc<crate::open::OpenWorld>>,
     /// The event being driven in the open world (`road`, `corners`, `crests` are its route).
     pub event: Option<crate::open::events::EventRef>,
+    /// The open world's trunks and boulders, everywhere (built by tile, `open::forest`).
+    pub forest: Option<Arc<crate::open::forest::ForestSolids>>,
 }
 
 const OBS_CELL: f32 = 8.0;
@@ -127,9 +129,11 @@ impl StageWorld {
     }
 
     /// Every solid obstacle the car can hit (trunk / boulder centre, radius, top), sorted: for
-    /// checking stages generate the same scenery on every machine.
+    /// checking stages generate the same scenery on every machine. (In the open world: the
+    /// forest tiles built so far.)
     pub fn obstacle_list(&self) -> Vec<(Vec2, f32, f32)> {
-        let mut v: Vec<(Vec2, f32, f32)> = self.obstacles.values().flatten().filter(|o| o.give == Give::Solid).map(|o| (o.pos, o.radius, o.top)).collect();
+        let forest = self.forest.as_ref().map(|f| f.built_solids()).unwrap_or_default();
+        let mut v: Vec<(Vec2, f32, f32)> = self.obstacles.values().flatten().chain(forest.iter()).filter(|o| o.give == Give::Solid).map(|o| (o.pos, o.radius, o.top)).collect();
         v.sort_by(|a, b| a.0.x.total_cmp(&b.0.x).then(a.0.y.total_cmp(&b.0.y)).then(a.1.total_cmp(&b.1)).then(a.2.total_cmp(&b.2)));
         v
     }
@@ -163,6 +167,9 @@ impl Ground for StageWorld {
             // Buildings always; traffic only in free roam (events run without it, so ghosts
             // replay exactly).
             o.walls.query(p, r, out);
+            if let Some(f) = &self.forest {
+                f.obstacles(p, r, out);
+            }
             if self.event.is_none() && o.traffic_solid.load(std::sync::atomic::Ordering::Relaxed) {
                 o.traffic.obstacles(p, r, out);
             }
@@ -192,6 +199,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
         obstacles: Arc::new(HashMap::new()),
         open: None,
         event: None,
+        forest: None,
     };
     // Collision for the car: the same points the dressing spawns, evaluated in a band along
     // the road (the trees far away can't be reached).
@@ -248,8 +256,8 @@ pub fn generate(def: &StageDef) -> StageWorld {
     world
 }
 
-/// The open world as a [`StageWorld`]: the network and terrain from [`crate::open`], trunks and
-/// boulders near any road (the dressing graph keeps them off every road and out of town).
+/// The open world as a [`StageWorld`]: the network and terrain from [`crate::open`], every trunk
+/// and boulder solid (the dressing graph keeps them off every road and out of town).
 fn generate_open(def: &StageDef) -> StageWorld {
     let open = crate::open::OpenWorld::generate(def.seed);
     let (start, _) = open.spawn();
@@ -264,67 +272,27 @@ fn generate_open(def: &StageDef) -> StageWorld {
         obstacles: Arc::new(HashMap::new()),
         open: Some(Arc::new(open)),
         event: None,
+        forest: None,
     };
     let (graph, inputs) = dressing(&world);
     let net = world.open.as_ref().unwrap().net.clone();
-    // Only the trunks and boulders within reach of a road matter, so evaluate the graph on the
-    // 128 m tiles a road passes through (and their neighbours), on all cores, not on the whole
-    // 16 km2 (8 s). The graph samples on a global lattice, so a point is the same whichever
-    // tile finds it; duplicates on tile edges are dropped.
-    const TILE: f32 = 128.0;
+    // Every trunk and boulder is solid (the car can leave the roads). The tiles a road passes
+    // through (and their neighbours) are built now, on all cores; the rest around the car as
+    // it drives (`open::forest`).
+    let forest = crate::open::forest::ForestSolids::new(graph, inputs);
     let mut tiles: Vec<(i32, i32)> = net
         .roads
         .iter()
         .flat_map(|r| r.road.pts.iter().step_by(16))
         .flat_map(|p| {
-            let (tx, tz) = ((p.x / TILE).floor() as i32, (p.z / TILE).floor() as i32);
+            let (tx, tz) = crate::open::forest::ForestSolids::tile_of(Vec2::new(p.x, p.z));
             (-1..=1).flat_map(move |dz| (-1..=1).map(move |dx| (tx + dx, tz + dz)))
         })
         .collect();
     tiles.sort_unstable();
     tiles.dedup();
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
-    let chunk = tiles.len().div_ceil(threads).max(1);
-    let found: Vec<(Vec2, f32, f32)> = std::thread::scope(|sc| {
-        let jobs: Vec<_> = tiles
-            .chunks(chunk)
-            .map(|part| {
-                let (graph, inputs, net) = (&graph, &inputs, &net);
-                sc.spawn(move || {
-                    let mut v = Vec::new();
-                    for &(tx, tz) in part {
-                        let a = Area::new(Vec2::new(tx as f32, tz as f32) * TILE, Vec2::new(tx as f32 + 1.0, tz as f32 + 1.0) * TILE);
-                        let Ok(out) = pcg_core::evaluate(graph, inputs, Some(a)) else { continue };
-                        for (port, radius) in [("trunks", 0.32f32), ("boulders", 0.85)] {
-                            let Some(p) = out.emits.get(port) else { continue };
-                            for k in 0..p.len() {
-                                let c = Vec2::new(p.pos[k].x, p.pos[k].z);
-                                if c.x < a.min.x || c.y < a.min.y || c.x >= a.max.x || c.y >= a.max.y || net.nearest(c, 30.0).is_none() {
-                                    continue;
-                                }
-                                v.push((c, radius * p.scale[k].x, p.pos[k].y + 4.0 * p.scale[k].y));
-                            }
-                        }
-                    }
-                    v
-                })
-            })
-            .collect();
-        jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect()
-    });
-    {
-        let mut grid: HashMap<(i32, i32), Vec<Obstacle>> = HashMap::new();
-        let cell = |c: Vec2| ((c.x / OBS_CELL).floor() as i32, (c.y / OBS_CELL).floor() as i32);
-        for (c, r, top) in found {
-            grid.entry(cell(c)).or_default().push(Obstacle::solid(c, r, top));
-        }
-        // Same order on every machine (thread and HashMap order aren't); drop tile-edge twins.
-        for v in grid.values_mut() {
-            v.sort_by(|a, b| a.pos.x.total_cmp(&b.pos.x).then(a.pos.y.total_cmp(&b.pos.y)).then(a.radius.total_cmp(&b.radius)));
-            v.dedup_by(|a, b| a.pos == b.pos);
-        }
-        world.obstacles = Arc::new(grid);
-    }
+    forest.fill(&tiles);
+    world.forest = Some(Arc::new(forest));
     world
 }
 
