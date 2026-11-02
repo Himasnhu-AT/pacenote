@@ -10,6 +10,7 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use engine::ui::UiSet;
 use engine::ui::prelude::*;
+use bevy::picking::hover::Hovered;
 use bevy::ui_widgets::Button;
 use engine::ui::widgets::{ActionButton, Focusable, Look, NavQueue, secondary_look};
 
@@ -95,6 +96,8 @@ pub fn text_field(p: &mut ChildSpawnerCommands, t: &Theme, label_text: &str, key
         c.spawn(eyebrow(label_text, t.text_muted));
         c.spawn((
             Button,
+            // Bevy 0.20: hover state for the engine's hot look (no more Interaction).
+            Hovered::default(),
             ActionButton(key.action().into()),
             Focusable { order },
             TextBox(key),

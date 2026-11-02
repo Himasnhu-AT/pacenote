@@ -11,6 +11,7 @@ use bevy::ui::RelativeCursorPosition;
 use engine::flow::AppState;
 use engine::settings::{FieldDef, FieldKind, RegisterSettings, format_percent};
 use engine::ui::prelude::*;
+use bevy::picking::hover::Hovered;
 use bevy::ui_widgets::Button;
 use engine::ui::widgets::{ActionButton, Focus, Focusable, KeepColor, LookBg, ScrollList, nav_look, primary_look, secondary_look};
 
@@ -476,6 +477,8 @@ fn build_main(world: &mut World, root: Entity) {
 fn link_button(p: &mut ChildSpawnerCommands, t: &Theme, label_text: &str, action: MenuAction, order: u32) {
     p.spawn((
         Button,
+        // Bevy 0.20: hover state for the engine's hot look (no more Interaction).
+        Hovered::default(),
         ActionButton(action.into()),
         Focusable { order },
         secondary_look(t),
@@ -562,6 +565,7 @@ fn build_stages(world: &mut World, root: Entity) {
                     let action = if locked { "wishlist" } else { STAGE_IDS[k] };
                     list.spawn((
                         Button,
+                        Hovered::default(),
                         ActionButton(MenuAction::Custom(action).into()),
                         Focusable { order: k as u32 + 1 },
                         StageRow(*id),
@@ -657,6 +661,7 @@ fn keep_stage_focus(world: &mut World) {
 fn chip(p: &mut ChildSpawnerCommands, t: &Theme, name: &str, id: &'static str, on: bool, is_default: bool) {
     p.spawn((
         Button,
+        Hovered::default(),
         ActionButton(MenuAction::Custom(id).into()),
         if on { primary_look(t) } else { secondary_look(t) },
         Node { height: px(34), padding: UiRect::horizontal(px(12)), align_items: AlignItems::Center, border: UiRect::all(px(1)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
@@ -978,6 +983,7 @@ fn build_boards(world: &mut World, root: Entity) {
                 let color = if *stale { t.text_dim } else if team_rank == 1 && !rec.solo() { t.accent } else if mine { t.info } else { t.text };
                 c.spawn((
                     Button,
+                    Hovered::default(),
                     ActionButton(MenuAction::Custom(ROW_IDS[k]).into()),
                     Focusable { order: 10 + k as u32 },
                     nav_look(&t),
