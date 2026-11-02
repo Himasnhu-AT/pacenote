@@ -146,6 +146,7 @@ pub fn start_loading(assets: PathBuf) {
             bank.seconds() * RATE * 4.0 / 1e6
         );
         let _ = BANK.set(bank);
+        super::voice::load(&assets);
     });
     if let Err(e) = spawned {
         bevy::log::warn!("car audio: can't start the loader: {e}");

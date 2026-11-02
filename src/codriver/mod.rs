@@ -1,6 +1,7 @@
 //! The AI co-driver: when no human guide is in the car, reads the pace notes out loud ahead of
 //! the car, and reports damage, splits, the finish, going off the road and rolling over. Lines
-//! are spoken with the system's text-to-speech ([`speech`]) and shown as a subtitle.
+//! are spoken from a phrase bank of recorded clips played in the game's audio ([`speech`],
+//! `audio::voice`; the system's text-to-speech only with `--os-tts`) and shown as a subtitle.
 //!
 //! On by default for solo runs; quiet while a human guide is connected (they read the notes),
 //! and `N` toggles it.
@@ -74,9 +75,20 @@ impl Default for CoDriver {
 }
 
 impl CoDriver {
-    /// The co-driver's voice is speaking now (the car audio ducks under it).
+    /// The co-driver's voice is speaking now.
     pub fn speaking(&self) -> bool {
         self.speech.speaking()
+    }
+
+    /// The line the rally audio stream plays (phrase bank), at the co-driver volume times
+    /// `bus_gain` (the engine mixer's `voice` bus).
+    pub fn utterance(&self, bus_gain: f32) -> crate::audio::voice::Utterance {
+        self.speech.utterance(bus_gain)
+    }
+
+    /// The OS voice (`--os-tts` dev fallback) is speaking: the car ducks for it.
+    pub fn os_speaking(&self) -> bool {
+        self.speech.os_speaking()
     }
 
     /// Forget the run (new stage, restart): notes from `s`, nothing pending.
@@ -119,6 +131,7 @@ impl Plugin for CoDriverPlugin {
         let quiet = engine::cli::dev_flag("mute") || (engine::cli::test_driven() && !engine::cli::dev_flag("sound"));
         let mut cd = CoDriver::default();
         cd.speech.audible = !quiet;
+        cd.speech.os_tts = engine::cli::dev_flag("os-tts");
         app.insert_resource(cd)
             .add_action(ActionDef::button("codriver").label("Co-driver on / off").group("Driving").bind(Binding::key(KeyCode::KeyN)))
             .add_systems(Update, (toggle, talk, subtitle).chain().run_if(resource_exists::<StageWorld>))
@@ -322,6 +335,68 @@ fn stop(mut cd: ResMut<CoDriver>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every line the co-driver can say is in the phrase bank: pace notes over real stages with
+    /// every option, the start, splits and times, damage, recovery and the toggle.
+    #[test]
+    fn every_line_is_in_the_phrase_bank() {
+        let bank = crate::audio::voice::bank().unwrap();
+        let mut lines: Vec<String> = vec![
+            "Co-driver on.".into(),
+            "Ready. flat out.".into(),
+            "We're on the roof. Press R to get back on the road.".into(),
+            "We're off the road. Get back on, or press R.".into(),
+        ];
+        for id in 1..=6 {
+            let Some(g) = crate::guide::GuideStage::generate(id) else { continue };
+            for (grade_first, lead) in [(false, 1.0), (true, 1.3), (false, 0.75)] {
+                for speed in [8.0, 25.0, 60.0] {
+                    let mut p = Planner::new(&g.corners, &g.crests, g.road.length());
+                    p.grade_first = grade_first;
+                    p.lead_scale = lead;
+                    let mut out = Vec::new();
+                    let mut s = 0.0;
+                    while s < g.road.length() {
+                        p.update(s, speed, &mut out);
+                        s += 3.0;
+                    }
+                    lines.extend(out.into_iter().map(|l| format!("Ready. {}.", l.text)));
+                }
+            }
+        }
+        for t in [0.04, 9.96, 42.06, 59.99, 60.0, 83.44, 185.0, 599.9, 1234.5] {
+            lines.push(format!("Stop! Stage time {}.", spoken_time(t)));
+            for n in 1..=9 {
+                lines.push(format!("Split {n}, {}.", spoken_time(t)));
+            }
+        }
+        let levels = [0.0, 0.2, 0.5, 0.8, 1.0];
+        for &e in &levels {
+            for &st in &levels {
+                for &su in &levels {
+                    for pull in [-0.5, 0.0, 0.5] {
+                        for last in [0.1, 0.5] {
+                            let after = Damage { engine: e, steering: st, suspension: su, pull, hits: 1, last, detached: 0 };
+                            let before = Damage { engine: e * 0.5, steering: st * 0.5, suspension: su * 0.5, ..Damage::default() };
+                            if let Some(l) = calls::damage_line(&before, &after) {
+                                lines.push(l.text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        lines.sort();
+        lines.dedup();
+        let mut missing = std::collections::BTreeSet::new();
+        for l in &lines {
+            let (u, unknown) = bank.plan(l, 1.0);
+            missing.extend(unknown.into_iter().map(|w| format!("{w:?} in {l:?}")));
+            assert!(u.n > 0 && (u.n as usize) < crate::audio::voice::MAX_ITEMS, "{l:?}: {} steps", u.n);
+        }
+        assert!(missing.is_empty(), "{} words missing from the bank: {missing:#?}", missing.len());
+        assert!(lines.len() > 300, "{} lines checked", lines.len());
+    }
 
     #[test]
     fn times_read_out() {

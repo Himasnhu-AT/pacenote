@@ -44,6 +44,7 @@ made for Pacenote. Licences allowed: CC0, CC BY (credited), SIL OFL for fonts (d
 | Clank Car Crash Collision | qubodup | https://freesound.org/people/qubodup/sounds/151624/ | CC0 1.0 | body_sounds (sounds/car/scrape.ogg, sounds/car/impact_heavy.ogg, sounds/car/impact_light.ogg, sounds/car/snap.ogg) |
 | Crack of branch 3.wav | (account since deleted) | https://freesound.org/people/deleted_user_2104797/sounds/164472/ | CC0 1.0 | body_sounds (sounds/car/scrape.ogg, sounds/car/impact_heavy.ogg, sounds/car/impact_light.ogg, sounds/car/snap.ogg) |
 | Car Antilag (No cleanup, 32float) | modusmogulus | https://freesound.org/people/modusmogulus/sounds/797835/ | CC0 1.0 | pops (sounds/car/pop*.ogg) |
+| Piper voice en_GB-cori-high | Bryce Beattie (voice model; trained from scratch on public-domain LibriVox recordings, ~24 h of one reader) | https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/cori/high | Public domain (model card: dataset "public domain"; the author's page https://brycebeattie.com/files/tts/ lists Cori as public domain: "Feel free to use these for any legal and ethical purpose"). Checked 2026-11-02. | codriver_phrase_bank (sounds/voice/*.ogg, sounds/voice/bank.txt) |
 | Barlow, Barlow Condensed (fonts) | The Barlow Project Authors (Jeremy Tribby) | https://github.com/jpt/barlow | SIL Open Font License 1.1 | UI text (engine/assets/fonts) |
 
 ## Must be credited in game (CC BY)
