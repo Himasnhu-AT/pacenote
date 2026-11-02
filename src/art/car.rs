@@ -119,6 +119,9 @@ pub fn lod_range(level: u8) -> VisibilityRange {
     }
 }
 
+/// The car model's asset path.
+pub const MODEL: &str = "models/rallycar.glb";
+
 /// The model under the car entity.
 #[derive(Component)]
 pub struct CarModel;
@@ -216,7 +219,7 @@ pub fn spawn(world: &mut World, car: Entity) {
         return;
     }
     let spec = world.get_resource::<CarSpec>().map(|s| s.0.clone()).unwrap_or_default();
-    let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset("models/rallycar.glb"));
+    let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset(MODEL));
     let tf = Transform::from_translation(model_offset(&spec));
     let model = world.spawn((Name::new("car model"), CarModel, WorldAssetRoot(scene), tf, Visibility::default(), Actor)).id();
     world.entity_mut(car).add_child(model);
