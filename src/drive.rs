@@ -322,8 +322,9 @@ impl SteerSettings {
 }
 
 /// Keyboard steering: the input ramps towards the held key instead of jumping to full lock.
-/// It winds on quickly at low speed (hairpins, 0.2 s to full) and progressively slower with
-/// speed (~0.6 s at 110 km/h), so a tap is a small correction and a held key a committed turn.
+/// It winds on fairly quickly at low speed (hairpins, ~0.35 s to full) and progressively slower
+/// with speed (~0.85 s at 110 km/h), so a tap is a small correction and a held key a committed
+/// turn. (Playtesters found 0.2 s / 0.6 s twitchy.)
 /// Letting go, or switching sides, unwinds faster than it winds on (a driver lets the wheel
 /// self-centre). The vehicle's own speed-sensitive lock ([`vehicle::steer_lock`]) then makes
 /// full input the most useful angle at that speed.
@@ -335,7 +336,7 @@ pub fn keyboard_steer(prev: f32, target: f32, speed: f32, dt: f32) -> f32 {
 /// steering speed; letting go always unwinds at the full rate).
 pub fn keyboard_steer_at(prev: f32, target: f32, speed: f32, dt: f32, speed_scale: f32) -> f32 {
     let t = (speed.abs() / 30.0).clamp(0.0, 1.0);
-    let wind = (5.0 + (1.6 - 5.0) * t) * speed_scale.clamp(0.3, 3.0);
+    let wind = (3.2 + (1.2 - 3.2) * t) * speed_scale.clamp(0.3, 3.0);
     let unwind = 7.0;
     let target = target.clamp(-1.0, 1.0);
     // Winding on: moving away from centre on the same side as the key.
@@ -462,8 +463,8 @@ mod tests {
         // Quick at hairpin speed, progressive at speed: neither twitchy nor sluggish.
         let slow = time_to(1.0, 20.0);
         let fast = time_to(1.0, 110.0);
-        assert!((0.15..0.35).contains(&slow), "{slow}");
-        assert!((0.5..0.8).contains(&fast), "{fast}");
+        assert!((0.25..0.45).contains(&slow), "{slow}");
+        assert!((0.7..1.0).contains(&fast), "{fast}");
         // A one-frame tap at speed is a small correction.
         assert!(keyboard_steer(0.0, 1.0, 30.0, 1.0 / 60.0) < 0.05);
         // Releasing unwinds faster than winding on; switching sides passes through centre.
