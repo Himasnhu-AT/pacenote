@@ -1,9 +1,12 @@
-//! Car and stage audio, all synthesised in code (no sound files): see docs/AUDIO.md.
+//! Car and stage audio: see docs/AUDIO.md.
 //!
-//! - [`car`]: engine (rpm/load pulse train), turbo, pops, limiter, gear whine, tyres per
-//!   surface and slip, stones, wind, suspension thumps, impacts.
-//! - [`ambience`]: wind, leaves, birds, cicadas, moor calls, crickets, rain, per biome/weather.
-//! - [`stream`]: the synth behind one rodio source; bus gains mirrored from the engine mixer.
+//! - [`car`]: the engine from recorded rpm loops (crossfaded by rpm and load), recorded pops,
+//!   tyres per surface and slip from recorded loops, recorded impacts and scrapes; synthesised
+//!   stones, wind, suspension thumps and rattles.
+//! - [`samples`]: the recordings (`assets/sounds/car/*.ogg`), decoded once on a worker thread.
+//! - [`ambience`]: wind, leaves, birds, cicadas, moor calls, crickets, rain, per biome/weather
+//!   (synthesised).
+//! - [`stream`]: the mix behind one rodio source; bus gains mirrored from the engine mixer.
 //!
 //! Buses (engine mixer): `car` (under `sfx`, so the default voice duck takes it down 4 dB),
 //! `ambience` (built-in, ducked 6 dB), `voice` (built-in, the partner's voice), `ui`.
@@ -16,6 +19,7 @@ pub mod body;
 pub mod car;
 pub mod dsp;
 pub mod powertrain;
+pub mod samples;
 #[cfg(test)]
 mod scenes;
 pub mod stream;
@@ -152,6 +156,7 @@ fn start_output(
     mut link: ResMut<Link>,
     backend: Res<SoundBackend>,
     cfg: Res<SoundConfig>,
+    assets: Option<Res<engine::paths::AssetsDir>>,
     streams: Option<ResMut<Assets<RallyStream>>>,
     mut stats: ResMut<RallyAudioStats>,
 ) {
@@ -160,7 +165,12 @@ fn start_output(
     }
     link.started = true;
     stats.output = "off".into();
-    if let Some(path) = engine::cli::dev_value("car-audio-wav") {
+    let capture = engine::cli::dev_value("car-audio-wav");
+    if capture.is_some() || backend.kind() == engine::sound::BackendKind::Device {
+        let dir = assets.map_or_else(|| engine::paths::assets_dir(&crate::info()), |a| a.0.clone());
+        samples::start_loading(dir);
+    }
+    if let Some(path) = capture {
         let secs: f32 = engine::cli::dev_value("car-audio-secs").and_then(|v| v.parse().ok()).unwrap_or(20.0);
         let cap = (secs.clamp(0.5, 600.0) * dsp::RATE) as usize * 2;
         commands.insert_resource(Capture { synth: Box::new(RallySynth::new(7)), path, buf: Vec::with_capacity(cap + stream::BLOCK * 2), cap, frac: 0.0, done: false });

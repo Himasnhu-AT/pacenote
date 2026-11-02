@@ -10,7 +10,7 @@ Every file under `assets_src/` is listed here. Only CC0 and CC BY licences are u
 - "First Person arms" by DJMaesen (bumstrum), CC BY 4.0 (driver's arms; see models/sketchfab below).
 - Both lines are in `assets/credits.txt`. (The CC BY Milano '95 and Car Concept below are no longer shipped. Restore their credit lines if they are ever used again.)
 
-CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and models from Poly Haven (polyhaven.com) and ambientCG (ambientcg.com), CC0. Smoke sprites by Kenney (kenney.nl), CC0. Hay bale and fence by carlosjorgereis (OpenGameArt), CC0."
+CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and models from Poly Haven (polyhaven.com) and ambientCG (ambientcg.com), CC0. Car sounds from Freesound (freesound.org), CC0. Smoke sprites by Kenney (kenney.nl), CC0. Hay bale and fence by carlosjorgereis (OpenGameArt), CC0."
 
 
 ## models/car
@@ -821,6 +821,34 @@ Same authors and licence as the models above. ~3.3 MB in total.
 - `assets/models/*.pnm`: decimated rocks, ferns, grass and a stump (`tools/art/build_meshes.py`); the bushes `shrub_a`/`shrub_b` are clusters of leaf-clump cards cut from `tree_small_02` (texture set `m_shrub`, `tools/art/build_bushes.py`), since Poly Haven's `shrub_02` is a sparse weed rather than a bush.
 - `assets/models/rallycar.glb`: the Mercedes-AMG GT3 Evo (above, CC BY), converted and rigged by `tools/art/import_sketchfab.py --profile gt3`. (The original procedural hatchback, `tools/art/build_rallycar.py`, has no third-party content.)
 - Credits: `assets/credits.txt`.
+
+## audio_car (car sounds, added 2026-11-02)
+
+Recordings for the car: engine, tyres, impacts, scrape, pops. All **CC0** (Creative Commons 0, https://creativecommons.org/publicdomain/zero/1.0/), checked on each Freesound page on 2026-11-02; no credit is required. Downloaded as Freesound's HQ Ogg previews (96 or 44.1 kHz, ~190 kbps; no login needed for CC0 sounds) from `https://cdn.freesound.org/previews/<id/1000>/<id>_<user id>-hq.ogg` into `assets_src/audio_car/freesound/<id>_<name>.ogg` (`meta.tsv` there lists every download with its page and file URL). 25 MB on disk, including candidates that were not used.
+
+Cooked by `tools/audio/cook_car.py` into `assets/sounds/car/*.ogg` (mono, 48 kHz, Ogg Vorbis via `oggenc`, loudness-normalised, loops crossfaded into themselves so they wrap seamlessly): 22 files, 868 KB.
+
+| Shipped file(s) | Source | Author | Part used |
+|---|---|---|---|
+| `engine_idle_bay`, `engine_idle_exh` | [21_500_4062.wav](https://freesound.org/people/Chippy569/sounds/162516/), [21_500_D6.wav](https://freesound.org/people/Chippy569/sounds/162515/) | Chippy569 | whole loop (measured ~1006 rpm, no load) |
+| `engine_off_lo_bay`, `engine_off_lo_exh` | [21_2500_4062.wav](https://freesound.org/people/Chippy569/sounds/162519/), [21_2500_D6.wav](https://freesound.org/people/Chippy569/sounds/162518/) | Chippy569 | whole loop (~2431 rpm, no load) |
+| `engine_off_hi_bay`, `engine_off_hi_exh` | [21_6500_4062.wav](https://freesound.org/people/Chippy569/sounds/162522/), [21_6500_D6.wav](https://freesound.org/people/Chippy569/sounds/162521/) | Chippy569 | whole loop (~6297 rpm, no load) |
+| `engine_on_lo_bay`, `engine_on_lo_exh` | [19_2500_4062.wav](https://freesound.org/people/Chippy569/sounds/162510/), [19_2500_D6.wav](https://freesound.org/people/Chippy569/sounds/162509/) | Chippy569 | whole loop (~2556 rpm, full load) |
+| `engine_on_hi_bay`, `engine_on_hi_exh` | [20_6500_4062.wav](https://freesound.org/people/Chippy569/sounds/162513/), [20_6500_D6.wav](https://freesound.org/people/Chippy569/sounds/162512/) | Chippy569 | whole loop (~6208 rpm, full load) |
+| `gravel_roll` | [car driving along gravel road cu blyth 21 6 12.flac](https://freesound.org/people/TRP/sounds/577501/) | TRP | 24–32 s, high-passed 140 Hz |
+| `gravel_slide` | [S36-15 Car skids; dirt.wav](https://freesound.org/people/craigsmith/sounds/675282/) | craigsmith | the bodies of nine skids, joined |
+| `tarmac_roll` | [Tire noise on the highway](https://freesound.org/people/ViveleVent/sounds/817389/) | ViveleVent | 15–23 s |
+| `tarmac_squeal` | [Chrysler LHS tire squeal 03](https://freesound.org/people/audible-edge/sounds/71738/) + [AE0090 Volvo 740 GLE handbrake turn 01](https://freesound.org/people/audible-edge/sounds/76804/) | audible-edge | 6.0–9.3 s + 7.55–8.95 s, high-passed 350 Hz |
+| `snow_roll` | [tires_snow_ice_slow.wav](https://freesound.org/people/dunebuggy/sounds/71099/) | dunebuggy | 0.8–6.8 s |
+| `scrape` | [MetalScrape_6.wav](https://freesound.org/people/deerlord/sounds/534851/) | deerlord | 12–18 s |
+| `impact_heavy` | [S36-09 Metal foley for car crash; much crunching](https://freesound.org/people/craigsmith/sounds/675475/) | craigsmith | 0.10–0.95 s |
+| `impact_light` | [Clank Car Crash Collision](https://freesound.org/people/qubodup/sounds/151624/) | qubodup | whole |
+| `snap` | [Crack of branch 3.wav](https://freesound.org/people/deleted_user_2104797/sounds/164472/) | (account since deleted) | 0.04–0.59 s |
+| `pop1`, `pop2`, `pop3` | [Car Antilag (No cleanup, 32float)](https://freesound.org/people/modusmogulus/sounds/797835/) | modusmogulus | three bangs at 1.57, 2.17 and 5.27 s |
+
+About the engine: a Mercedes-Benz 190E 2.3-16V (2.3 l 16-valve 4-cylinder) on a dyno, recorded for "the Kickstarter Dyno Session" with three mics at once: a DPA 4062 on the radiator support above the headlight (`_4062`, shipped as `_bay`), an Audix D6 a foot behind the exhaust (`_D6`, shipped as `_exh`) and a Rode NT1a 30 ft in front (`_Distant`, downloaded, not used). The files named "500" are ~1000 rpm (no load) and ~2580 rpm (full load) by their firing frequency; the full-load "500" set and the sweeps (`162499`–`162504`) were downloaded but not used. The recording is of an engine, not a branded product: nothing in the shipped sound identifies the car.
+
+Downloaded and not used (all CC0): Chippy569's distant-mic loops and sweeps; TRP 577504; felix.blume 685233; loganzsound 784177; kyles 637192, 637161; Marschal 718299; orlandorizo 591079; audible-edge 71736; craigsmith 675286; mwchristian95 725428; qubodup 332056, 332058; LPA134 329516; Logicogonist 807437; squareal 237375; P%C3%B3l 385935; CeebFrack 105351; conicity 697837; alegemaate 364699; selfdestructbutton 569571 (a GarageBand piece, not a recording).
 
 ## Not found / not downloaded
 

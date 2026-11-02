@@ -1,18 +1,22 @@
-//! The car, synthesised, and its inside/outside mix. The parts:
-//! - [`super::powertrain`]: engine (per-cylinder exhaust pulses through pipe waveguides), intake,
-//!   pops, limiter, misfires and knock when damaged; turbo whistle, blow-off and flutter.
-//! - [`super::tyres`]: rolling and sliding per surface, stones on the arches and floor.
-//! - [`super::body`]: impacts, ground hits, suspension thumps and bottoming, scrapes,
-//!   rattles, gear clunks.
-//! - here: gear whine, wind, and the mix for the chase camera (outside) or the bonnet camera
-//!   (inside: exhaust through the bulkhead, tyres muffled, intake/whine/stones/rattles up).
+//! The car and its inside/outside mix. The parts:
+//! - [`super::powertrain`]: the engine from recorded loops (engine bay and exhaust mics,
+//!   crossfaded by rpm and load), recorded backfire pops, the limiter, misfires when damaged.
+//! - [`super::tyres`]: recorded rolling and sliding loops per surface, stones on the arches
+//!   and floor.
+//! - [`super::body`]: recorded impacts, ground hits, snaps and scrapes; suspension thumps and
+//!   bottoming, rattles, gear clunks.
+//! - here: wind, and the mix for the chase camera (outside) or the cockpit and bonnet cameras
+//!   (inside: the engine bay mic through the bulkhead, the exhaust dark and boomy, tyres
+//!   muffled, stones and rattles up).
 //!
 //! Runs on the audio thread; parameters arrive once per block (see [`CarParams`]) and are
-//! smoothed per sample.
+//! smoothed per sample. The recordings come from [`super::samples::bank`]; until it has loaded
+//! the recorded layers are silent.
 
 use super::body::Body;
-use super::dsp::{Biquad, Noise, Osc, RATE, Smooth, Wander, smoothstep};
-use super::powertrain::{Engine, Turbo};
+use super::dsp::{Biquad, Noise, RATE, Smooth, Wander};
+use super::powertrain::Engine;
+use super::samples::{self, Bank};
 use super::tyres::Tyres;
 
 /// Surface classes the tyres sound different on.
@@ -106,13 +110,10 @@ pub enum CarEvent {
 pub struct CarSynth {
     p: CarParams,
     n: Noise,
+    bank: Option<&'static Bank>,
     pub engine: Engine,
-    pub turbo: Turbo,
     pub tyres: Tyres,
     pub body: Body,
-    whine: Osc,
-    whine2: Osc,
-    whine_lvl: Smooth,
     wind_lp: Biquad,
     wind_hiss: Biquad,
     buffet: Biquad,
@@ -120,7 +121,9 @@ pub struct CarSynth {
     gust: Wander,
     speed: Smooth,
     interior: Smooth,
-    /// Inside: the exhaust through the body (low-passed, with the cabin's boom).
+    /// Inside: the engine bay through the bulkhead, the exhaust through the body (low-passed,
+    /// with the cabin's boom).
+    cabin_bay: Biquad,
     cabin_eng: Biquad,
     cabin_boom: Biquad,
     /// Inside: the tyres and the world outside, muffled.
@@ -136,13 +139,10 @@ impl CarSynth {
         CarSynth {
             p: CarParams::default(),
             n: Noise::new(seed),
+            bank: samples::bank(),
             engine: Engine::new(seed),
-            turbo: Turbo::new(seed),
             tyres: Tyres::new(seed),
             body: Body::new(seed),
-            whine: Osc::default(),
-            whine2: Osc::default(),
-            whine_lvl: sm(0.1, 0.1),
             wind_lp: Biquad::lowpass(600.0, 0.6),
             wind_hiss: Biquad::bandpass(2500.0, 0.6),
             buffet: Biquad::lowpass(160.0, 0.9),
@@ -150,7 +150,8 @@ impl CarSynth {
             gust: Wander::new(0.4),
             speed: sm(0.1, 0.1),
             interior: sm(0.05, 0.05),
-            cabin_eng: Biquad::lowpass(750.0, 0.6),
+            cabin_bay: Biquad::lowpass(2600.0, 0.6),
+            cabin_eng: Biquad::lowpass(850.0, 0.6),
             cabin_boom: Biquad::bandpass(118.0, 2.2),
             cabin_l: Biquad::lowpass(1700.0, 0.6),
             cabin_r: Biquad::lowpass(1700.0, 0.6),
@@ -183,7 +184,6 @@ impl CarSynth {
             c.slide = ok(c.slide, 0.0, 4.0, 0.0);
         }
         self.engine.set(&p);
-        self.turbo.set(&p);
         self.p = p;
     }
 
@@ -197,7 +197,6 @@ impl CarSynth {
             CarEvent::Shift(up) => {
                 self.body.shift();
                 self.engine.shift(up, &self.p);
-                self.turbo.shift(up);
             }
         }
     }
@@ -205,10 +204,6 @@ impl CarSynth {
     /// Updates filter coefficients from the smoothed state (every 32 samples: small enough
     /// steps that sweeps don't zipper).
     fn update_coeffs(&mut self) {
-        let p = self.p;
-        self.engine.update_coeffs(&p);
-        self.turbo.update_coeffs();
-        self.tyres.update_coeffs();
         let speed = self.speed.v;
         self.wind_lp.set_lowpass(180.0 + 28.0 * speed, 0.6);
         self.wind_hiss.set_bandpass(1500.0 + 40.0 * speed, 0.5);
@@ -217,6 +212,9 @@ impl CarSynth {
 
     /// Renders `frames` stereo frames, adding into `out` (interleaved L R).
     pub fn render(&mut self, out: &mut [f32]) {
+        if self.bank.is_none() {
+            self.bank = samples::bank();
+        }
         for fr in out.chunks_exact_mut(2) {
             let (l, r) = self.sample();
             fr[0] += l;
@@ -236,41 +234,36 @@ impl CarSynth {
         let speed = self.speed.next(p.speed);
         let inside = self.interior.next(p.interior);
         let out = 1.0 - inside;
-        let eng = self.engine.sample(&p);
-        let ty = self.tyres.sample(&p, speed);
-        let body = self.body.sample(&p);
-        let turbo = self.turbo.sample(self.engine.load.v, self.engine.rpm.v);
-        // Gear whine: straight-cut gears; the input shaft mesh and the final drive, louder
-        // under load and on the overrun, much louder inside.
-        let e = &self.engine;
-        let shaft = e.rpm.v / 60.0;
-        let g = p.gear.max(1) as f32;
-        let wf = shaft * (17.0 + 2.0 * g);
-        let wl = self.whine_lvl.next(if p.gear != 0 { (0.3 + 0.7 * e.load.v) * smoothstep(2.0, 12.0, speed) } else { 0.0 });
-        let whine = (self.whine.next(wf) + 0.35 * self.whine2.next(wf * 2.0)) * wl * (0.004 + 0.012 * inside);
+        let bank = self.bank;
+        let eng = self.engine.sample(&p, bank);
+        let ty = self.tyres.sample(&p, speed, bank);
+        let body = self.body.sample(&p, bank);
         // Wind. Outside: rushing air. Inside: low buffeting and a door-seal whistle.
         let gust = 0.8 + 0.2 * self.gust.next(&mut self.n);
         let wn = self.n.white();
         let v2 = (speed / 40.0).powi(2).min(1.5) * gust;
         let rush = (self.wind_lp.run(wn) * 1.4 + self.wind_hiss.run(wn) * 0.35) * v2 * 0.22;
         let cabin_wind = (self.buffet.run(wn) * 2.2 + self.seal.run(wn) * 0.08) * v2 * 0.2;
-        // Exhaust: direct outside; through the bulkhead inside (dark, boomy).
-        let ex_out = eng.exhaust + eng.pops;
-        let ex_in = self.cabin_eng.run(eng.exhaust + 0.5 * eng.pops);
-        let boom = self.cabin_boom.run(eng.exhaust);
-        let exhaust = ex_out * out + (ex_in * 1.25 + boom * 0.7) * inside;
-        let mech = eng.mech * (0.6 + 0.9 * inside);
+        // Engine. Outside: mostly the exhaust, some engine bay. Inside: the engine bay through
+        // the bulkhead (intake, valve train), the exhaust dark and boomy through the body.
+        let ex_out = eng.exhaust * 0.9 + eng.bay * 0.4;
+        let ex_in = self.cabin_bay.run(eng.bay) * 0.85 + self.cabin_eng.run(eng.exhaust) * 0.75 + self.cabin_boom.run(eng.exhaust) * 0.5;
+        let engine = ex_out * out + ex_in * inside;
+        // Pops: direct outside, softer inside.
+        let pop_g = out + 0.5 * inside;
+        let (pop_l, pop_r) = (eng.pops.0 * pop_g, eng.pops.1 * pop_g);
         // Tyres: full band outside, muffled inside; stones on the floor are louder inside.
         let tl = ty.l * out + self.cabin_l.run(ty.l + rush) * 0.6 * inside;
         let tr = ty.r * out + self.cabin_r.run(ty.r + rush) * 0.6 * inside;
         let floor = 0.65 + 0.7 * inside;
         let shell = body.shell * (0.6 * inside);
-        let mono = exhaust + mech + turbo * (0.9 + 0.2 * inside) + whine + rush * out + cabin_wind * inside + shell;
-        let l = (mono + tl + ty.floor_l * floor + body.l) * act;
-        let r = (mono + tr + ty.floor_r * floor + body.r) * act;
+        let mono = engine + rush * out + cabin_wind * inside + shell;
+        let l = (mono + pop_l + tl + ty.floor_l * floor + body.l) * act;
+        let r = (mono + pop_r + tr + ty.floor_r * floor + body.r) * act;
         (l, r)
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -382,83 +375,64 @@ mod tests {
         check(&g, 2.0);
     }
 
-    /// Energy at the firing-order harmonics (rpm/30 Hz and multiples) dominates energy between
-    /// them, and moves with rpm.
+    /// The engine's firing harmonics (rpm/30 Hz and multiples) sit where the rpm says, at the
+    /// recorded rpms and between them (two loops pitched to the same rpm), on and off load.
     #[test]
-    fn spectrum_follows_rpm() {
-        for rpm in [1800.0f32, 3000.0, 4500.0, 6000.0] {
-            let mut s = CarSynth::new(3);
-            let mut p = driving(rpm, 1.0);
-            p.speed = 0.0;
-            s.set(p);
-            let out = mono(&run(&mut s, 1.0));
-            let x = &out[24_000..];
-            let f = rpm / 30.0;
-            let on: f32 = (1..=6).map(|k| goertzel(x, f * k as f32)).sum();
-            let off: f32 = (1..=6).map(|k| goertzel(x, f * (k as f32 + 0.37))).sum();
-            assert!(on > 8.0 * off, "rpm {rpm}: on {on} off {off}");
-            // Wrong rpm's harmonics are weak.
-            let wrong: f32 = (1..=3).map(|k| goertzel(x, f * 1.37 * k as f32)).sum();
-            assert!(on > 4.0 * wrong, "rpm {rpm}: on {on} wrong {wrong}");
-            // Uneven cylinders: some half-order (rpm/60 multiples) content, well below the
-            // firing harmonics.
-            let half: f32 = (0..6).map(|k| goertzel(x, f * (k as f32 + 0.5))).sum();
-            assert!(half > on * 1e-4 && half < on * 0.5, "rpm {rpm}: half-orders {half} vs {on}");
+    fn pitch_follows_rpm() {
+        for th in [0.0, 1.0] {
+            for rpm in [1500.0f32, 2500.0, 3300.0, 4500.0, 6000.0, 7200.0] {
+                let mut s = CarSynth::new(3);
+                let mut p = driving(rpm, th);
+                p.speed = 0.0;
+                s.set(p);
+                let out = mono(&run(&mut s, 1.2));
+                let x = &out[24_000..];
+                let f = rpm / 30.0;
+                let score = |f: f32| (1..=6).map(|k| goertzel(x, f * k as f32)).sum::<f32>();
+                let on = score(f);
+                // Harmonics of a wrong rpm (±18 %, between the half-orders) are weaker.
+                for wrong in [f * 0.82, f * 1.18] {
+                    let w = score(wrong);
+                    assert!(on > 2.5 * w, "rpm {rpm} throttle {th}: on {on} vs {:.0} rpm {w}", wrong * 30.0);
+                }
+            }
         }
     }
 
     #[test]
-    fn load_makes_it_louder_and_brighter() {
+    fn load_makes_it_louder() {
         let measure = |th: f32| {
             let mut s = CarSynth::new(4);
             let mut p = driving(4500.0, th);
             p.speed = 0.0;
             s.set(p);
             let out = mono(&run(&mut s, 0.8));
-            let x = &out[19_200..];
-            let hi: f32 = (8..=14).map(|k| goertzel(x, 150.0 * k as f32)).sum();
-            (rms(x), hi)
+            rms(&out[19_200..])
         };
-        let (quiet, dull) = measure(0.0);
-        let (loud, bright) = measure(1.0);
+        let (quiet, loud) = (measure(0.0), measure(1.0));
         assert!(loud > quiet * 1.5, "{loud} vs {quiet}");
-        assert!(bright > dull * 2.0, "{bright} vs {dull}");
-    }
-
-    /// At low rpm the firings are pulses with the pipe ringing between them, not isolated
-    /// clicks in silence.
-    #[test]
-    fn low_rpm_is_pulses_not_clicks() {
-        let mut s = CarSynth::new(4);
-        let mut p = driving(1300.0, 1.0);
-        p.speed = 0.0;
-        s.set(p);
-        let x = mono(&run(&mut s, 1.0));
-        let x = &x[24_000..];
-        // Over one firing period (rpm/30 Hz → 1100 samples), the share of samples within
-        // 5 % of the peak level must not be tiny (a click train sits near zero most of the
-        // time).
-        let pk = peak(x);
-        let busy = x.iter().filter(|v| v.abs() > pk * 0.05).count() as f32 / x.len() as f32;
-        assert!(busy > 0.3, "busy {busy}");
-        // Crest factor of a click train is huge; pulses with ringing are moderate.
-        let crest = pk / rms(x);
-        assert!(crest < 8.0, "crest {crest}");
+        // And louder with rpm.
+        let rev = |rpm: f32| {
+            let mut s = CarSynth::new(4);
+            s.set(CarParams { speed: 0.0, ..driving(rpm, 1.0) });
+            rms(&mono(&run(&mut s, 0.8))[19_200..])
+        };
+        assert!(rev(6500.0) > rev(1200.0) * 2.0);
     }
 
     #[test]
-    fn lift_off_pops_and_blow_off() {
-        let mut s = CarSynth::new(11);
-        s.set(driving(6500.0, 1.0));
-        run(&mut s, 2.0); // spool up
-        assert!(s.turbo.boost > 0.5, "boost {}", s.turbo.boost);
-        s.set(driving(6000.0, 0.0));
-        assert!(s.turbo.bov.active(), "blow-off on lift");
-        assert!(s.engine.crackle > 0.9);
+    fn lift_off_pops() {
         let mut pops = 0;
-        for _ in 0..40 {
-            run(&mut s, 0.02);
-            pops += s.engine.popping() as u32;
+        for seed in 0..6 {
+            let mut s = CarSynth::new(seed);
+            s.set(driving(6500.0, 1.0));
+            run(&mut s, 0.5);
+            s.set(driving(6000.0, 0.0));
+            assert!(s.engine.crackle > 0.9);
+            for _ in 0..40 {
+                run(&mut s, 0.02);
+                pops += s.engine.popping() as u32;
+            }
         }
         assert!(pops > 0, "some backfire pops in the first 0.8 s of overrun");
     }
@@ -522,16 +496,9 @@ mod tests {
             assert!(slide > roll * 1.4, "surface {surf}: slide {slide} vs roll {roll}");
             assert!(slide < 0.5);
         }
-        // Squeal is tonal on tarmac: the saw's harmonics stand out of the scrub around them.
-        let (_, d) = tyre_level(TARMAC, 1.0, 1.5);
-        let f0 = 420.0 + 90.0 * 1.5;
-        let on: f32 = (1..=5).map(|k| goertzel(&d, f0 * k as f32)).sum();
-        let off: f32 = (1..=5).map(|k| goertzel(&d, f0 * (k as f32 + 0.5))).sum();
-        assert!(on > 3.0 * off, "on {on} off {off}");
-        // Surfaces sound different: their spectra (brightness above 1.5 kHz) differ.
+        // Surfaces sound different: mud is the darkest.
         let b: Vec<f32> = [GRAVEL, TARMAC, MUD, SNOW].iter().map(|&s| brightness(&tyre_level(s, 1.0, 0.0).1, 1500.0)).collect();
         assert!(b[MUD] < b[GRAVEL] && b[MUD] < b[SNOW], "mud is the darkest: {b:?}");
-        assert!(b[SNOW] > b[TARMAC], "snow squeaks above tarmac hum: {b:?}");
     }
 
     #[test]
@@ -548,34 +515,23 @@ mod tests {
     }
 
     #[test]
-    fn damaged_engine_misfires_and_knocks() {
-        // Engine alone: per-firing energy varies far more when damaged (misfires), and the
-        // mechanical output (intake, valve train, knock) gains a knock band.
+    fn damaged_engine_misfires() {
+        // Engine alone: the level from firing to firing varies far more when damaged.
         let measure = |dmg: f32| {
             let mut e = crate::audio::powertrain::Engine::new(3);
             let mut p = driving(3000.0, 1.0);
             p.engine_damage = dmg;
             e.set(&p);
-            let (mut ex, mut mech) = (Vec::new(), Vec::new());
-            for i in 0..144_000 {
-                if i % 32 == 0 {
-                    e.update_coeffs(&p);
-                }
-                let o = e.sample(&p);
-                ex.push(o.exhaust);
-                mech.push(o.mech);
-            }
-            // 100 Hz firing → 480 samples per firing.
-            let fe: Vec<f32> = ex[48_000..].chunks(480).map(rms).collect();
+            let bank = crate::audio::samples::bank();
+            let ex: Vec<f32> = (0..144_000).map(|_| e.sample(&p, bank).exhaust).collect();
+            // 100 Hz firing → 480 samples per firing; 2 firings per window.
+            let fe: Vec<f32> = ex[48_000..].chunks(960).map(rms).collect();
             let mean = fe.iter().sum::<f32>() / fe.len() as f32;
             let var = fe.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / fe.len() as f32;
-            let knock: f32 = (0..10).map(|k| goertzel(&mech[48_000..], 1100.0 + 80.0 * k as f32)).sum();
-            (var.sqrt() / mean, knock)
+            var.sqrt() / mean
         };
-        let (ok, ok_k) = measure(0.0);
-        let (bad, bad_k) = measure(0.85);
-        assert!(bad > ok * 2.0, "firing spread healthy {ok} damaged {bad}");
-        assert!(bad_k > ok_k * 3.0, "knock {ok_k} → {bad_k}");
+        let (ok, bad) = (measure(0.0), measure(0.85));
+        assert!(bad > ok * 1.5, "firing spread healthy {ok} damaged {bad}");
     }
 
     #[test]
@@ -611,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    fn inside_is_darker_with_more_mechanism() {
+    fn inside_is_darker() {
         let render = |interior: f32| {
             let mut s = CarSynth::new(5);
             let mut p = driving(5000.0, 1.0);
@@ -625,33 +581,55 @@ mod tests {
         let (outside, inside) = (render(0.0), render(1.0));
         let (bo, bi) = (brightness(&outside, 2000.0), brightness(&inside, 2000.0));
         assert!(bi < bo * 0.7, "inside is muffled: {bi} vs {bo}");
-        // Gear whine (input shaft × 23 at 3rd) is louder inside.
-        let wf = 5000.0 / 60.0 * 23.0;
-        assert!(goertzel(&inside, wf) > goertzel(&outside, wf) * 2.0);
     }
 
-    /// No discontinuities: a long rpm sweep with throttle stabs never jumps sample to sample
-    /// more than the signal's own movement allows, and the output never sits in denormals.
+    /// No clicks: a long rpm sweep through every crossfade with throttle stabs and slides never
+    /// jumps sample to sample far more than the recordings' own movement, and the output never
+    /// sits in denormals.
     #[test]
     fn sweeps_are_smooth_and_never_denormal() {
         let mut s = CarSynth::new(12);
         let mut out = Vec::new();
-        for i in 0..300 {
+        for i in 0..600 {
             let t = i as f32 / 100.0;
-            let mut p = driving(1000.0 + 2000.0 * t, if (i / 40) % 2 == 0 { 1.0 } else { 0.0 });
+            let mut p = driving(900.0 + 1150.0 * t, if (i / 40) % 2 == 0 { 1.0 } else { 0.0 });
             p.speed = 10.0 + 5.0 * t;
             p.surfaces[TARMAC] = Contact { roll: 0.8, slide: if (i / 70) % 2 == 0 { 0.0 } else { 1.2 } };
             s.set(p);
             out.extend(mono(&run(&mut s, 0.01)));
         }
-        let d2: Vec<f32> = out.windows(3).map(|w| (w[2] - 2.0 * w[1] + w[0]).abs()).collect();
-        let typical = rms(&d2);
-        let worst = d2.iter().fold(0.0f32, |m, v| m.max(*v));
-        assert!(worst < typical * 40.0, "worst step {worst} vs typical {typical}");
+        let d: Vec<f32> = out.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+        let typical = rms(&d);
+        let worst = d.iter().fold(0.0f32, |m, v| m.max(*v));
+        assert!(worst < typical * 25.0, "worst step {worst} vs typical {typical}");
         // Silence after: decays to exact zeros, not denormals.
         s.set(CarParams { active: false, ..default() });
         let tail = run(&mut s, 3.0);
         assert!(tail.iter().all(|v| *v == 0.0 || v.abs() > 1e-30), "denormal output");
+    }
+
+    /// The level doesn't jump at a crossfade point: RMS in 150 ms steps (long enough to hold a
+    /// few idle firings) along a slow rpm sweep changes smoothly: no step bigger than 3 dB
+    /// between neighbouring windows. (Two recordings pitched to the same rpm drift in and out
+    /// of phase, so the middle of a crossfade can dip ~2 dB for a moment; a gain error at a
+    /// crossover would be a step of 6 dB or more.)
+    #[test]
+    fn crossfades_hold_the_level() {
+        for th in [0.0, 1.0] {
+            let mut s = CarSynth::new(7);
+            let mut lv = Vec::new();
+            for i in 0..200 {
+                let rpm = 1000.0 * (7.4f32).powf(i as f32 / 200.0);
+                s.set(CarParams { speed: 0.0, ..driving(rpm, th) });
+                let x = mono(&run(&mut s, 0.15));
+                if i > 10 {
+                    lv.push(20.0 * rms(&x).log10());
+                }
+            }
+            let (at, worst) = lv.windows(2).enumerate().map(|(i, w)| (i, (w[1] - w[0]).abs())).fold((0, 0.0f32), |a, b| if b.1 > a.1 { b } else { a });
+            let rpm = 1000.0 * (7.4f32).powf((at + 12) as f32 / 200.0);
+            assert!(worst < 3.0, "throttle {th}: level step {worst} dB at {rpm:.0} rpm: {:?}", &lv[at.saturating_sub(4)..(at + 5).min(lv.len())]);
+        }
     }
 
     /// `cargo test --lib report_levels -- --ignored --nocapture`: levels per scenario.
@@ -662,42 +640,35 @@ mod tests {
             let mut s = CarSynth::new(9);
             s.set(p);
             run(&mut s, 0.5);
-            rms(&mono(&run(&mut s, 1.0)))
+            let x = mono(&run(&mut s, 1.0));
+            (20.0 * rms(&x).log10(), 20.0 * peak(&x).log10())
         };
         let quiet = CarParams { active: true, rpm: 0.0, ..default() };
-        for rpm in [2000.0f32, 4000.0, 6100.0] {
-            let mut s = CarSynth::new(9);
-            s.set(CarParams { active: true, rpm, throttle: 1.0, ..default() });
-            run(&mut s, 0.5);
-            let x = mono(&run(&mut s, 0.5));
-            let f = rpm / 60.0;
-            let v: Vec<String> = (1..=12).map(|k| format!("{:.1}", 10.0 * goertzel(&x, f * k as f32).max(1e-20).log10())).collect();
-            println!("rpm {rpm}: half-order dB {}", v.join(" "));
+        for interior in [0.0, 1.0] {
+            for (name, rpm, th) in [("idle", 950.0, 0.0), ("2500 lift", 2500.0, 0.0), ("2500 full", 2500.0, 1.0), ("4000 full", 4000.0, 1.0), ("6500 lift", 6500.0, 0.0), ("6500 full", 6500.0, 1.0)] {
+                let (r, p) = lvl(CarParams { active: true, rpm, throttle: th, interior, ..default() });
+                println!("engine {name} inside {interior}: rms {r:.1} dB peak {p:.1} dB");
+            }
         }
-        for (name, p) in [
-            ("engine idle", CarParams { active: true, rpm: 950.0, ..default() }),
-            ("engine 3000 full", CarParams { active: true, rpm: 3000.0, throttle: 1.0, ..default() }),
-            ("engine 6500 full", CarParams { active: true, rpm: 6500.0, throttle: 1.0, ..default() }),
-            ("engine 6500 lift", CarParams { active: true, rpm: 6500.0, throttle: 0.0, ..default() }),
-            ("wind 15", CarParams { speed: 15.0, ..quiet }),
-            ("wind 35", CarParams { speed: 35.0, ..quiet }),
-        ] {
-            println!("{name}: rms {:.4}", lvl(p));
+        for (name, p) in [("wind 15", CarParams { speed: 15.0, ..quiet }), ("wind 35", CarParams { speed: 35.0, ..quiet })] {
+            let (r, _) = lvl(p);
+            println!("{name}: rms {r:.1} dB");
         }
         for surf in 0..SURFACES {
             for (r, sl) in [(1.0, 0.0), (1.0, 1.0), (1.0, 2.0)] {
-                let mut p = quiet;
+                let mut p = CarParams { speed: 20.0, ..quiet };
                 p.surfaces[surf] = Contact { roll: r, slide: sl };
-                println!("surface {surf} roll {r} slide {sl}: rms {:.4}", lvl(p));
+                let (rm, _) = lvl(p);
+                println!("surface {surf} roll {r} slide {sl}: rms {rm:.1} dB");
             }
         }
-        for (name, ev) in [("impact", CarEvent::Impact(30.0)), ("impact5", CarEvent::Impact(5.0)), ("thump", CarEvent::Thump(1.0, 0.0)), ("bottom", CarEvent::Bottom(1.0, 0.0)), ("shift", CarEvent::Shift(true))] {
+        for (name, ev) in [("impact", CarEvent::Impact(30.0)), ("impact5", CarEvent::Impact(5.0)), ("ground", CarEvent::Ground(10.0)), ("snap", CarEvent::Snap(15.0)), ("thump", CarEvent::Thump(1.0, 0.0)), ("bottom", CarEvent::Bottom(1.0, 0.0)), ("shift", CarEvent::Shift(true))] {
             let mut s = CarSynth::new(9);
             s.set(CarParams { active: true, rpm: 0.0, ..default() });
             run(&mut s, 0.2);
             s.event(ev);
             let out = run(&mut s, 0.5);
-            println!("{name}: peak {:.3}", peak(&out));
+            println!("{name}: peak {:.1} dB", 20.0 * peak(&out).log10());
         }
     }
 }

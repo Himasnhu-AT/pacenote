@@ -15,5 +15,8 @@ Textures, models and foliage (CC0, with thanks):
 Poly Haven (polyhaven.com): Rob Tuytel, Rico Cilliers, Amal Kumar, Dario Barresi, Dimitrios Savva, Charlotte Baglioni, Jenelle van Heerden, James Ray Cock, Kless Gyzen, eye-candy.xyz.
 ambientCG (ambientcg.com): Lennart Demes.
 
+Car sounds (CC0, with thanks):
+Recorded by Chippy569 (engine), TRP, craigsmith, ViveleVent, audible-edge, dunebuggy, deerlord, qubodup and modusmogulus, from Freesound (freesound.org).
+
 Thanks:
 Everyone who reads the road out loud.

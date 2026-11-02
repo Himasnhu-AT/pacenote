@@ -1,21 +1,11 @@
-//! The body and chassis: impacts, the body hitting the ground, suspension thumps and
-//! bottoming out, scraping along the ground, and rattles (loose parts when the suspension is
-//! damaged, a little trim rattle on rough ground anyway).
+//! The body and chassis: impacts, the body hitting the ground and snapping saplings and posts
+//! (recorded one-shots), scraping along the ground (a recorded loop), suspension thumps and
+//! bottoming out, and rattles (loose parts when the suspension is damaged, a little trim rattle
+//! on rough ground anyway; these are synthesised).
 
 use super::car::CarParams;
 use super::dsp::{Biquad, Decay, Noise, RATE, Ring, Saw, Smooth, Wander, pan};
-
-#[derive(Clone, Copy, Debug, Default)]
-struct Hit {
-    thud: Ring,
-    metal: [Ring; 3],
-    noise: Decay,
-    panel: Biquad,
-    crunch: Biquad,
-    /// Bits falling off and settling after a big hit (rate per second, decays).
-    debris: f32,
-    pan: f32,
-}
+use super::samples::{Bank, Id, Looper, Shots};
 
 /// What the body sends out (stereo; heard both inside and out).
 #[derive(Clone, Copy, Debug, Default)]
@@ -29,8 +19,9 @@ pub struct BodyOut {
 #[derive(Clone, Debug)]
 pub struct Body {
     n: Noise,
-    hits: [Hit; 3],
-    next_hit: usize,
+    hits: Shots<4>,
+    /// Bits falling off and settling after a big hit (rate per second, decays).
+    debris: f32,
     thumps: [(Ring, Decay, f32); 4],
     next_thump: usize,
     bottoms: [(Ring, Ring, Decay, f32); 2],
@@ -40,10 +31,7 @@ pub struct Body {
     clunk: Ring,
     clunk_tick: Ring,
     scrape: Smooth,
-    scrape_bp: Biquad,
-    scrape_hi: Biquad,
-    scrape_am: Wander,
-    scrape_ring: [Biquad; 2],
+    scrape_loop: Looper,
     rustle: Smooth,
     rustle_bp: Biquad,
     rustle_lo: Biquad,
@@ -60,8 +48,8 @@ impl Body {
     pub fn new(seed: u32) -> Self {
         Body {
             n: Noise::new(seed ^ 0x4444),
-            hits: [Hit::default(); 3],
-            next_hit: 0,
+            hits: Shots::default(),
+            debris: 0.0,
             thumps: [(Ring::default(), Decay::default(), 0.0); 4],
             next_thump: 0,
             bottoms: [(Ring::default(), Ring::default(), Decay::default(), 0.0); 2],
@@ -71,10 +59,7 @@ impl Body {
             clunk: Ring::default(),
             clunk_tick: Ring::default(),
             scrape: Smooth::new(0.0, 0.02, 0.08, RATE),
-            scrape_bp: Biquad::bandpass(1400.0, 0.9),
-            scrape_hi: Biquad::highpass(3500.0, 0.7),
-            scrape_am: Wander::new(30.0),
-            scrape_ring: [Biquad::bandpass(1730.0, 25.0), Biquad::bandpass(3310.0, 30.0)],
+            scrape_loop: Looper::default(),
             rustle: Smooth::new(0.0, 0.03, 0.15, RATE),
             rustle_bp: Biquad::bandpass(3200.0, 0.8),
             rustle_lo: Biquad::bandpass(700.0, 0.7),
@@ -88,32 +73,32 @@ impl Body {
         }
     }
 
-    /// Hit a tree/rock/post at `v` m/s (closing speed): a deep thud, a crunch of panels,
-    /// metal rings, then debris settling. Bigger hits are lower, longer and louder.
+    /// Hit a tree/rock/post at `v` m/s (closing speed), or the ground (`metal` false: darker,
+    /// slower): a recorded crash, then debris settling. Bigger hits are lower and louder; small
+    /// ones are a lighter clank.
     pub fn impact(&mut self, v: f32, metal: bool) {
         let a = (v / 12.0).clamp(0.05, 1.0);
         let n = &mut self.n;
-        let h = &mut self.hits[self.next_hit];
-        self.next_hit = (self.next_hit + 1) % 3;
-        h.thud.trigger(n.range(38.0, 52.0) * (1.25 - 0.3 * a), 0.3 + 0.35 * a, 0.65 * a.sqrt());
-        let m = if metal { 1.0 } else { 0.35 };
-        for (r, f) in h.metal.iter_mut().zip([1130.0, 2370.0, 3710.0]) {
-            r.trigger(f * n.range(0.88, 1.12), n.range(0.2, 0.45), 0.045 * a * m * n.range(0.5, 1.0));
+        let pan = n.range(-0.4, 0.4);
+        let pitch = if metal { 1.0 } else { 0.72 } * n.range(0.92, 1.08);
+        if a > 0.35 {
+            self.hits.play(Id::ImpactHeavy, pitch * (1.12 - 0.25 * a), 0.9 * a.sqrt(), pan);
         }
-        h.noise.trigger(0.5 * a, 0.08 + 0.2 * a);
-        h.panel.set_bandpass(n.range(650.0, 950.0), 1.1);
-        h.crunch.set_bandpass(n.range(2200.0, 3200.0), 0.9);
-        h.debris = if v > 6.0 { 40.0 * a } else { 0.0 };
-        h.pan = n.range(-0.4, 0.4);
+        // The light clank on its own for small hits, under the crash for big ones.
+        self.hits.play(Id::ImpactLight, pitch * n.range(0.9, 1.1), 0.7 * a.sqrt() * if a > 0.35 { 0.5 } else { 1.0 }, pan);
+        if v > 6.0 {
+            self.debris = self.debris.max(40.0 * a);
+        }
     }
 
-    /// Snapping a sapling, post or sign at `v` m/s: a soft woody crack (no metal), a few
-    /// chips rattling off the bodywork.
+    /// Snapping a sapling, post or sign at `v` m/s: a woody crack, a few chips rattling off
+    /// the bodywork.
     pub fn snap(&mut self, v: f32) {
-        self.impact(v * 0.3, false);
-        let h = &mut self.hits[(self.next_hit + 2) % 3];
-        h.crunch.set_bandpass(self.n.range(1600.0, 2400.0), 1.4);
-        h.debris = 10.0 * (v / 20.0).clamp(0.2, 1.0);
+        let a = (v / 20.0).clamp(0.2, 1.0);
+        let pan = self.n.range(-0.5, 0.5);
+        let rate = self.n.range(0.85, 1.15);
+        self.hits.play(Id::Snap, rate, 0.6 * a.sqrt(), pan);
+        self.debris = self.debris.max(10.0 * a);
     }
 
     /// Suspension slam: strength 0..1, pan −1..1.
@@ -145,30 +130,20 @@ impl Body {
     }
 
     #[inline]
-    pub fn sample(&mut self, p: &CarParams) -> BodyOut {
+    pub fn sample(&mut self, p: &CarParams, bank: Option<&Bank>) -> BodyOut {
         let n = &mut self.n;
-        let (mut l, mut r) = (0.0, 0.0);
-        for h in &mut self.hits {
-            if h.noise.active() || h.thud.active() {
-                let nz = n.white() * h.noise.next();
-                let m: f32 = h.metal.iter_mut().map(|m| m.tick()).sum();
-                let s = h.thud.tick() + h.panel.run(nz) * 1.3 + h.crunch.run(nz) * 0.8 + nz * 0.15 + m;
-                let (a, b) = pan(h.pan);
-                l += s * a;
-                r += s * b;
-            } else {
-                h.panel.settle();
-                h.crunch.settle();
+        let (mut l, mut r) = match bank {
+            Some(b) => self.hits.next(b),
+            None => (0.0, 0.0),
+        };
+        if self.debris > 0.05 {
+            if n.chance(self.debris / RATE) {
+                let t = &mut self.tinkles[self.next_tinkle];
+                self.next_tinkle = (self.next_tinkle + 1) % 6;
+                t.0.trigger(n.range(1800.0, 5200.0), n.range(0.02, 0.06), n.range(0.004, 0.02) * (self.debris / 40.0).min(1.0));
+                t.1 = n.range(-0.7, 0.7);
             }
-            if h.debris > 0.05 {
-                if n.chance(h.debris / RATE) {
-                    let t = &mut self.tinkles[self.next_tinkle];
-                    self.next_tinkle = (self.next_tinkle + 1) % 6;
-                    t.0.trigger(n.range(1800.0, 5200.0), n.range(0.02, 0.06), n.range(0.004, 0.02) * (h.debris / 40.0).min(1.0));
-                    t.1 = n.range(-0.7, 0.7);
-                }
-                h.debris *= 1.0 - 4.0 / RATE;
-            }
+            self.debris *= 1.0 - 4.0 / RATE;
         }
         for (ring, px) in &mut self.tinkles {
             if ring.active() {
@@ -196,15 +171,13 @@ impl Body {
         let clunk = self.clunk.tick() + self.clunk_tick.tick();
         l += clunk;
         r += clunk;
-        // Scrape: the body sliding on the ground, gritty noise with a couple of panel modes
-        // ringing.
+        // Scrape: the body sliding on the ground (recorded metal scraping, faster with speed).
         let sc = self.scrape.next((p.scrape / 15.0).min(1.5));
         let mut shell = 0.0;
-        if sc > 1e-4 {
-            let am = (0.55 + 0.45 * self.scrape_am.next(n)).max(0.0);
-            let wn = n.white() * am;
-            let ring = self.scrape_ring[0].run(wn) + self.scrape_ring[1].run(wn);
-            shell += (self.scrape_bp.run(wn) * 0.16 + self.scrape_hi.run(wn) * 0.05 + ring * 0.35) * sc;
+        if sc > 1e-4
+            && let Some(b) = bank
+        {
+            shell += self.scrape_loop.next(b.get(Id::Scrape), 0.8 + 0.3 * sc) * sc * 0.3;
         }
         // Brush: leaves and twigs swishing along the sides, crackling with the branches.
         let ru = self.rustle.next((p.brush / 12.0).min(1.2));

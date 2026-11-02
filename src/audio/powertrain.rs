@@ -1,88 +1,74 @@
-//! Engine and turbo for the car sound.
+//! The engine, from recordings: a Mercedes-Benz 190E 2.3-16V (a 2.3 litre 16-valve
+//! 4-cylinder) on a dyno, steady-rpm loops at full load and at no load, each from two mics
+//! recorded together: the engine bay (intake, valve train, block) and the exhaust. Sources in
+//! `assets_src/SOURCES.md`; cooked by `tools/audio/cook_car.py`.
 //!
-//! Engine: a 4-cylinder, 4-stroke (firing order 1-3-4-2, two firings per revolution, so the
-//! firing frequency is rpm/30 Hz). Each cylinder's exhaust pulse is a shape over crank angle
-//! (so its harmonics stay locked to engine orders at any rpm), sharper and taller under load,
-//! with its own small gain, timing and width offsets (the half-orders that make a real engine
-//! gruff instead of a buzz). A short sharp "bark" at each firing, placed with sub-sample
-//! timing, adds bite under load. The pulses run through two pipe waveguides (header and
-//! tail pipe: fixed resonances the harmonics sweep through, the "vowel"), exhaust formants and
-//! a muffler low-pass that opens with load. Intake roar and valve-train ticks are a separate
-//! output (louder inside the car).
+//! Every loop plays all the time at `rpm / its recorded rpm`, so all of them sit at the car's
+//! rpm. Two equal-power crossfades pick what is heard: by rpm between the two loops whose
+//! recorded rpm brackets the car's (in log rpm), and by load between the full-load and no-load
+//! sets. The idle loop is the bottom of both sets.
 //!
-//! Turbo: boost builds with load above ~2.4k rpm and bleeds off on lift; the whistle follows
-//! the shaft speed; lifting with boost gives a blow-off and compressor flutter.
+//! On top: the rev limiter (ignition cut ~14 times a second), gear changes (the sim's cut
+//! drops to overrun; an upshift under power bangs; a downshift blips), recorded backfire pops
+//! on the overrun after a lift and on the limiter, and a damaged engine misfiring.
 
 use super::car::CarParams;
-use super::dsp::{Biquad, Decay, Delay, Noise, OnePole, Osc, RATE, Ring, Smooth, Wander, smoothstep};
+use super::dsp::{Noise, RATE, Smooth, Wander, smoothstep};
+use super::samples::{Bank, Id, Looper, Shots};
 
-/// Per-cylinder gain, timing (fraction of the cycle) and pulse width offsets: a slightly
-/// uneven engine, like a real one.
-const CYL_GAIN: [f32; 4] = [1.0, 0.8, 0.92, 0.85];
-const CYL_TIME: [f32; 4] = [0.0, 0.006, -0.004, 0.003];
-const CYL_WIDTH: [f32; 4] = [1.0, 1.12, 0.92, 1.05];
-/// Firing points in the 720° cycle (0..1), firing order 1-3-4-2.
-const FIRE_AT: [f32; 4] = [0.0, 0.75, 0.25, 0.5];
+/// The loops: recorded rpm (measured from the firing frequency, see `cook_car.py --report`)
+/// and the two mics.
+const LOOPS: [(f32, Id, Id); 5] = [
+    (1006.0, Id::IdleBay, Id::IdleExh),
+    (2431.0, Id::OffLoBay, Id::OffLoExh),
+    (6297.0, Id::OffHiBay, Id::OffHiExh),
+    (2556.0, Id::OnLoBay, Id::OnLoExh),
+    (6208.0, Id::OnHiBay, Id::OnHiExh),
+];
+/// No-load and full-load sets, by index into [`LOOPS`], in rpm order.
+const OFF: [usize; 3] = [0, 1, 2];
+const ON: [usize; 3] = [0, 3, 4];
 
 /// What the engine sends out, per sample.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EngineOut {
-    /// Exhaust note (heard best outside, through the body inside).
+    /// Engine bay mic (the cockpit hears mostly this, through the bulkhead).
+    pub bay: f32,
+    /// Exhaust mic (outside sound; boomy and dark inside).
     pub exhaust: f32,
-    /// Backfire pops and bangs (outside sound).
-    pub pops: f32,
-    /// Intake roar, valve train, knock (heard best inside).
-    pub mech: f32,
+    /// Backfire pops and bangs (stereo; outside sound).
+    pub pops: (f32, f32),
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct Cyl {
-    /// Strength of the current pulse (set at firing).
-    amp: f32,
-    /// Phase since this cylinder last fired (cycles).
-    last_u: f32,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct Pop {
-    noise: Decay,
-    boom: Ring,
-    crack: Biquad,
+/// Equal-power weights over one set at `rpm`: (index into LOOPS, weight) × 2.
+fn weights(set: &[usize; 3], rpm: f32) -> [(usize, f32); 2] {
+    let r = |i: usize| LOOPS[set[i]].0;
+    if rpm <= r(0) {
+        return [(set[0], 1.0), (set[1], 0.0)];
+    }
+    for k in 0..2 {
+        if rpm < r(k + 1) {
+            let t = (rpm / r(k)).ln() / (r(k + 1) / r(k)).ln();
+            let a = t * std::f32::consts::FRAC_PI_2;
+            return [(set[k], a.cos()), (set[k + 1], a.sin())];
+        }
+    }
+    [(set[2], 1.0), (set[1], 0.0)]
 }
 
 #[derive(Clone, Debug)]
 pub struct Engine {
     n: Noise,
-    /// Crank phase over one 720° cycle (0..1).
-    theta: f32,
     pub rpm: Smooth,
     pub load: Smooth,
     level: Smooth,
-    cyl: [Cyl; 4],
-    /// Pulse width (cycle fraction) and sharpness blend (0 soft .. 1 sharp), from load.
-    width: f32,
-    sharp: f32,
-    bark_a: OnePole,
-    bark_b: OnePole,
-    /// Sub-sample remainder of the last bark impulse (added on the next sample).
-    bark_next: f32,
-    burst: Decay,
-    header: Delay<256>,
-    header_lp: OnePole,
-    pipe: Delay<1024>,
-    pipe_lp: OnePole,
-    body: Biquad,
-    mid: Biquad,
-    rasp: Biquad,
-    muffler: Biquad,
-    dc: Biquad,
-    intake_bp: Biquad,
-    intake_honk: Biquad,
-    tick: Ring,
-    knock: Ring,
-    knock_bp: Biquad,
-    leak: Biquad,
-    wobble: Wander,
+    loops: [Looper; 5],
+    /// Gain of each loop (smoothed a little so a crossfade step never clicks).
+    gain: [Smooth; 5],
+    /// Firing clock (0..1 per firing, rpm/30 Hz): pops and misfires happen on firings.
+    fire: f32,
+    /// Ignition cut by the limiter (fast smoothing of the dip).
+    cut_gain: Smooth,
     limiter: f32,
     /// 1 right after a lift (pops are likely), decays.
     pub crackle: f32,
@@ -90,49 +76,35 @@ pub struct Engine {
     blip: f32,
     /// A misfire left unburnt fuel: the next firing may bang in the exhaust.
     unburnt: bool,
+    /// A misfire's dip (1 at the misfire, falls over about a firing).
+    misfire: f32,
+    wobble: Wander,
     last_throttle: f32,
-    pops: [Pop; 3],
-    next_pop: usize,
+    pops: Shots<4>,
 }
 
 impl Engine {
     pub fn new(seed: u32) -> Self {
+        let mut n = Noise::new(seed ^ 0x1111);
+        // Each loop starts somewhere else, so a crossfade never lines two up in phase.
+        let loops = std::array::from_fn(|_| Looper::at(n.unit() as f64));
         Engine {
-            n: Noise::new(seed ^ 0x1111),
-            theta: 0.0,
+            n,
             rpm: Smooth::new(950.0, 0.02, 0.03, RATE),
             load: Smooth::new(0.0, 0.03, 0.06, RATE),
             level: Smooth::new(0.0, 0.05, 0.2, RATE),
-            cyl: [Cyl::default(); 4],
-            width: 0.11,
-            sharp: 0.0,
-            bark_a: OnePole::new(1500.0),
-            bark_b: OnePole::new(1500.0),
-            bark_next: 0.0,
-            burst: Decay::default(),
-            header: Delay::default(),
-            header_lp: OnePole::new(3500.0),
-            pipe: Delay::default(),
-            pipe_lp: OnePole::new(1800.0),
-            body: Biquad::bandpass(110.0, 1.0),
-            mid: Biquad::bandpass(420.0, 2.0),
-            rasp: Biquad::bandpass(1350.0, 1.6),
-            muffler: Biquad::lowpass(3000.0, 0.7),
-            dc: Biquad::highpass(28.0, 0.7),
-            intake_bp: Biquad::bandpass(900.0, 0.8),
-            intake_honk: Biquad::bandpass(360.0, 4.0),
-            tick: Ring::default(),
-            knock: Ring::default(),
-            knock_bp: Biquad::bandpass(1500.0, 2.0),
-            leak: Biquad::bandpass(1900.0, 1.2),
-            wobble: Wander::new(3.0),
+            loops,
+            gain: [Smooth::new(0.0, 0.01, 0.01, RATE); 5],
+            fire: 0.0,
+            cut_gain: Smooth::new(1.0, 0.004, 0.004, RATE),
             limiter: 0.5,
             crackle: 0.0,
             blip: 0.0,
             unburnt: false,
+            misfire: 0.0,
+            wobble: Wander::new(3.0),
             last_throttle: 0.0,
-            pops: [Pop::default(); 3],
-            next_pop: 0,
+            pops: Shots::default(),
         }
     }
 
@@ -161,50 +133,33 @@ impl Engine {
 
     /// A backfire is sounding.
     pub fn popping(&self) -> bool {
-        self.pops.iter().any(|p| p.noise.active())
+        self.pops.active()
     }
 
     fn pop(&mut self, strength: f32) {
         let n = &mut self.n;
-        let pop = &mut self.pops[self.next_pop];
-        self.next_pop = (self.next_pop + 1) % 3;
-        let a = n.range(0.5, 1.0) * strength;
-        pop.noise.trigger(0.6 * a, n.range(0.02, 0.05));
-        pop.boom.trigger(n.range(60.0, 95.0), n.range(0.08, 0.14), 0.5 * a);
-        pop.crack.set_bandpass(n.range(1600.0, 3200.0), 0.9);
+        let id = [Id::Pop1, Id::Pop2, Id::Pop3][(n.next_u32() % 3) as usize];
+        let gain = n.range(0.5, 1.0) * strength;
+        self.pops.play(id, n.range(0.88, 1.12), gain, n.range(-0.2, 0.2));
     }
 
-    /// Filter coefficients from the smoothed state (every few dozen samples).
-    pub fn update_coeffs(&mut self, p: &CarParams) {
-        let load = self.load.v;
-        let rpm_n = ((self.rpm.v - p.idle_rpm) / (p.redline - p.idle_rpm)).clamp(0.0, 1.0);
-        let bark = 600.0 + 1900.0 * load + 900.0 * rpm_n;
-        self.bark_a.set(bark);
-        self.bark_b.set(bark);
-        self.muffler.set_lowpass(1500.0 + 3300.0 * load + 1800.0 * rpm_n, 0.75);
-        self.rasp.set_bandpass(1250.0 + 500.0 * rpm_n, 1.6);
-        self.intake_bp.set_bandpass(700.0 + 900.0 * rpm_n, 0.8);
-        // Narrower, taller pulses under load.
-        // (In a 720° cycle with 4 firings, 0.1 ≈ 72° of crank: the exhaust blowdown.)
-        self.width = 0.11 - 0.035 * load;
-        self.sharp = load;
-    }
-
-    /// One sample.
+    /// One sample. Silent (but keeping time) until the bank has loaded.
     #[inline]
-    pub fn sample(&mut self, p: &CarParams) -> EngineOut {
-        let n = &mut self.n;
+    pub fn sample(&mut self, p: &CarParams, bank: Option<&Bank>) -> EngineOut {
         let redline = p.redline;
         let at_limit = p.rpm >= redline - 80.0 && p.throttle > 0.5;
         // Limiter bounce: cut ignition about half of each ~70 ms cycle.
         let mut cut = p.shifting;
         let mut lim_cut = false;
+        let mut lim_start = false;
         if at_limit {
+            let before = self.limiter;
             self.limiter += 14.0 / RATE;
             if self.limiter >= 1.0 {
                 self.limiter -= 1.0;
             }
             lim_cut = self.limiter < 0.45;
+            lim_start = lim_cut && before >= 0.45;
             cut |= lim_cut;
         } else {
             self.limiter = 0.5;
@@ -218,217 +173,99 @@ impl Engine {
         let level = self.level.next(if p.active { 1.0 } else { 0.0 });
         let dmg = p.engine_damage;
         let idle_factor = 1.0 - smoothstep(p.idle_rpm, p.idle_rpm + 1500.0, p.rpm);
-        let wob = self.wobble.next(n);
-        let dip = if at_limit && cut { 0.97 } else { 1.0 };
+        let wob = self.wobble.next(&mut self.n);
+        let dip = if lim_cut { 0.97 } else { 1.0 };
         // A hurt engine hunts at idle.
-        let rpm = self.rpm.next(p.rpm * dip) * (1.0 + (0.008 + 0.03 * dmg) * wob * idle_factor);
+        let rpm = self.rpm.next(p.rpm * dip) * (1.0 + (0.006 + 0.03 * dmg) * wob * idle_factor);
+        // A stopped engine (rpm 0) is silent.
+        let running = smoothstep(150.0, 450.0, rpm);
+        let rpm = rpm.max(200.0);
         let rpm_n = ((rpm - p.idle_rpm) / (redline - p.idle_rpm)).clamp(0.0, 1.0);
         let overrun = (1.0 - load) * smoothstep(2200.0, 4500.0, rpm);
         self.crackle *= 1.0 - 1.0 / (1.4 * RATE);
-        let inc = rpm / 120.0 / RATE;
-        self.theta += inc;
-        if self.theta >= 1.0 {
-            self.theta -= 1.0;
-        }
-        // Pulse shapes: x(1−x)² (round, overrun) blended to x(1−x)⁵ (sharp, load), peak 1.
-        let mut pulse = 0.0;
-        let mut bark = self.bark_next;
-        self.bark_next = 0.0;
-        let mut pops = 0.0;
-        let mut mech = 0.0;
-        let w_base = self.width;
-        for k in 0..4 {
-            let mut u = self.theta - FIRE_AT[k] - CYL_TIME[k];
-            u -= u.floor();
-            let c = &mut self.cyl[k];
-            if u < c.last_u {
-                // This cylinder just fired (`u` cycles ago = u / inc samples ago).
-                let jitter = 1.0 + (0.16 * idle_factor + 0.04 + 0.1 * dmg) * n.white();
-                let cg = 1.0 + (CYL_GAIN[k] - 1.0) * (0.6 + 0.4 * idle_factor);
-                let base = (0.42 + 0.58 * load) * (0.6 + 0.4 * rpm_n) * cg * jitter;
-                // A gear change drops to an overrun burble; the limiter cuts harder.
-                let mut fired = if lim_cut { 0.1 } else if cut { 0.45 } else { 1.0 - 0.4 * overrun };
-                // Damage: misfires (more under load), each leaving fuel to bang later.
-                let misfire = dmg * dmg * 0.18 * (0.6 + 0.4 * load);
-                if p.active && n.chance(misfire) {
-                    fired *= 0.08;
-                    self.unburnt = true;
-                } else if self.unburnt {
-                    self.unburnt = false;
-                    if n.chance(0.5) {
-                        let pop = &mut self.pops[self.next_pop];
-                        self.next_pop = (self.next_pop + 1) % 3;
-                        let a = n.range(0.3, 0.8);
-                        pop.noise.trigger(0.5 * a, n.range(0.015, 0.04));
-                        pop.boom.trigger(n.range(55.0, 80.0), 0.1, 0.45 * a);
-                        pop.crack.set_bandpass(n.range(1400.0, 2600.0), 0.9);
-                    }
-                }
-                c.amp = base * fired;
-                // Bark: an impulse split over this and the next sample by where between
-                // them the firing fell (sub-sample timing: no jitter at high rpm).
-                let frac = (u / inc.max(1e-9)).clamp(0.0, 1.0);
-                let imp = c.amp * (0.45 + 0.55 * load);
-                bark += imp * frac;
-                self.bark_next += imp * (1.0 - frac);
-                self.burst.trigger(c.amp * (0.12 + 0.45 * load), 0.006 + 0.01 * (1.0 - rpm_n));
-                // Valve train: a light tick each firing; a damaged engine knocks.
-                if p.active {
-                    self.tick.trigger(n.range(4200.0, 5600.0), 0.006, 0.006 * (0.3 + rpm_n));
-                    if dmg > 0.25 && n.chance(0.35 + 0.5 * dmg) {
-                        let a = (dmg - 0.25) * (0.4 + 0.6 * load);
-                        self.knock.trigger(n.range(1100.0, 1900.0), n.range(0.01, 0.022), 0.3 * a);
-                    }
-                }
-                // Backfire: unburnt fuel lighting in the exhaust on overrun and on the limiter.
-                let chance = if lim_cut { 0.22 } else { 0.07 * overrun * self.crackle };
-                if p.active && n.chance(chance) {
-                    let pop = &mut self.pops[self.next_pop];
-                    self.next_pop = (self.next_pop + 1) % 3;
-                    let a = n.range(0.5, 1.0);
-                    pop.noise.trigger(0.6 * a, n.range(0.02, 0.05));
-                    pop.boom.trigger(n.range(65.0, 95.0), 0.12, 0.5 * a);
-                    pop.crack.set_bandpass(n.range(1800.0, 3200.0), 0.9);
+        // Firings: misfires and backfires.
+        self.fire += rpm / 30.0 / RATE;
+        if self.fire >= 1.0 {
+            self.fire -= 1.0;
+            let n = &mut self.n;
+            let misfire = dmg * dmg * 0.28 * (0.6 + 0.4 * load);
+            let mut bang = 0.0;
+            if p.active && n.chance(misfire) {
+                self.misfire = 1.0;
+                self.unburnt = true;
+            } else if self.unburnt {
+                self.unburnt = false;
+                if n.chance(0.5) {
+                    bang = 0.6;
                 }
             }
-            c.last_u = u;
-            let w = w_base * CYL_WIDTH[k];
-            if u < w && c.amp > 0.0 {
-                let x = u / w;
-                let y = 1.0 - x;
-                let y2 = y * y;
-                let soft = 6.75 * x * y2;
-                let sharp = 14.93 * x * y2 * y2 * y;
-                pulse += c.amp * (soft + (sharp - soft) * self.sharp);
+            // Unburnt fuel lighting in the exhaust on the overrun after a lift.
+            if p.active && n.chance(0.02 * overrun * self.crackle) {
+                bang = 1.0;
+            }
+            if bang > 0.0 {
+                self.pop(bang);
             }
         }
-        // Bark: impulse → two one-poles (normalised to ~unit peak per firing).
-        let k = self.bark_a.coeff().max(1e-4);
-        let x = self.bark_a.lp(bark * std::f32::consts::E / k);
-        let bark = self.bark_b.lp(x);
-        let comb = n.white() * self.burst.next();
-        let src = pulse * 0.55 + bark * (0.35 + 0.35 * load) + comb;
-        // Header (short) and tail pipe (long) waveguides: open ends reflect inverted, losses
-        // grow with frequency.
-        let h = src - 0.32 * self.header_lp.lp(self.header.read(118.0));
-        self.header.write(h);
-        let t = h - 0.42 * self.pipe_lp.lp(self.pipe.read(436.0));
-        self.pipe.write(t);
-        let body = self.body.run(t) * 0.5;
-        let mid = self.mid.run(t) * 0.6;
-        let rasp = self.rasp.run(src) * (0.12 + 0.4 * load);
-        // A cracked manifold: a breathy chuff with each pulse.
-        let leak = if dmg > 0.2 { self.leak.run(n.white() * pulse) * 0.5 * (dmg - 0.2) } else { 0.0 };
-        let raw = self.muffler.run(t * 0.4 + body + mid + rasp) + leak;
-        let exhaust = self.dc.run(raw) * 0.75 * level;
-        // Intake: suction noise and the airbox resonance, both with load and rpm.
-        let suction = n.white() * (0.15 + pulse.abs());
-        mech += self.intake_bp.run(suction) * 0.09 * load * (0.3 + rpm_n);
-        mech += self.intake_honk.run(pulse) * 0.18 * (0.2 + load) * (0.3 + 0.7 * rpm_n);
-        mech += self.tick.tick();
-        if self.knock.active() {
-            let kv = self.knock.next();
-            mech += self.knock_bp.run(kv + n.white() * 0.3 * kv.abs());
-        } else {
-            self.knock_bp.settle();
+        if lim_start && p.active && self.n.chance(0.45) {
+            self.pop(0.8);
         }
-        for pop in &mut self.pops {
-            if pop.noise.active() || pop.boom.active() {
-                let nz = n.white() * pop.noise.next();
-                pops += pop.crack.run(nz) * 1.4 + nz * 0.3 + pop.boom.tick();
-            } else {
-                pop.crack.settle();
+        // A misfire is a missing firing: the level drops for about a firing.
+        self.misfire *= 1.0 - (rpm / 30.0 * 0.8) / RATE;
+        // The limiter's cut is heard as the engine dropping out.
+        let cutg = self.cut_gain.next(if lim_cut { 0.35 } else { 1.0 });
+        // Loudness: idle is quiet, full load at the top loudest; the overrun sits below the
+        // same rpm under load.
+        let loud = (0.32 + 0.68 * rpm_n.powf(0.8)) * (0.5 + 0.5 * load);
+        let gain = level * running * loud * cutg * (1.0 - 0.85 * self.misfire.min(1.0));
+        let mut target = [0.0f32; 5];
+        let (on, off) = ((load * std::f32::consts::FRAC_PI_2).sin(), (load * std::f32::consts::FRAC_PI_2).cos());
+        for (i, w) in weights(&ON, rpm) {
+            target[i] += w * on;
+        }
+        for (i, w) in weights(&OFF, rpm) {
+            target[i] += w * off;
+        }
+        let Some(bank) = bank else {
+            return EngineOut::default();
+        };
+        let (mut bay, mut exhaust) = (0.0, 0.0);
+        for (i, (rec_rpm, b, e)) in LOOPS.iter().enumerate() {
+            let g = self.gain[i].next(target[i]);
+            let rate = rpm / rec_rpm;
+            // The bay and exhaust mics were recorded together: one position for both.
+            let pos = self.loops[i];
+            let vb = self.loops[i].next(bank.get(*b), rate);
+            let mut pe = pos;
+            let ve = pe.next(bank.get(*e), rate);
+            if g > 1e-4 {
+                bay += vb * g;
+                exhaust += ve * g;
             }
         }
-        EngineOut { exhaust, pops: pops * 0.5 * level, mech: mech * level }
+        let pops = self.pops.next(bank);
+        EngineOut { bay: bay * gain, exhaust: exhaust * gain, pops: (pops.0 * level, pops.1 * level) }
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Turbo {
-    n: Noise,
-    pub boost: f32,
-    shaft: Smooth,
-    whistle: Osc,
-    whistle2: Osc,
-    hiss: Biquad,
-    pub bov: Decay,
-    bov_f: f32,
-    bov_bp: Biquad,
-    flutter: Decay,
-    flutter_osc: Osc,
-    last_throttle: f32,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl Turbo {
-    pub fn new(seed: u32) -> Self {
-        Turbo {
-            n: Noise::new(seed ^ 0x2222),
-            boost: 0.0,
-            shaft: Smooth::new(0.0, 0.5, 0.9, RATE),
-            whistle: Osc::default(),
-            whistle2: Osc::default(),
-            hiss: Biquad::bandpass(5000.0, 6.0),
-            bov: Decay::default(),
-            bov_f: 3500.0,
-            bov_bp: Biquad::bandpass(3500.0, 1.2),
-            flutter: Decay::default(),
-            flutter_osc: Osc::default(),
-            last_throttle: 0.0,
-        }
-    }
-
-    /// New parameters: a lift with boost blows off.
-    pub fn set(&mut self, p: &CarParams) {
-        if p.throttle < 0.25 && self.last_throttle >= 0.5 {
-            let b = self.boost;
-            if b > 0.3 {
-                self.bov.trigger(b * 0.22, 0.45);
-                self.bov_f = 4200.0;
-                self.flutter.trigger(b * 0.12, 0.35);
+    #[test]
+    fn crossfade_weights_are_equal_power_and_bracket_the_rpm() {
+        for rpm in [500.0, 1006.0, 1800.0, 2556.0, 4000.0, 6208.0, 7600.0] {
+            let w = weights(&ON, rpm);
+            let p: f32 = w.iter().map(|(_, g)| g * g).sum();
+            assert!((p - 1.0).abs() < 1e-4, "rpm {rpm}: power {p}");
+            for (i, g) in w {
+                if g > 0.01 {
+                    let ratio = rpm / LOOPS[i].0;
+                    // Never pitched beyond the neighbour's recorded rpm.
+                    assert!(ratio > 0.3 && ratio < 2.6, "rpm {rpm}: loop {i} at ×{ratio}");
+                }
             }
         }
-        self.last_throttle = p.throttle;
-    }
-
-    /// An upshift under boost: a short chuff of the valve.
-    pub fn shift(&mut self, up: bool) {
-        if up && self.boost > 0.4 && !self.bov.active() {
-            self.bov.trigger(self.boost * 0.1, 0.18);
-            self.bov_f = 3600.0;
-        }
-    }
-
-    pub fn update_coeffs(&mut self) {
-        self.hiss.set_bandpass(2400.0 + 5200.0 * self.shaft.v, 7.0);
-        self.bov_bp.set_bandpass(self.bov_f, 1.3);
-    }
-
-    #[inline]
-    pub fn sample(&mut self, load: f32, rpm: f32) -> f32 {
-        // Boost builds with load above ~2500 rpm (lag), bleeds off on lift.
-        let target = load * smoothstep(2400.0, 5200.0, rpm);
-        let rate = if target > self.boost { 1.3 } else { 4.0 };
-        self.boost += (target - self.boost) * rate / RATE;
-        let shaft = self.shaft.next(self.boost.max(smoothstep(1500.0, 7000.0, rpm) * 0.25));
-        let wf = 2400.0 + 5200.0 * shaft;
-        let n = &mut self.n;
-        // Compressor whistle: the blade-pass tone and a weaker partial, plus air hiss.
-        let whistle = (self.whistle.next(wf) + 0.3 * self.whistle2.next(wf * 1.52)) * shaft * shaft * 0.011
-            + self.hiss.run(n.white()) * shaft * 0.05;
-        let mut bov = 0.0;
-        if self.bov.active() {
-            self.bov_f = (self.bov_f * (1.0 - 1.6 / RATE)).max(1200.0);
-            bov = self.bov_bp.run(n.white()) * self.bov.next();
-        }
-        if self.flutter.active() {
-            // Compressor surge "stu-tu-tu".
-            let am = 0.5 + 0.5 * self.flutter_osc.next(22.0);
-            bov += self.bov_bp.run(n.white()) * self.flutter.next() * am * am;
-        }
-        if !self.bov.active() && !self.flutter.active() {
-            self.bov_bp.settle();
-        }
-        whistle + bov
+        assert_eq!(weights(&OFF, 6297.0)[0], (2, 1.0));
     }
 }
