@@ -56,13 +56,23 @@ fn button_centre(app: &mut App, action: UiAction) -> Option<Vec2> {
 fn click_at(app: &mut App, at: Vec2) {
     let w = app.world_mut();
     let window = w.query_filtered::<Entity, With<PrimaryWindow>>().single(w).unwrap();
+    // What winit sends for a real click: the cursor moves there (logical px), then the button
+    // goes down and up. Bevy 0.20 picking reads the `WindowEvent` copies of these.
+    let scale = w.entity(window).get::<Window>().unwrap().scale_factor();
     w.entity_mut(window).get_mut::<Window>().unwrap().set_physical_cursor_position(Some(at.as_dvec2()));
+    let moved = bevy::window::CursorMoved { window, position: at / scale, delta: None };
+    w.write_message(moved.clone());
+    w.write_message(bevy::window::WindowEvent::CursorMoved(moved));
     app.update();
     let w = app.world_mut();
-    w.write_message(MouseButtonInput { button: MouseButton::Left, state: ButtonState::Pressed, window });
+    let press = MouseButtonInput { button: MouseButton::Left, state: ButtonState::Pressed, window };
+    w.write_message(press);
+    w.write_message(bevy::window::WindowEvent::MouseButtonInput(press));
     app.update();
     let w = app.world_mut();
-    w.write_message(MouseButtonInput { button: MouseButton::Left, state: ButtonState::Released, window });
+    let release = MouseButtonInput { button: MouseButton::Left, state: ButtonState::Released, window };
+    w.write_message(release);
+    w.write_message(bevy::window::WindowEvent::MouseButtonInput(release));
     for _ in 0..4 {
         app.update();
     }

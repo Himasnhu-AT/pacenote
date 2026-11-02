@@ -113,6 +113,12 @@ mod dev {
     pub fn register(app: &mut App) {
         app.add_control_command("art.stats", "Trees (near/far cells, entities, far triangles)", params(&[]), stats)
             .add_control_command("art.textures", "Load state of every material texture (counts, and the first paths per state)", params(&[]), textures)
+            .add_control_command(
+                "ui.click_at",
+                "Click the primary window at logical (x, y) the way winit does (CursorMoved + button WindowEvents)",
+                params(&[("x", "number", "logical px from the left"), ("y", "number", "logical px from the top"), ("action", "string", "move | down | up | tap (default: move + down; send up next)")]),
+                click_at,
+            )
             .add_control_command("art.memory", "Mesh and image memory by entity name (CPU copies; render-only meshes counted, not sized)", params(&[]), memory)
             .add_control_command(
             "art.place",
@@ -150,6 +156,51 @@ mod dev {
             }
         }
         Ok(json!(by))
+    }
+
+    fn click_at(world: &mut World, p: Value) -> Result<Value, String> {
+        use bevy::input::{ButtonState, mouse::MouseButtonInput};
+        use bevy::window::{CursorMoved, PrimaryWindow, WindowEvent};
+        if p.get("action").and_then(Value::as_str) == Some("list") {
+            let scale = world.query_filtered::<&Window, With<PrimaryWindow>>().single(world).map_or(1.0, |w| w.scale_factor());
+            let list: Vec<Value> = world
+                .query::<(&engine::ui::widgets::ActionButton, &bevy::ui::UiGlobalTransform, &bevy::ui::ComputedUiTargetCamera, Option<&bevy::picking::hover::Hovered>)>()
+                .iter(world)
+                .map(|(b, t, cam, h)| json!([format!("{:?}", b.0), [t.translation.x / scale, t.translation.y / scale], format!("{:?}", cam.get()), h.map(|h| h.0)]))
+                .collect();
+            return Ok(json!({"scale": scale, "buttons": list}));
+        }
+        let x = p.get("x").and_then(Value::as_f64).ok_or("`x` is required")? as f32;
+        let y = p.get("y").and_then(Value::as_f64).ok_or("`y` is required")? as f32;
+        let action = p.get("action").and_then(Value::as_str).unwrap_or("tap");
+        let mut q = world.query_filtered::<(Entity, &Window), With<PrimaryWindow>>();
+        let (window, w) = q.single(world).map_err(|_| "no primary window")?;
+        let scale = w.scale_factor();
+        let at = Vec2::new(x, y);
+        if let Ok(mut w) = world.query_filtered::<&mut Window, With<PrimaryWindow>>().single_mut(world) {
+            w.set_physical_cursor_position(Some((at * scale).as_dvec2()));
+        }
+        if matches!(action, "move" | "tap") {
+            let moved = CursorMoved { window, position: at, delta: None };
+            world.write_message(moved.clone());
+            world.write_message(WindowEvent::CursorMoved(moved));
+        }
+        let button = |state| MouseButtonInput { button: MouseButton::Left, state, window };
+        if matches!(action, "down" | "tap") {
+            world.write_message(button(ButtonState::Pressed));
+            world.write_message(WindowEvent::MouseButtonInput(button(ButtonState::Pressed)));
+        }
+        if action == "up" {
+            world.write_message(button(ButtonState::Released));
+            world.write_message(WindowEvent::MouseButtonInput(button(ButtonState::Released)));
+        }
+        let hovered: Vec<String> = world
+            .query::<(&engine::ui::widgets::ActionButton, &bevy::picking::hover::Hovered)>()
+            .iter(world)
+            .filter(|(_, h)| h.0)
+            .map(|(b, _)| format!("{:?}", b.0))
+            .collect();
+        Ok(json!({"at": [x, y], "scale": scale, "hovered": hovered}))
     }
 
     /// Vertex and index bytes of a mesh still on the CPU (`None`: render-world only).
