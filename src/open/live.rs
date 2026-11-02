@@ -44,8 +44,11 @@ pub struct LiveBuilding;
 
 #[derive(Resource, Default)]
 struct Live {
-    /// Each road's spline as last rebuilt from (to find what moved).
-    splines: HashMap<Entity, Spline>,
+    /// Each road's spline as last rebuilt from, by stable id (to find what moved; a level
+    /// opened again has new entities with the same ids and splines: nothing moved).
+    splines: HashMap<u64, Spline>,
+    /// Stable id of each road entity (to tell a deleted road from a reloaded one).
+    ids: HashMap<Entity, u64>,
     /// Areas (XZ min, max) whose ground needs shaping again.
     reshape: Vec<(Vec2, Vec2)>,
     /// A change waits: real seconds when the last one came.
@@ -117,7 +120,7 @@ fn watch(
     mut live: ResMut<Live>,
     time: Res<Time<Real>>,
     loading: Option<Res<crate::loading::Loading>>,
-    roads: Query<(Entity, Ref<Spline>, Ref<RoadSpline>), With<LevelEntity>>,
+    roads: Query<(Entity, &LevelEntity, Ref<Spline>, Ref<RoadSpline>)>,
     points: Query<(), (With<LevelEntity>, Or<(With<HomePoint>, With<EventStart>, With<GradeNote>)>, Changed<Transform>)>,
     doc: Query<Ref<WorldDoc>>,
     mut removed: RemovedComponents<Spline>,
@@ -128,32 +131,39 @@ fn watch(
     let now = time.elapsed_secs_f64();
     if !live.started {
         // The world was just built from these: remember them, nothing to do.
-        live.splines = roads.iter().map(|(e, s, _)| (e, (*s).clone())).collect();
+        live.splines = roads.iter().map(|(_, l, s, _)| (l.id.0, (*s).clone())).collect();
+        live.ids = roads.iter().map(|(e, l, _, _)| (e, l.id.0)).collect();
         live.started = true;
         return;
     }
     let mut any = false;
-    for (e, s, info) in &roads {
+    for (e, l, s, info) in &roads {
+        live.ids.insert(e, l.id.0);
         if !(s.is_changed() || info.is_changed()) {
             continue;
         }
-        let boxes = match live.splines.get(&e) {
+        let boxes = match live.splines.get(&l.id.0) {
             Some(old) if *old == *s => Vec::new(),
             Some(old) => changed_boxes(old, &s),
             None => span_box(&s, 0, s.points.len() as isize).into_iter().collect(),
         };
-        if boxes.is_empty() && !info.is_changed() {
+        if boxes.is_empty() && (info.is_added() || !info.is_changed()) {
             continue;
         }
         if info.kind == super::RoadKind::Street {
             live.town = true;
         }
         live.reshape.extend(boxes);
-        live.splines.insert(e, (*s).clone());
+        live.splines.insert(l.id.0, (*s).clone());
         any = true;
     }
+    let current: HashSet<u64> = roads.iter().map(|(_, l, _, _)| l.id.0).collect();
     for e in removed.read() {
-        if let Some(old) = live.splines.remove(&e) {
+        let Some(id) = live.ids.remove(&e) else { continue };
+        if current.contains(&id) {
+            continue;
+        }
+        if let Some(old) = live.splines.remove(&id) {
             live.reshape.extend(span_box(&old, 0, old.points.len() as isize));
             live.town = true;
             any = true;

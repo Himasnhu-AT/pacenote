@@ -103,7 +103,7 @@ impl Plugin for LevelTypesPlugin {
             .add_systems(PreStartup, pick_source)
             .add_systems(Update, adopt_volumes);
         #[cfg(feature = "dev")]
-        app.add_systems(PostUpdate, (hide_game_ui, one_main_camera).run_if(resource_exists::<engine::editor::EditorMode>));
+        app.add_systems(PostUpdate, hide_game_ui.run_if(resource_exists::<engine::editor::EditorMode>));
     }
 }
 
@@ -263,7 +263,7 @@ pub fn spawn_level(world: &mut World, data: &WorldData, splines: &[(Spline, Road
         level(world, e);
     }
     for (name, f) in [("Trees", Foliage::Trees), ("Dressing", Foliage::Dressing)] {
-        let e = world.spawn((Name::new(name), f, PcgOverrides::default(), Transform::IDENTITY)).id();
+        let e = world.spawn((Name::new(name), f, PcgOverrides::default(), engine::pcg::PcgFollowTerrain, Transform::IDENTITY)).id();
         level(world, e);
     }
 }
@@ -326,6 +326,10 @@ pub fn adopt_volume(world: &mut World, v: Entity) {
     if !t.contains::<PcgOverrides>() {
         t.insert(PcgOverrides::default());
     }
+    // Trees and rocks follow sculpting (and the ground re-shaped around a moved road).
+    if !t.contains::<engine::pcg::PcgFollowTerrain>() {
+        t.insert(engine::pcg::PcgFollowTerrain);
+    }
     info!("level: the {kind:?} volume is on the level's foliage entity");
 }
 
@@ -337,21 +341,6 @@ fn hide_game_ui(mut roots: Query<&mut Visibility, (With<bevy::ui::Node>, Without
         if *v != Visibility::Hidden {
             *v = Visibility::Hidden;
         }
-    }
-}
-
-/// In the editor the editor's camera is the main one: the game's own (spawned when the stage
-/// loads) stops being `MainCamera` and stops drawing. Otherwise everything that follows "the"
-/// main camera (tree streaming, traffic, terrain detail) finds two and does nothing.
-#[cfg(feature = "dev")]
-#[allow(clippy::type_complexity)]
-fn one_main_camera(mut commands: Commands, mut cams: Query<(Entity, &mut Camera), (With<engine::gfx::MainCamera>, Without<engine::editor::EditorOnly>)>, editor: Query<(), (With<engine::gfx::MainCamera>, With<engine::editor::EditorOnly>)>) {
-    if editor.is_empty() {
-        return;
-    }
-    for (e, mut cam) in &mut cams {
-        cam.is_active = false;
-        commands.entity(e).remove::<engine::gfx::MainCamera>();
     }
 }
 
@@ -367,6 +356,13 @@ fn adopt_volumes(world: &mut World) {
     for v in generated {
         adopt_volume(world, v);
     }
+}
+
+/// Is the level at `path` an open world (does it hold a [`WorldDoc`])? Relative paths are
+/// tried as given, then under the assets folder.
+pub fn is_open_world(path: &Path) -> bool {
+    let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(path);
+    [path.to_path_buf(), assets].iter().any(|p| std::fs::read_to_string(p).is_ok_and(|t| t.contains("\"pacenote::open::level::WorldDoc\"")))
 }
 
 /// The terrain folder of the level at `level` (`WorldDoc::terrain` next to it).
@@ -460,6 +456,7 @@ pub fn level_app() -> App {
         .register_type::<ChildOf>()
         .register_type::<Spline>()
         .register_type::<PcgOverrides>()
+        .register_type::<engine::pcg::PcgFollowTerrain>()
         .add_plugins((engine::level::LevelPlugin, placeable::PlaceablePlugin, LevelTypesPlugin));
     app
 }
