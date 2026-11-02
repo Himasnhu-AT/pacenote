@@ -429,8 +429,9 @@ impl Car {
 /// launch clutch slip, gravel gearing, stiffer diffs; 5 = the same bits on every CPU (libm),
 /// bump-stop damping, engine braking either way, hill hold that holds, implicit wheel spin;
 /// 6 = no damage, breakable saplings / posts / signs, shrubs that drag; 7 = damage again (from
-/// solid hits only), body parts that come off.
-pub const REVISION: u64 = 7;
+/// solid hits only), body parts that come off; 8 = Bevy 0.20 / glam 0.33 (same code, the float
+/// math's last bits moved).
+pub const REVISION: u64 = 8;
 
 /// Fastest the body may spin (rad/s); normal crashes stay under ~15.
 const MAX_SPIN: f32 = 25.0;

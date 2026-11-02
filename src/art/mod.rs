@@ -112,6 +112,7 @@ mod dev {
 
     pub fn register(app: &mut App) {
         app.add_control_command("art.stats", "Trees (near/far cells, entities, far triangles)", params(&[]), stats)
+            .add_control_command("art.textures", "Load state of every material texture (counts, and the first paths per state)", params(&[]), textures)
             .add_control_command("art.memory", "Mesh and image memory by entity name (CPU copies; render-only meshes counted, not sized)", params(&[]), memory)
             .add_control_command(
             "art.place",
@@ -124,6 +125,31 @@ mod dev {
     fn stats(world: &mut World, _: Value) -> Result<Value, String> {
         let t = world.get_resource::<super::trees::TreeField>().map(|f| f.stats).unwrap_or_default();
         Ok(json!({"trees": t.trees, "cells": t.cells, "near_cells": t.near_cells, "near_entities": t.near_entities, "far_triangles": t.far_triangles}))
+    }
+
+    fn textures(world: &mut World, _: Value) -> Result<Value, String> {
+        use std::collections::BTreeMap;
+        let server = world.resource::<AssetServer>();
+        let mut seen = std::collections::HashSet::new();
+        let mut by: BTreeMap<String, (usize, Vec<String>)> = BTreeMap::new();
+        for (_, m) in world.resource::<Assets<StandardMaterial>>().iter() {
+            for h in [&m.base_color_texture, &m.normal_map_texture, &m.metallic_roughness_texture, &m.occlusion_texture].into_iter().flatten() {
+                if !seen.insert(h.id()) {
+                    continue;
+                }
+                let state = match server.get_load_state(h.id()) {
+                    Some(bevy::asset::LoadState::Failed(e)) => format!("failed: {e}").chars().take(160).collect(),
+                    Some(s) => format!("{s:?}"),
+                    None => "untracked".into(),
+                };
+                let e = by.entry(state).or_default();
+                e.0 += 1;
+                if e.1.len() < 3 {
+                    e.1.push(h.path().map_or("(no path)".into(), |p| p.to_string()));
+                }
+            }
+        }
+        Ok(json!(by))
     }
 
     /// Vertex and index bytes of a mesh still on the CPU (`None`: render-world only).

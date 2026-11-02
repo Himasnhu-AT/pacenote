@@ -74,7 +74,7 @@ fn dump(app: &mut App) {
     for (e, c, t, n, ui) in cams.iter(w) {
         eprintln!("camera {e} {:?} order {} active {} target {:?} ui {ui} size {:?}", n.map(|n| n.as_str()), c.order, c.is_active, t, c.physical_target_size());
     }
-    let mut q = w.query::<(&ActionButton, &Interaction, &bevy::ui::UiGlobalTransform, &ComputedNode, &bevy::ui::ComputedUiTargetCamera)>();
+    let mut q = w.query::<(&ActionButton, Option<&bevy::picking::hover::Hovered>, &bevy::ui::UiGlobalTransform, &ComputedNode, &bevy::ui::ComputedUiTargetCamera)>();
     for (b, i, t, n, cam) in q.iter(w) {
         eprintln!("button {:?} {:?} at {:?} size {:?} cam {:?}", b.0, i, t.translation, n.size(), cam.get());
     }

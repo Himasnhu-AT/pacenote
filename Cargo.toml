@@ -11,7 +11,7 @@ engine = { path = "/Users/himanshu/codes/game/engine", default-features = false,
 pcg-core = { path = "/Users/himanshu/codes/game/engine/crates/pcg-core" }
 # Bevy derive macros expand to `bevy::ecs::..`, so the game names bevy itself (no features of
 # its own: the engine picks them).
-bevy = { version = "=0.19.1", default-features = false }
+bevy = { version = "=0.20.1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 ron = "0.12"
 # Microphone capture for voice chat (same version rodio already pulls in: no new copy).

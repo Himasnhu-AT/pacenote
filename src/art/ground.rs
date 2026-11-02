@@ -340,7 +340,7 @@ fn bounds(world: &mut World, id: Entity, aabb: Option<bevy::camera::primitives::
 
 /// Adds a static ground mesh GPU-only (no CPU copy) with its bounds on the entity.
 fn add_mesh(world: &mut World, mut m: Mesh) -> (Handle<Mesh>, Option<bevy::camera::primitives::Aabb>) {
-    let aabb = m.compute_aabb();
+    let aabb = m.get_aabb();
     m.asset_usage = RenderAssetUsages::RENDER_WORLD;
     (world.resource_mut::<Assets<Mesh>>().add(m), aabb)
 }

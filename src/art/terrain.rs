@@ -1,6 +1,6 @@
 //! Full-PBR terrain: replaces the engine's albedo-only splat material on the terrain chunks
 //! with one that also uses each layer's normal and ORM maps (cooked sets), anti-tiling and a
-//! height-ish blend between layers (`terrain.wgsl`). It reuses the engine's splat map and
+//! height-ish blend between layers (`terrain.wesl`). It reuses the engine's splat map and
 //! layer rules ([`super::ground::layers`]), so the layout is identical; only shading changes.
 
 use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
@@ -57,7 +57,7 @@ pub struct PnTerrainExt {
 
 impl MaterialExtension for PnTerrainExt {
     fn fragment_shader() -> ShaderRef {
-        "embedded://pacenote/art/terrain.wgsl".into()
+        "embedded://pacenote/art/terrain.wesl".into()
     }
 }
 
@@ -68,7 +68,7 @@ impl Plugin for TerrainArtPlugin {
         if !app.is_plugin_added::<MaterialPlugin<StandardMaterial>>() {
             return; // headless
         }
-        bevy::asset::embedded_asset!(app, "terrain.wgsl");
+        bevy::asset::embedded_asset!(app, "terrain.wesl");
         app.add_plugins(MaterialPlugin::<PnTerrain>::default()).add_systems(Update, (build, swap).chain());
     }
 }

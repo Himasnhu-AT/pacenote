@@ -169,7 +169,7 @@ fn kit(world: &mut World) -> Kit {
 /// Horizontal reach of a mesh from its origin (m).
 fn mesh_reach(mesh: &mut Mesh) -> Option<f32> {
     use bevy::camera::primitives::MeshAabb;
-    let a = mesh.compute_aabb()?;
+    let a = mesh.get_aabb()?;
     let (lo, hi) = (Vec3::from(a.min()), Vec3::from(a.max()));
     Some(lo.x.abs().max(hi.x.abs()).max(lo.z.abs()).max(hi.z.abs()) * 0.8)
 }
@@ -182,7 +182,7 @@ fn tree_height(world: &mut World) -> Option<f32> {
     let meshes = world.resource::<Assets<Mesh>>();
     let mut top: f32 = 0.0;
     for (m, _) in parts {
-        if let Some(a) = meshes.get(&m).and_then(|m| m.compute_aabb()) {
+        if let Some(a) = meshes.get(&m).and_then(|m| m.get_aabb()) {
             top = top.max(a.max().y);
         }
     }

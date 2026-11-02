@@ -11,6 +11,7 @@ use bevy::ui::RelativeCursorPosition;
 use engine::flow::AppState;
 use engine::settings::{FieldDef, FieldKind, RegisterSettings, format_percent};
 use engine::ui::prelude::*;
+use bevy::ui_widgets::Button;
 use engine::ui::widgets::{ActionButton, Focus, Focusable, KeepColor, LookBg, ScrollList, nav_look, primary_look, secondary_look};
 
 use super::board::{self, Record};

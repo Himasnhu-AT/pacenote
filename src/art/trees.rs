@@ -653,7 +653,7 @@ pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit
             field.stats.far_triangles += g.tris();
             // GPU-only (no CPU copy kept), so the bounds go on explicitly.
             let mut m = g.mesh(false);
-            let aabb = m.compute_aabb();
+            let aabb = m.get_aabb();
             m.asset_usage = RenderAssetUsages::RENDER_WORLD;
             let h = meshes.add(m);
             let range = VisibilityRange { start_margin: (FAR_START - FADE)..FAR_START, end_margin: (kit.view - 60.0)..kit.view, use_aabb: false };

@@ -1289,7 +1289,7 @@ fn bad_inputs_keep_the_car_finite() {
 /// The scripted drive's hash on every machine. If it changes on purpose (a sim change), bump
 /// `vehicle::REVISION` and update it here. If it differs only on some CPU, the sim has picked
 /// up a platform-dependent call (see the comments at the libm calls in vehicle.rs).
-const SCRIPTED_HASH: u64 = 0x12ff_546f_2a20_7a8e;
+const SCRIPTED_HASH: u64 = 0x7d39_843b_d34b_fbe6;
 
 #[test]
 fn scripted_drive_is_bit_identical() {

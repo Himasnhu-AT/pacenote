@@ -2,15 +2,14 @@
 // PBR layers: colour, normal (BC5, RG) and ORM (R = AO, G = roughness) per layer, sampled with
 // world-XZ UVs. Each layer is sampled at two scales/rotations blended by low-frequency noise
 // (breaks visible tiling), and transitions are sharpened by the layers' AO as a height cue.
-#import bevy_pbr::{
+// WESL (Bevy 0.20).
+import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
-    pbr_functions::alpha_discard,
+    pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     forward_io::{VertexOutput, FragmentOutput},
-    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
-}
-#ifdef VISIBILITY_RANGE_DITHER
-#import bevy_pbr::pbr_functions::visibility_range_dither;
-#endif
+};
+@if(VISIBILITY_RANGE_DITHER)
+import bevy_pbr::render::pbr_functions::visibility_range_dither;
 
 struct Params {
     // rgb: linear tint (1 = texture as is), a: roughness multiplier
@@ -23,22 +22,22 @@ struct Params {
     misc: vec4<f32>,
 };
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> p: Params;
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var splat_tex: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(102) var splat_smp: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var c0: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(104) var c1: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(105) var c2: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(106) var c3: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(107) var n0: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(108) var n1: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(109) var n2: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(110) var n3: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(111) var o0: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(112) var o1: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(113) var o2: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(114) var o3: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(115) var smp: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> p: Params;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var splat_tex: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var splat_smp: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(103) var c0: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(104) var c1: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(105) var c2: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(106) var c3: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(107) var n0: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(108) var n1: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(109) var n2: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(110) var n3: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(111) var o0: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(112) var o1: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(113) var o2: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(114) var o3: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(115) var smp: sampler;
 
 fn hash21(q0: vec2<f32>) -> f32 {
     let q = fract(q0 * vec2<f32>(123.34, 456.21));
@@ -93,9 +92,8 @@ fn layer(i: u32, ct: texture_2d<f32>, nt: texture_2d<f32>, ot: texture_2d<f32>, 
 @fragment
 fn fragment(vertex_output: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var in = vertex_output;
-#ifdef VISIBILITY_RANGE_DITHER
+@if(VISIBILITY_RANGE_DITHER)
     visibility_range_dither(in.position, in.visibility_range_dither);
-#endif
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 
     let wp = in.world_position.xz;
@@ -136,7 +134,7 @@ fn fragment(vertex_output: VertexOutput, @builtin(front_facing) is_front: bool) 
     pbr_input.material.perceptual_roughness = clamp(rough, 0.05, 1.0);
     pbr_input.N = nm;
     pbr_input.diffuse_occlusion = pbr_input.diffuse_occlusion * ao;
-    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    pbr_input.material.base_color = alpha_discard(pbr_input.material.flags, pbr_input.material.alpha_cutoff, pbr_input.material.base_color);
 
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
