@@ -63,6 +63,9 @@ pub struct OpenWorld {
     /// Whether traffic is solid for the car (dev: the measuring tour turns it off so the
     /// autopilot, which doesn't look out for traffic, isn't wrecked at a crossing).
     pub traffic_solid: Arc<std::sync::atomic::AtomicBool>,
+    /// The terrain folder of the level it was loaded from (editor sculpts are saved there);
+    /// `None` when generated.
+    pub terrain_dir: Option<std::path::PathBuf>,
 }
 
 impl OpenWorld {
@@ -75,11 +78,49 @@ impl OpenWorld {
     /// Builds the network, the terrain and the town from the world data, once it passes
     /// [`data::WorldData::validate`].
     pub fn from_data(data: data::WorldData) -> Result<OpenWorld, String> {
+        OpenWorld::from_data_with(data, None)
+    }
+
+    /// The world from the level file the game plays ([`level::source`]): its data and its
+    /// terrain. Falls back to the generated world (with an error in the log) if the level is
+    /// missing or bad.
+    pub fn load_or_generate(seed: u64) -> OpenWorld {
+        let path = level::source();
+        let t = std::time::Instant::now();
+        match level::load(&path).and_then(|l| {
+            let dir = l.terrain.clone();
+            OpenWorld::from_data_with(l.data, Some(l.heights)).map(|mut o| {
+                o.terrain_dir = Some(dir);
+                o
+            })
+        }) {
+            Ok(o) => {
+                bevy::log::info!("open world: {} in {:.2} s", path.display(), t.elapsed().as_secs_f32());
+                o
+            }
+            Err(e) => {
+                bevy::log::error!("open world: can't load {}: {e}; generating it from the seed", path.display());
+                OpenWorld::generate(seed)
+            }
+        }
+    }
+
+    /// [`from_data`](Self::from_data) with the terrain heights given (a level's terrain files)
+    /// rather than shaped from the roads. They must cover the region at [`SPACING`].
+    pub fn from_data_with(data: data::WorldData, heights: Option<Heightfield>) -> Result<OpenWorld, String> {
         data.validate()?;
         let net = data.net();
         let n = (2.0 * roads::HALF / SPACING) as u32 + 1;
         let origin = Vec2::splat(-roads::HALF);
-        let heights = Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z));
+        let heights = match heights {
+            Some(h) => {
+                if h.nx() != n || h.nz() != n || h.spacing() != SPACING || h.origin() != origin {
+                    return Err(format!("terrain {}x{} at {} m from {}: needs {n}x{n} at {SPACING} m from {origin}", h.nx(), h.nz(), h.spacing(), h.origin()));
+                }
+                h
+            }
+            None => Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z)),
+        };
         let layout = buildings::layout_with(&net, &data.lots);
         let walls = buildings::ObstacleGrid::new(&buildings::obstacles(&layout), 10.0);
         Ok(OpenWorld {
@@ -90,6 +131,7 @@ impl OpenWorld {
             walls: Arc::new(walls),
             traffic: traffic::TrafficSolids::default(),
             traffic_solid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            terrain_dir: None,
         })
     }
 

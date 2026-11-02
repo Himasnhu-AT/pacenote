@@ -95,8 +95,21 @@ pub struct LevelTypesPlugin;
 
 impl Plugin for LevelTypesPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<RoadSpline>().register_type::<WorldDoc>().register_type::<Foliage>();
+        app.register_type::<RoadSpline>().register_type::<WorldDoc>().register_type::<Foliage>().add_systems(PreStartup, pick_source);
     }
+}
+
+/// The level the open world loads: `--level <file>` (the editor's Play passes its copy), else
+/// the shipped one under the assets folder.
+fn pick_source(config: Option<Res<engine::level::LevelConfig>>, assets: Option<Res<engine::paths::AssetsDir>>) {
+    let assets_path = |p: &Path| assets.as_ref().map_or_else(|| p.to_path_buf(), |a| a.0.join(p));
+    let path = match config.and_then(|c| c.startup.clone()) {
+        Some(p) if p.is_absolute() || p.exists() => p,
+        Some(p) => assets_path(&p),
+        None => assets_path(Path::new(DEFAULT_LEVEL)),
+    };
+    info!("open world level: {}", path.display());
+    set_source(path);
 }
 
 /// The stations of `r` kept as control points: every surface change, and as few others as
@@ -268,6 +281,60 @@ pub fn from_level(world: &mut World) -> Result<WorldData, String> {
 /// The terrain folder of the level at `level` (`WorldDoc::terrain` next to it).
 pub fn terrain_dir(level: &Path, terrain: &str) -> PathBuf {
     level.parent().unwrap_or(Path::new(".")).join(terrain)
+}
+
+/// The level the open world loads from: `--level <file>` (set at startup), else
+/// `assets/levels/open.level.ron`.
+static SOURCE: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// The shipped level, under the assets folder.
+pub const DEFAULT_LEVEL: &str = "levels/open.level.ron";
+
+pub fn set_source(path: PathBuf) {
+    *SOURCE.write().unwrap_or_else(|e| e.into_inner()) = Some(path);
+}
+
+pub fn source() -> PathBuf {
+    SOURCE.read().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(DEFAULT_LEVEL))
+}
+
+/// Biggest level file read (the baked world is 0.65 MB).
+const MAX_LEVEL_BYTES: u64 = 64 << 20;
+
+/// What a level file gives the open world.
+pub struct Loaded {
+    pub data: WorldData,
+    pub heights: engine::world::Heightfield,
+    /// Where its terrain files are (sculpts are saved back there).
+    pub terrain: PathBuf,
+}
+
+/// Reads the open world from the level at `path`: world data ([`from_level`]) and terrain
+/// heights. The terrain folder is looked for next to the level, then (for the editor's Play
+/// copy of a level, written elsewhere) next to the shipped level.
+pub fn load(path: &Path) -> Result<Loaded, String> {
+    let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+    if size > MAX_LEVEL_BYTES {
+        return Err(format!("{}: {size} bytes (at most {MAX_LEVEL_BYTES})", path.display()));
+    }
+    let mut app = level_app();
+    let world = app.world_mut();
+    engine::level::load_level(world, path).map_err(|e| format!("{}: {e:?}", path.display()))?;
+    let data = from_level(world)?;
+    let name = world.query::<&WorldDoc>().iter(world).next().map(|d| d.terrain.clone()).unwrap_or_default();
+    if name.is_empty() || name.contains("..") || Path::new(&name).is_absolute() {
+        return Err(format!("terrain folder {name:?}"));
+    }
+    let mut dir = terrain_dir(path, &name);
+    if !dir.join("terrain.ron").exists() {
+        dir = terrain_dir(&source_default(), &name);
+    }
+    let heights = TerrainData::load(&dir).and_then(|t| t.to_heightfield()).map_err(|e| format!("terrain {}: {e:?}", dir.display()))?;
+    Ok(Loaded { data, heights, terrain: dir })
+}
+
+fn source_default() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(DEFAULT_LEVEL)
 }
 
 /// A headless app with what saving and loading the open world's level needs.

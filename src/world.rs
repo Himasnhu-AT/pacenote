@@ -259,7 +259,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
 /// The open world as a [`StageWorld`]: the network and terrain from [`crate::open`], every trunk
 /// and boulder solid (the dressing graph keeps them off every road and out of town).
 fn generate_open(def: &StageDef) -> StageWorld {
-    let open = crate::open::OpenWorld::generate(def.seed);
+    let open = crate::open::OpenWorld::load_or_generate(def.seed);
     let (start, _) = open.spawn();
     // The world data sets the time of day.
     let def = &StageDef { time: open.data.time, ..def.clone() };
@@ -464,6 +464,9 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
         cell_size: 512.0,
         ..default()
     };
+    // Editor sculpts of a level's terrain are saved back to its files with the level.
+    let terrain_dir = s.open.as_ref().and_then(|o| o.terrain_dir.clone());
+    world.insert_resource(engine::world::TerrainSaveTarget { dir: terrain_dir, dirty: false });
     if let Err(e) = engine::world::desc::spawn_world_with(world, desc, Some((*s.heights).clone())) {
         error!("terrain: {e}");
     }
