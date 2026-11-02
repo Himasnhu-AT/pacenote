@@ -1,18 +1,22 @@
-//! Tyres on each surface class, rolling and sliding, plus stones thrown at the arches and the
-//! floor.
+//! Tyres on each surface class, rolling and sliding, from recorded loops (see
+//! [`super::samples`]), plus stones thrown at the arches and the floor (synthesised: short
+//! resonant pings and thuds).
 //!
 //! | Class | Rolling | Sliding |
 //! |---|---|---|
-//! | gravel | dense crunch grains (small resonant clicks) + compression crunch + rumble | scrabble (many more grains), spray hiss, ploughing roar, stones on the floor |
-//! | tarmac | tread hum (~1 kHz band) + low road roar | squeal: band-limited saw with stick-slip chatter through two resonances; scrub hiss |
-//! | snow | squeaky tonal grains + soft crunch | more squeak, hiss |
-//! | mud | low squelch + rising "bubble" chirps | slurp, many more bubbles |
-//! | off-road | grass swish + bumps | more swish |
+//! | gravel | gravel crunch under slow tyres, sped up with the car | dirt skids |
+//! | tarmac | tyre roar on a highway | tyre squeal |
+//! | snow | tyres creeping over snow and ice | the same, faster and harder, plus some dirt skid |
+//! | mud | the gravel crunch, slowed and darkened | the skid, darkened |
+//! | off-road | the gravel crunch, darker, with a bumpy rumble | the skid, darker |
+//!
+//! Every loop is stereo by reading it twice, half a loop apart (decorrelated channels).
 
 use super::car::{CarParams, GRAVEL, MUD, OFFROAD, SNOW, SURFACES, TARMAC};
-use super::dsp::{Biquad, Decay, Noise, Osc, RATE, Ring, Saw, Smooth, Wander, smoothstep};
+use super::dsp::{Biquad, Noise, RATE, Ring, Smooth, Wander, smoothstep};
+use super::samples::{Bank, Id, Looper};
 
-/// Short resonant clicks with a pan each (gravel and snow grains, stones).
+/// Short resonant clicks with a pan each (stones).
 #[derive(Clone, Copy, Debug)]
 struct Grains<const N: usize> {
     v: [(Ring, f32); N],
@@ -39,22 +43,12 @@ impl<const N: usize> Grains<N> {
         for (ring, px) in &mut self.v {
             if ring.active() {
                 let s = ring.next();
-                // Cheap linear pan (the grains are tiny; equal power isn't audible here).
                 l += s * (1.0 - *px);
                 r += s * (1.0 + *px);
             }
         }
         (l, r)
     }
-}
-
-/// A bubble in mud: a sine chirping upward as it decays.
-#[derive(Clone, Copy, Debug, Default)]
-struct Bubble {
-    osc: Osc,
-    hz: f32,
-    rise: f32,
-    env: Decay,
 }
 
 /// What the tyres send out.
@@ -68,34 +62,58 @@ pub struct TyreOut {
     pub floor_r: f32,
 }
 
+/// One recorded loop, stereo, with a low-pass per channel (for the darker surfaces).
+#[derive(Clone, Copy, Debug)]
+struct Layer {
+    id: Id,
+    pos: Looper,
+    lp: [Biquad; 2],
+    filtered: bool,
+}
+
+impl Layer {
+    fn new(id: Id, start: f64, lowpass: Option<f32>) -> Self {
+        let hz = lowpass.unwrap_or(20_000.0);
+        Layer { id, pos: Looper::at(start), lp: [Biquad::lowpass(hz, 0.7); 2], filtered: lowpass.is_some() }
+    }
+
+    /// Next stereo sample at `rate`, scaled by `gain` (silent and not moving below a floor).
+    #[inline]
+    fn next(&mut self, bank: &Bank, rate: f32, gain: f32) -> (f32, f32) {
+        if gain < 1e-4 {
+            if self.filtered {
+                self.lp[0].settle();
+                self.lp[1].settle();
+            }
+            return (0.0, 0.0);
+        }
+        let x = bank.get(self.id);
+        let r = self.pos.peek(x, 0.5);
+        let l = self.pos.next(x, rate);
+        if self.filtered {
+            (self.lp[0].run(l) * gain, self.lp[1].run(r) * gain)
+        } else {
+            (l * gain, r * gain)
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Tyres {
     n: Noise,
     pub roll: [Smooth; SURFACES],
     pub slide: [Smooth; SURFACES],
-    grains: Grains<10>,
-    crunch: Biquad,
-    crunch_am: Wander,
-    gravel_lo: Biquad,
-    spray: Biquad,
-    spray_am: Wander,
-    plough: Biquad,
-    tread: Biquad,
-    tarmac_lo: Biquad,
-    squeal: Saw,
-    squeal_lo: Biquad,
-    squeal_hi: Biquad,
+    gravel_roll: Layer,
+    gravel_slide: Layer,
+    tarmac_roll: Layer,
+    squeal: Layer,
+    snow_roll: Layer,
+    snow_slide: Layer,
+    mud_roll: Layer,
+    mud_slide: Layer,
+    off_roll: Layer,
+    off_slide: Layer,
     squeal_wander: Wander,
-    chatter: Wander,
-    scrub: Biquad,
-    snow: Grains<6>,
-    snow_crunch: Biquad,
-    mud_lo: Biquad,
-    mud_slurp: Biquad,
-    mud_wander: Wander,
-    bubbles: [Bubble; 4],
-    next_bubble: usize,
-    grass_hp: Biquad,
     rumble: Biquad,
     rumble_wander: Wander,
     pings: Grains<6>,
@@ -106,33 +124,23 @@ pub struct Tyres {
 impl Tyres {
     pub fn new(seed: u32) -> Self {
         let sm = |up, down| Smooth::new(0.0, up, down, RATE);
+        let mut n = Noise::new(seed ^ 0x3333);
+        let mut at = |id, lp| Layer::new(id, n.unit() as f64, lp);
         Tyres {
-            n: Noise::new(seed ^ 0x3333),
+            gravel_roll: at(Id::GravelRoll, None),
+            gravel_slide: at(Id::GravelSlide, None),
+            tarmac_roll: at(Id::TarmacRoll, None),
+            squeal: at(Id::TarmacSqueal, None),
+            snow_roll: at(Id::SnowRoll, None),
+            snow_slide: at(Id::GravelSlide, Some(2400.0)),
+            mud_roll: at(Id::GravelRoll, Some(650.0)),
+            mud_slide: at(Id::GravelSlide, Some(900.0)),
+            off_roll: at(Id::GravelRoll, Some(1800.0)),
+            off_slide: at(Id::GravelSlide, Some(1600.0)),
+            n,
             roll: [sm(0.05, 0.08); SURFACES],
             slide: [sm(0.03, 0.09); SURFACES],
-            grains: Grains::default(),
-            crunch: Biquad::bandpass(650.0, 0.9),
-            crunch_am: Wander::new(45.0),
-            gravel_lo: Biquad::lowpass(200.0, 0.7),
-            spray: Biquad::bandpass(4800.0, 0.55),
-            spray_am: Wander::new(14.0),
-            plough: Biquad::bandpass(480.0, 0.8),
-            tread: Biquad::bandpass(950.0, 0.9),
-            tarmac_lo: Biquad::lowpass(420.0, 0.7),
-            squeal: Saw::default(),
-            squeal_lo: Biquad::bandpass(900.0, 7.0),
-            squeal_hi: Biquad::bandpass(2000.0, 6.0),
             squeal_wander: Wander::new(3.0),
-            chatter: Wander::new(28.0),
-            scrub: Biquad::bandpass(1500.0, 0.7),
-            snow: Grains::default(),
-            snow_crunch: Biquad::bandpass(1300.0, 1.0),
-            mud_lo: Biquad::lowpass(320.0, 0.9),
-            mud_slurp: Biquad::bandpass(420.0, 3.0),
-            mud_wander: Wander::new(4.0),
-            bubbles: [Bubble::default(); 4],
-            next_bubble: 0,
-            grass_hp: Biquad::highpass(3500.0, 0.7),
             rumble: Biquad::lowpass(110.0, 0.8),
             rumble_wander: Wander::new(6.0),
             pings: Grains::default(),
@@ -141,95 +149,50 @@ impl Tyres {
         }
     }
 
-    pub fn update_coeffs(&mut self) {
-        let ts = self.slide[TARMAC].v.min(2.0);
-        // Squeal pitch rises a little with slip.
-        self.squeal_lo.set_bandpass(860.0 + 180.0 * ts, 7.0);
-        self.squeal_hi.set_bandpass(1950.0 + 350.0 * ts, 6.0);
-    }
-
     #[inline]
-    pub fn sample(&mut self, p: &CarParams, speed: f32) -> TyreOut {
-        let n = &mut self.n;
+    pub fn sample(&mut self, p: &CarParams, speed: f32, bank: Option<&Bank>) -> TyreOut {
         let mut roll = [0.0f32; SURFACES];
         let mut slide = [0.0f32; SURFACES];
         for i in 0..SURFACES {
             roll[i] = self.roll[i].next(p.surfaces[i].roll);
             slide[i] = self.slide[i].next(p.surfaces[i].slide);
         }
-        let wn = n.white();
-        let mut mono = 0.0;
+        let n = &mut self.n;
         let fast = smoothstep(3.0, 15.0, speed);
-        // Gravel.
+        // Rolling recordings were made slowly: play them faster with the car.
+        let v = (speed / 25.0).min(1.6);
+        let (mut l, mut r) = (0.0, 0.0);
+        let mut add = |(a, b): (f32, f32)| {
+            l += a;
+            r += b;
+        };
         let (gr, gs) = (roll[GRAVEL], slide[GRAVEL]);
-        if gr + gs > 1e-4 {
-            // Grains: stones crunching under the tread. Rate grows with roll and much more
-            // with slide (scrabble).
-            let rate = (gr * 320.0 + gs * 1400.0) / RATE;
-            if n.chance(rate) {
-                let a = n.range(0.008, 0.035) * (1.0 + 0.8 * gs.min(1.5));
-                self.grains.trigger(n.range(700.0, 3800.0), n.range(0.003, 0.012), a, n.range(-0.7, 0.7));
-            }
-            let am = (0.55 + 0.45 * self.crunch_am.next(n)).max(0.0);
-            let spray_am = (0.6 + 0.4 * self.spray_am.next(n)).max(0.0);
-            mono += self.crunch.run(wn) * (gr * 0.08 + gs * 0.08) * am * am
-                + self.gravel_lo.run(wn) * gr * 0.22
-                + self.spray.run(wn) * gs * 0.15 * spray_am
-                + self.plough.run(wn) * gs * 0.14 * am;
-        }
-        // Snow: squeaky tonal grains over a soft crunch.
-        let (sr, ss) = (roll[SNOW], slide[SNOW]);
-        if sr + ss > 1e-4 {
-            let rate = (sr * 140.0 + ss * 600.0) / RATE;
-            if n.chance(rate) {
-                self.snow.trigger(n.range(1100.0, 2900.0), n.range(0.008, 0.022), n.range(0.006, 0.022), n.range(-0.6, 0.6));
-            }
-            let am = (0.5 + 0.5 * self.crunch_am.next(n)).max(0.0);
-            mono += self.snow_crunch.run(wn) * (sr * 0.05 + ss * 0.12) * am + self.spray.run(wn) * ss * 0.05;
-        }
-        // Tarmac: tread hum and road roar; squeal past the grip peak, scrub when locked.
         let (tr, ts) = (roll[TARMAC], slide[TARMAC]);
-        if tr + ts > 1e-4 {
-            mono += self.tread.run(wn) * tr * tr.min(1.0) * 0.05 + self.tarmac_lo.run(wn) * tr * 0.11;
-            let sq = smoothstep(0.2, 0.9, ts);
-            if sq > 1e-4 {
-                let v = self.squeal_wander.next(n);
-                // Stick-slip: the rubber grabs and lets go tens of times a second.
-                let ch = self.chatter.next(n);
-                let f = (420.0 + 90.0 * ts.min(2.0)) * (1.0 + 0.06 * v + 0.015 * ch);
-                let saw = self.squeal.next(f);
-                let tone = self.squeal_lo.run(saw) * 0.9 + self.squeal_hi.run(saw) * 0.5;
-                let am = (0.65 + 0.35 * ch).max(0.0);
-                mono += tone * sq * 0.42 * am * (0.75 + 0.25 * v.abs());
-            }
-            mono += self.scrub.run(wn) * ts * 0.05;
-        }
-        // Mud: low squelch with a wet resonance, and bubbles that chirp upward.
+        let (sr, ss) = (roll[SNOW], slide[SNOW]);
         let (mr, ms) = (roll[MUD], slide[MUD]);
-        if mr + ms > 1e-4 {
-            let v = self.mud_wander.next(n);
-            let am = (0.6 + 0.4 * v).max(0.0);
-            mono += self.mud_lo.run(wn) * (mr * 0.24 + ms * 0.3) * am + self.mud_slurp.run(wn) * (ms * 0.16 + mr * 0.03) * am * am;
-            let rate = (mr * 14.0 + ms * 45.0) / RATE;
-            if n.chance(rate) {
-                let b = &mut self.bubbles[self.next_bubble];
-                self.next_bubble = (self.next_bubble + 1) % 4;
-                b.hz = n.range(110.0, 260.0);
-                b.rise = 1.0 + n.range(3.0, 9.0) / RATE;
-                b.env.trigger(n.range(0.02, 0.05) * (0.6 + 0.4 * (mr + ms).min(1.5)), n.range(0.04, 0.09));
-            }
-        }
-        for b in &mut self.bubbles {
-            if b.env.active() {
-                b.hz *= b.rise;
-                mono += b.osc.next(b.hz) * b.env.next();
-            }
-        }
-        // Off the road: grass swish and bumps.
         let (or, os) = (roll[OFFROAD], slide[OFFROAD]);
+        if let Some(bank) = bank {
+            add(self.gravel_roll.next(bank, 0.8 + 0.45 * v, gr * 0.45));
+            add(self.gravel_slide.next(bank, 0.9 + 0.1 * gs.min(2.0), gs * 0.26));
+            add(self.tarmac_roll.next(bank, 0.8 + 0.3 * v, tr * tr.min(1.0).sqrt() * 0.26));
+            // Squeal past the grip peak; its pitch wanders and rises a little with slip.
+            let sq = smoothstep(0.2, 0.9, ts);
+            let wob = self.squeal_wander.next(n);
+            add(self.squeal.next(bank, 0.94 + 0.05 * ts.min(2.0) + 0.03 * wob, sq * 0.3));
+            add(self.snow_roll.next(bank, 0.8 + 0.4 * v + 0.25 * ss.min(1.5), sr * 0.45 + ss * 0.3));
+            add(self.snow_slide.next(bank, 1.0, ss * 0.1));
+            add(self.mud_roll.next(bank, 0.6 + 0.25 * v, (mr + 0.4 * ms) * 0.5));
+            add(self.mud_slide.next(bank, 0.75, ms * 0.3));
+            add(self.off_roll.next(bank, 0.7 + 0.35 * v, or * 0.3));
+            add(self.off_slide.next(bank, 0.85, os * 0.5));
+        }
+        // Off the road: a bumpy rumble under it.
         if or + os > 1e-4 {
             let b = self.rumble_wander.next(n).abs();
-            mono += self.grass_hp.run(wn) * (or * 0.03 + os * 0.04) + self.rumble.run(wn) * or * (0.18 + 0.45 * b);
+            let s = self.rumble.run(n.white()) * or * (0.18 + 0.45 * b);
+            add((s, s));
+        } else {
+            self.rumble.settle();
         }
         // Stones: pinging into the arches, thudding on the floor (gravel mostly, some
         // off-road and snow). Sliding throws far more.
@@ -240,13 +203,10 @@ impl Tyres {
         if n.chance(stone * 1.3) {
             self.thunks.trigger(n.range(260.0, 720.0), n.range(0.03, 0.08), n.range(0.02, 0.07), n.range(-0.5, 0.5));
         }
-        let (gl, grr) = self.grains.run();
-        let (sl, srr) = self.snow.run();
         let (pl, pr) = self.pings.run();
         let (tl, trr) = self.thunks.run();
         // The floor pan rings a little with each stone.
-        let thunk_mono = (tl + trr) * 0.5;
-        let floor = self.thunk_body.run(thunk_mono) * 0.8;
-        TyreOut { l: mono + gl + sl, r: mono + grr + srr, floor_l: pl + tl + floor, floor_r: pr + trr + floor }
+        let floor = self.thunk_body.run((tl + trr) * 0.5) * 0.8;
+        TyreOut { l, r, floor_l: pl + tl + floor, floor_r: pr + trr + floor }
     }
 }

@@ -33,7 +33,7 @@ Full design: `docs/DESIGN.md`.
 | `src/codriver/` | AI co-driver: pace notes read ahead by time (`calls.rs`, pure), damage/splits/finish/off-road/roof lines, system TTS (`speech.rs`: `say`, espeak, PowerShell), subtitles; `N` toggles; quiet when a human guide is connected |
 | `src/hud.rs` | Driver HUD (speed, gear, clock, damage readout, retired message) |
 | `src/art/` | Textured terrain material (`terrain.wgsl`), road ribbon, card trees, rocks/plants, car model, per-stage look (sky/fog/rain), wheel spray |
-| `src/audio/` | Synthesised engine/turbo/tyres/ambience on a custom stream; guide hears the replicated car (`RemoteCarSound`) |
+| `src/audio/` | Car from CC0 recordings (`assets/sounds/car/`, cooked by `tools/audio/cook_car.py`): engine rpm/load loops crossfaded and pitched, tyres per surface, impacts, pops; synthesised wind, stones, thumps and ambience; all on a custom stream; guide hears the replicated car (`RemoteCarSound`) |
 | `src/meta/` | Menus, stage select, leaderboards (`board.rs`), ghosts (`ghost.rs`), results, credits; `netlink.rs` adapts to `net_session` |
 | `src/net_session.rs` | `Role` (Solo / Driver / Guide), `Session`, `host` / `join` / `host_with` / `join_with` |
 | `src/guide/` | Replication (`sync.rs`: `NetCar`, `NetRun`, `NetStage`), guide map, panel, driver's "guide connected" notice |
