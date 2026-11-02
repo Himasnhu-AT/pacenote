@@ -1510,11 +1510,11 @@ mod tests {
 
     /// Runs `minutes` of traffic around a walker, checking invariants as it goes. Returns
     /// (cars per step on average, the longest wait seen).
-    fn run(cars: usize, minutes: f32, seed: u64, check: bool) -> (Traffic, f32, f32) {
+    fn run(cars: usize, minutes: f32, seed: u64, speed: f32, check: bool) -> (Traffic, f32, f32) {
         let (net, g) = world();
         let mut t = Traffic::with_graph(g.clone(), TrafficConfig { cars, seed, ..default() });
         let (spawn, _) = super::super::roads::spawn(&net);
-        let mut walker = LaneWalker::new(&g, xz(spawn), 13.0, seed ^ 1);
+        let mut walker = LaneWalker::new(&g, xz(spawn), speed, seed ^ 1);
         let dt = 1.0 / 60.0;
         let steps = (minutes * 60.0 * 60.0) as usize;
         let (mut total, mut worst) = (0usize, 0.0f32);
@@ -1569,16 +1569,26 @@ mod tests {
 
     #[test]
     fn ten_minutes_of_sixty_cars() {
-        let (t, mean, worst) = run(60, 10.0, 7, true);
+        let (t, mean, worst) = run(60, 10.0, 7, 13.0, true);
+        eprintln!("60 cars, 10 min: {mean:.1} cars on average, longest wait {worst:.1} s, {} cars spawned", t.next_id - 1);
         assert!(mean > 50.0, "kept ~60 cars around: {mean}");
         assert!(worst < 60.0, "someone waited {worst} s");
         assert!(t.next_id > 60, "cars came and went: {}", t.next_id);
     }
 
     #[test]
+    fn other_seeds_and_a_fast_player() {
+        for (seed, speed) in [(1, 25.0), (2, 30.0), (3, 8.0)] {
+            let (_, mean, worst) = run(60, 5.0, seed, speed, true);
+            eprintln!("seed {seed}, player at {speed} m/s: {mean:.1} cars, longest wait {worst:.1} s");
+            assert!(worst < 60.0, "seed {seed}: someone waited {worst} s");
+        }
+    }
+
+    #[test]
     fn deterministic() {
-        let (a, _, _) = run(40, 1.0, 3, false);
-        let (b, _, _) = run(40, 1.0, 3, false);
+        let (a, _, _) = run(40, 1.0, 3, 13.0, false);
+        let (b, _, _) = run(40, 1.0, 3, 13.0, false);
         let (pa, pb) = (a.placements(), b.placements());
         assert_eq!(pa.len(), pb.len());
         for (x, y) in pa.iter().zip(&pb) {
