@@ -240,7 +240,9 @@ impl LaneGraph {
     pub fn build(net: &RoadNet) -> LaneGraph {
         // Nodes: junctions closer than MERGE are one (a town street's end and the country
         // road leaving it). Each lists the (road, station) pairs that meet there.
-        let mut nodes: Vec<(Vec2, Vec<(usize, usize)>, bool)> = Vec::new();
+        // (position, the (road, station) pairs meeting there, dead end)
+        type Raw = (Vec2, Vec<(usize, usize)>, bool);
+        let mut nodes: Vec<Raw> = Vec::new();
         for j in &net.junctions {
             let k = match nodes.iter().position(|(p, _, _)| p.distance(j.pos) < MERGE) {
                 Some(k) => k,
@@ -491,7 +493,7 @@ pub struct TrafficConfig {
 
 impl Default for TrafficConfig {
     fn default() -> Self {
-        TrafficConfig { cars: 40, radius: 600.0, spawn_min: 220.0, despawn: 800.0, seed: 0x7AFF_1C }
+        TrafficConfig { cars: 40, radius: 600.0, spawn_min: 220.0, despawn: 800.0, seed: 0x007A_FF1C }
     }
 }
 
@@ -1201,8 +1203,9 @@ impl LaneWalker {
 
 // ---------------------------------------------------------------- ECS
 
-/// Steps [`Traffic`] (when the resource exists) after the car sim each fixed step, publishes
-/// the solids to [`TrafficSolids`], and draws the cars.
+/// Steps [`Traffic`] (when the resource exists) after the car sim each fixed step around the
+/// driven car (else [`TrafficFocus`]), publishes the solids to [`TrafficSolids`], and draws the
+/// cars (shared meshes and materials, no shadows past [`SHADOW_RANGE`] from the camera).
 pub struct TrafficPlugin;
 
 /// The cars' collision cylinders after the last step, shareable with a `Ground` (clone the
@@ -1229,8 +1232,13 @@ impl Plugin for TrafficPlugin {
     }
 }
 
-fn step(time: Res<Time<Fixed>>, mut traffic: ResMut<Traffic>, cars: Query<&crate::drive::DrivenCar>, solids: Res<TrafficSolids>) {
-    let player = cars.iter().next().map(|c| Player { pos: c.car.pos, vel: c.car.vel });
+/// Where traffic gathers when there's no driven car (a menu backdrop, a spectator, the
+/// `traffic_view` example).
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct TrafficFocus(pub Player);
+
+fn step(time: Res<Time<Fixed>>, mut traffic: ResMut<Traffic>, cars: Query<&crate::drive::DrivenCar>, focus: Option<Res<TrafficFocus>>, solids: Res<TrafficSolids>) {
+    let player = cars.iter().next().map(|c| Player { pos: c.car.pos, vel: c.car.vel }).or(focus.map(|f| f.0));
     traffic.step(time.delta_secs(), player);
     if let Ok(mut s) = solids.0.write() {
         s.clear();
@@ -1257,7 +1265,7 @@ struct TrafficArt {
 }
 
 /// Cars beyond this from the camera don't cast shadows (m).
-const SHADOW_RANGE: f32 = 70.0;
+pub const SHADOW_RANGE: f32 = 70.0;
 
 #[allow(clippy::too_many_arguments)]
 fn draw(
