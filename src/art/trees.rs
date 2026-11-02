@@ -8,14 +8,23 @@
 //! - **Species**: Scots pine (long bare trunk, crown on top), spruce/fir (bare lower trunk,
 //!   dense crown), snowy spruce, birch (white trunk, leafy crown) and an olive-like scrub tree.
 //!   Each has three seeded variants.
-//! - **Near** (within [`NEAR_END`] m of the camera): a trunk (bark) and a crown (three crossed
-//!   core cards for the silhouette plus drooping branch cards for depth), two entities per tree
-//!   sharing meshes and materials (Bevy batches them), casting shadows. Spawned per PCG cell
-//!   around the camera ([`NEAR_LOAD`] / [`NEAR_UNLOAD`]), a few cells per frame.
-//! - **Far**: the core cards only, merged into one mesh per PCG cell (no shadows), from
-//!   [`FAR_START`] m to the fog distance. Built once when the cell's points arrive.
-//! - Both tiers cross-fade with dithered `VisibilityRange`s; between them a tree can be drawn
-//!   twice for a few metres, never not at all.
+//! - **Data**: every PCG cell's trees are kept as points (species, variant, transform). Only
+//!   what is in range of the camera has entities or meshes ([`stream`]), so memory and draw
+//!   work follow the view, not the map (the open world has ~145k trees).
+//! - **LOD0** (to [`LOD0_END`] m): a trunk (bark) and a crown (three crossed core cards for the
+//!   silhouette plus drooping branch cards for depth), two entities per tree sharing meshes and
+//!   materials (Bevy instances them), casting shadows.
+//! - **LOD1** (to [`LOD1_END`] m): the whole-tree picture on the three core cards plus one
+//!   whorl (or leaf clump) in [`LOD1_KEEP`]; one entity per tree (the birch adds a 4-sided
+//!   trunk), casting shadows.
+//! - **Impostor** (to the fog, at most [`REACH`] m): one quad per tree turned about the vertical
+//!   to face the camera (`impostor.wesl`), showing the same whole-tree picture; merged per
+//!   256 m chunk and species, no shadows, no prepass. Built for chunks entering the reach and
+//!   dropped for chunks leaving it, a few per frame. On Low every other tree has one.
+//! - Distances scale with the quality preset's `detail_scale` ([`Lods`]). Each step is a
+//!   dithered crossfade: LOD0/LOD1 with Bevy's `VisibilityRange` per tree, LOD1/impostor with
+//!   the same dither computed per tree in the impostor shader, so the two cover complementary
+//!   pixels.
 
 use std::collections::HashMap;
 use std::f32::consts::{PI, TAU};
@@ -23,9 +32,14 @@ use std::f32::consts::{PI, TAU};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
+use bevy::camera::primitives::Aabb;
+use bevy::camera::visibility::NoAutoAabb;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::material::OpaqueRendererMethod;
+use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin};
 use bevy::prelude::*;
-use bevy::camera::primitives::MeshAabb;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
 use engine::gfx::MainCamera;
 use engine::pcg::PcgEmitted;
 use engine::render_budget::{KeepDetail, Scenery};
@@ -34,16 +48,28 @@ use super::pbr;
 use crate::stage::{Biome, Rng};
 use crate::world::StageWorld;
 
-/// Near trees fade out by this distance from the camera (m).
-pub const NEAR_END: f32 = 150.0;
-/// Far cards fade in from this distance to their cell's centre.
-pub const FAR_START: f32 = 104.0;
-const FADE: f32 = 12.0;
-/// Near entities exist for cells whose centre is within this (and go beyond the unload radius).
-pub const NEAR_LOAD: f32 = 220.0;
-pub const NEAR_UNLOAD: f32 = 270.0;
-/// Cells whose near trees spawn per frame.
+/// LOD0 (full crown, 3D trunk) fades out by this distance from the camera at High (m); the
+/// quality preset's `detail_scale` scales it, like [`LOD1_END`].
+pub const LOD0_END: f32 = 80.0;
+/// LOD1 (cheaper crown) fades out by this distance at High; impostors beyond.
+pub const LOD1_END: f32 = 300.0;
+/// Impostors stop here (or at the fog, if nearer): nothing further is resident.
+pub const REACH: f32 = 1200.0;
+/// Crossfade spans: LOD0 to LOD1, LOD1 to impostor, impostor to nothing.
+const FADE0: f32 = 10.0;
+const FADE1: f32 = 20.0;
+const FAR_FADE: f32 = 60.0;
+/// A cell's LOD entities exist while its centre is within the LOD's end + this (a 64 m
+/// cell's trees sit within ~46 m of its centre), and go beyond + [`UNLOAD_PAD`].
+const LOAD_PAD: f32 = 60.0;
+const UNLOAD_PAD: f32 = 110.0;
+/// Cells whose LOD0 or LOD1 trees spawn per frame.
 const SPAWNS_PER_FRAME: usize = 3;
+/// Impostor chunks are this many PCG cells square (64 m cells: 256 m).
+const CHUNK: i32 = 4;
+/// Impostor chunks built per frame, and how far past the reach they are dropped.
+const CHUNKS_PER_FRAME: usize = 2;
+const CHUNK_UNLOAD_PAD: f32 = 150.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Species {
@@ -270,20 +296,39 @@ fn trunk(g: &mut Geo, h: f32, r0: f32, r1: f32, sides: u32, tile: f32, lean: Vec
     }
 }
 
-/// One tree variant: near trunk (bark; none for the olive), near crown, far crown.
+/// The impostor picture of a variant at unit scale: a camera-facing quad `half_w` either side of
+/// the trunk axis, from `y0` to `y1`, showing `frame`, its axis moved by `offset` (a lean).
+#[derive(Clone, Copy)]
+pub struct Bill {
+    half_w: f32,
+    y0: f32,
+    y1: f32,
+    frame: Frame,
+    offset: Vec3,
+}
+
+/// One tree variant: LOD0 (near trunk, bark, none for the olive; near crown), LOD1 (a cheaper
+/// crown, plus a thin trunk for the birch whose picture has none) and the impostor quad.
 pub struct TreeGeo {
     pub trunk: Option<Geo>,
     pub crown: Geo,
-    pub far: Geo,
+    pub lod1: Geo,
+    pub trunk1: Option<Geo>,
+    pub bill: Bill,
 }
+
+/// LOD1 keeps one whorl (or leaf clump) in this many.
+const LOD1_KEEP: usize = 3;
 
 /// Builds a species variant (unit scale: the PCG point scale multiplies it).
 pub fn build(sp: Species, variant: usize) -> TreeGeo {
     let mut rng = Rng::new(0x7EE0_0000 + variant as u64 * 7919 + sp as u64 * 104_729);
     let mut tr = Geo::default();
     let mut crown = Geo::default();
-    let mut far = Geo::default();
+    let mut lod1 = Geo::default();
     let yaw0 = rng.range(0.0, PI);
+    let bill;
+    let mut trunk1 = None;
     match sp {
         Species::Spruce | Species::SnowSpruce => {
             // Tall fir: bare lower trunk with a few dead twigs, dense crown above.
@@ -296,22 +341,31 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
                 let yaw = yaw0 + k as f32 * PI / 3.0;
                 // Near: the crown only (the 3D trunk stands below; less alpha-tested overdraw).
                 core_card(&mut crown, yaw, h * a.crown * 0.8, h, w, a.tree.top(1.0 - a.crown * 0.8));
-                core_card(&mut far, yaw, -0.05, h, w, a.tree);
+                // LOD1: the whole tree, trunk included.
+                core_card(&mut lod1, yaw, -0.05, h, w, a.tree);
             }
+            bill = Bill { half_w: w * 0.5, y0: -0.05, y1: h, frame: a.tree, offset: Vec3::ZERO };
             // Whorls of real branches: longest low down, drooping more there.
             let mut y = crown0 + 0.4;
             let mut i = rng.range(0.0, 3.0) as usize;
+            let mut whorl = 0;
             while y < h - 1.5 {
                 let t = (y - crown0) / (h - crown0);
                 let len = w * 0.5 * (1.0 - t).powf(0.8) + 0.5;
                 let n = if t < 0.5 { 4 } else { 3 };
                 let a0 = rng.range(0.0, TAU);
+                let mut c = Geo::default();
                 for b in 0..n {
                     let yaw = a0 + b as f32 * TAU / n as f32 + rng.range(-0.3, 0.3);
                     let k = i % 3;
                     i += 1;
-                    branch_card(&mut crown, y, yaw, len, len * a.branch_aspect[k], rng.range(0.1, 0.3) + 0.25 * (1.0 - t), rng.range(-0.4, 0.4), a.branches[k]);
+                    branch_card(&mut c, y, yaw, len, len * a.branch_aspect[k], rng.range(0.1, 0.3) + 0.25 * (1.0 - t), rng.range(-0.4, 0.4), a.branches[k]);
                 }
+                crown.append(&c, 0.0, Vec3::ONE, Vec3::ZERO);
+                if whorl % LOD1_KEEP == 0 {
+                    lod1.append(&c, 0.0, Vec3::ONE, Vec3::ZERO);
+                }
+                whorl += 1;
                 y += rng.range(0.9, 1.3);
             }
         }
@@ -327,14 +381,16 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
             for k in 0..3 {
                 let yaw = yaw0 + k as f32 * PI / 3.0;
                 let (mut c, mut f) = (Geo::default(), Geo::default());
-                // Near: the crown only (the 3D trunk stands below); far: the whole tree.
+                // Near: the crown only (the 3D trunk stands below); LOD1: the whole tree.
                 core_card(&mut c, yaw, h * a.crown * 0.8, h, w, a.tree.top(1.0 - a.crown * 0.8));
                 core_card(&mut f, yaw, -0.05, h, w, a.tree);
                 crown.append(&c, 0.0, Vec3::ONE, leanv * 0.5);
-                far.append(&f, 0.0, Vec3::ONE, leanv * 0.5);
+                lod1.append(&f, 0.0, Vec3::ONE, leanv * 0.5);
             }
+            bill = Bill { half_w: w * 0.5, y0: -0.05, y1: h, frame: a.tree, offset: leanv * 0.5 };
             let mut y = crown0 + 1.0;
             let mut i = rng.range(0.0, 3.0) as usize;
+            let mut whorl = 0;
             while y < h - 1.5 {
                 let t = (y - crown0) / (h - crown0);
                 let len = w * 0.45 * (1.0 - t * 0.6) + 0.5;
@@ -347,6 +403,10 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
                     branch_card(&mut c, y, yaw, len, len * a.branch_aspect[k], rng.range(-0.1, 0.2), rng.range(-0.5, 0.5), a.branches[k]);
                 }
                 crown.append(&c, 0.0, Vec3::ONE, leanv * (y / h).powi(2));
+                if whorl % LOD1_KEEP == 0 {
+                    lod1.append(&c, 0.0, Vec3::ONE, leanv * (y / h).powi(2));
+                }
+                whorl += 1;
                 y += rng.range(1.3, 1.9);
             }
         }
@@ -359,6 +419,10 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
             let w = h * a.aspect * rng.range(0.66, 0.78);
             let lean = Vec2::new(rng.range(-0.4, 0.4), rng.range(-0.4, 0.4));
             trunk(&mut tr, h * 0.85, 0.16, 0.04, 6, 2.2, lean);
+            // LOD1's trunk: four sides, one ring per 2.5 m.
+            let mut t1 = Geo::default();
+            trunk(&mut t1, h * 0.85, 0.16, 0.04, 4, 2.2, lean);
+            trunk1 = Some(t1);
             let leanv = Vec3::new(lean.x, 0.0, lean.y) * 0.6;
             // The picture's lower part is empty (no trunk): start the cards a little below the
             // crown so the lowest branches meet our trunk.
@@ -368,8 +432,9 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
                 let mut c = Geo::default();
                 core_card(&mut c, yaw, h * a.crown * 0.6, h, w, f);
                 crown.append(&c, 0.0, Vec3::ONE, leanv);
-                far.append(&c, 0.0, Vec3::ONE, leanv);
+                lod1.append(&c, 0.0, Vec3::ONE, leanv);
             }
+            bill = Bill { half_w: w * 0.5, y0: h * a.crown * 0.6, y1: h, frame: f, offset: leanv };
             for k in 0..7 {
                 let y = rng.range(crown0 + 1.0, h - 1.5);
                 let yaw = rng.range(0.0, TAU);
@@ -377,7 +442,11 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
                 let sz = w * rng.range(0.4, 0.55);
                 let mut c = Geo::default();
                 core_card(&mut c, yaw + PI / 2.0, -sz * 0.5, sz * 0.5, sz * a.branch_aspect[k % 3], a.branches[k % 3]);
-                crown.append(&c, 0.0, Vec3::ONE, Vec3::new(yaw.sin() * r, y, yaw.cos() * r) + leanv);
+                let at = Vec3::new(yaw.sin() * r, y, yaw.cos() * r) + leanv;
+                crown.append(&c, 0.0, Vec3::ONE, at);
+                if k % LOD1_KEEP == 0 {
+                    lod1.append(&c, 0.0, Vec3::ONE, at);
+                }
             }
         }
         Species::Olive => {
@@ -388,8 +457,9 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
             for k in 0..3 {
                 let yaw = yaw0 + k as f32 * PI / 3.0;
                 core_card(&mut crown, yaw, -0.1, h, w, a.tree);
-                core_card(&mut far, yaw, -0.1, h, w, a.tree);
+                core_card(&mut lod1, yaw, -0.1, h, w, a.tree);
             }
+            bill = Bill { half_w: w * 0.5, y0: -0.1, y1: h, frame: a.tree, offset: Vec3::ZERO };
             let crown0 = h * a.crown;
             for k in 0..5 {
                 let y = rng.range(crown0 + 0.8, h - 0.8);
@@ -398,12 +468,50 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
                 let sz = h * rng.range(0.35, 0.5);
                 let mut c = Geo::default();
                 core_card(&mut c, yaw + PI / 2.0, -sz * 0.5, sz * 0.5, sz * a.branch_aspect[k % 3], a.branches[k % 3]);
-                crown.append(&c, 0.0, Vec3::ONE, Vec3::new(yaw.sin() * r, y, yaw.cos() * r));
+                let at = Vec3::new(yaw.sin() * r, y, yaw.cos() * r);
+                crown.append(&c, 0.0, Vec3::ONE, at);
+                if k % LOD1_KEEP == 0 {
+                    lod1.append(&c, 0.0, Vec3::ONE, at);
+                }
             }
-            return TreeGeo { trunk: None, crown, far };
+            return TreeGeo { trunk: None, crown, lod1, trunk1: None, bill };
         }
     }
-    TreeGeo { trunk: Some(tr), crown, far }
+    TreeGeo { trunk: Some(tr), crown, lod1, trunk1, bill }
+}
+
+// ---------------------------------------------------------------- impostor material
+
+/// Far trees: one camera-facing quad per tree, merged per chunk (`impostor.wesl`). The base
+/// material is the species' card set (no normal map, forward only); no prepass, no shadows.
+pub type ImpostorMat = ExtendedMaterial<StandardMaterial, ImpostorExt>;
+
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
+pub struct ImpostorExt {
+    /// Fade in from x to y, fade out from z to w (m), as a `VisibilityRange`.
+    #[uniform(100)]
+    pub range: Vec4,
+}
+
+impl MaterialExtension for ImpostorExt {
+    fn vertex_shader() -> ShaderRef {
+        "embedded://pacenote/art/impostor.wesl".into()
+    }
+    fn fragment_shader() -> ShaderRef {
+        "embedded://pacenote/art/impostor.wesl".into()
+    }
+    fn enable_prepass() -> bool {
+        false
+    }
+    fn enable_shadows() -> bool {
+        false
+    }
+}
+
+/// Registers the impostor material (visual runs only).
+pub fn register(app: &mut App) {
+    bevy::asset::embedded_asset!(app, "impostor.wesl");
+    app.add_plugins(MaterialPlugin::<ImpostorMat>::default());
 }
 
 // ---------------------------------------------------------------- ECS
@@ -411,14 +519,39 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
 struct Kind {
     trunk: Option<Handle<Mesh>>,
     crown: Handle<Mesh>,
-    far: Geo,
+    lod1: Handle<Mesh>,
+    trunk1: Option<Handle<Mesh>>,
+    bill: Bill,
 }
 
 struct SpeciesKit {
     variants: Vec<Kind>,
     trunk_mat: Option<Handle<StandardMaterial>>,
     crown_mat: Handle<StandardMaterial>,
-    far_mat: Handle<StandardMaterial>,
+    imp_mat: Handle<ImpostorMat>,
+}
+
+/// Distances of the LOD chain for a stage (m from the camera; scaled by the quality preset).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lods {
+    /// LOD0 (full crown, 3D trunk, shadows) fades out by here; LOD1 fades in over the same span.
+    pub lod0: f32,
+    /// LOD1 (cheaper crown, shadows) fades out by here; the impostor fades in over the same span.
+    pub lod1: f32,
+    /// Impostors fade out by here; chunks further than this aren't built (resident radius).
+    pub reach: f32,
+    /// Only every other tree gets an impostor (Low).
+    pub thin: bool,
+}
+
+impl Lods {
+    /// For a view (fog) distance and graphics quality `q` (0 = Low … 3 = Ultra) with the
+    /// preset's detail scale `detail`.
+    pub fn new(view: f32, q: usize, detail: f32) -> Lods {
+        let lod0 = LOD0_END * detail;
+        let lod1 = (LOD1_END * detail).max(lod0 + 2.0 * FADE1);
+        Lods { lod0, lod1, reach: view.min(REACH).max(lod1 + 60.0), thin: q == 0 }
+    }
 }
 
 /// Meshes and materials for the stage's species.
@@ -426,16 +559,16 @@ struct SpeciesKit {
 pub struct TreeKit {
     species: HashMap<Species, SpeciesKit>,
     mix: &'static [(Species, f32)],
-    view: f32,
+    lods: Lods,
     /// The road every ~20 m (x, z): the camera never leaves it, so a forest cell further
-    /// than `view` from all of these is never seen and gets no far cards.
+    /// than the reach from all of these is never seen and gets no impostors.
     road: Vec<Vec2>,
 }
 
 impl TreeKit {
     /// Can a camera on the road see trees around `p` (within `margin` of it)?
     fn seen(&self, p: Vec3, margin: f32) -> bool {
-        let reach = (self.view + margin).powi(2);
+        let reach = (self.lods.reach + margin).powi(2);
         let p = Vec2::new(p.x, p.z);
         self.road.iter().any(|r| r.distance_squared(p) <= reach)
     }
@@ -448,21 +581,45 @@ struct Tree {
     scale: Vec3,
     species: Species,
     variant: usize,
+    /// Has an impostor (all of them, or every other one on Low).
+    far: bool,
 }
 
 #[derive(Default)]
 struct Cell {
     trees: Vec<Tree>,
     center: Vec3,
-    far: Vec<Entity>,
-    near: Vec<Entity>,
+    /// A camera on a road can see it from within the reach.
+    seen: bool,
+    lod0: Vec<Entity>,
+    lod1: Vec<Entity>,
 }
 
-/// Trees per PCG cell, and which cells have near entities.
+/// A square of `CHUNK` × `CHUNK` cells whose impostors are one mesh per species.
+#[derive(Default)]
+struct Chunk {
+    /// The XZ bounds of its trees.
+    min: Vec2,
+    max: Vec2,
+    cells: Vec<IVec2>,
+    entities: Vec<Entity>,
+    triangles: usize,
+    /// Built and up to date.
+    built: bool,
+}
+
+impl Chunk {
+    fn distance(&self, eye: Vec2) -> f32 {
+        (eye.clamp(self.min, self.max) - eye).length()
+    }
+}
+
+/// Trees per PCG cell, which cells have LOD0 / LOD1 entities, impostor chunks.
 #[derive(Resource, Default)]
 pub struct TreeField {
     cells: HashMap<IVec2, Cell>,
-    /// Cells in near range still waiting for their near trees (after this frame's spawns).
+    chunks: HashMap<IVec2, Chunk>,
+    /// Cells / chunks in range still waiting for their trees (after this frame's spawns).
     waiting: usize,
     pub stats: TreeStats,
 }
@@ -471,15 +628,27 @@ pub struct TreeField {
 pub struct TreeStats {
     pub trees: usize,
     pub cells: usize,
+    /// Cells with LOD0 or LOD1 entities.
     pub near_cells: usize,
+    /// LOD0 + LOD1 entities.
     pub near_entities: usize,
+    pub lod0_entities: usize,
+    pub lod1_entities: usize,
+    /// Impostor chunks built / known.
+    pub chunks: usize,
+    pub chunks_total: usize,
+    /// Impostor triangles resident (built chunks).
     pub far_triangles: usize,
+    pub lods: Option<Lods>,
 }
 
-/// Creates the kit for a stage (materials, meshes). Visual worlds only.
-pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
+/// Creates the kit for a stage (materials, meshes). Visual worlds only. `q` is the graphics
+/// quality (0 = Low … 3 = Ultra).
+pub fn setup(world: &mut World, s: &StageWorld, view: f32, q: usize) {
     let wet = world.get_resource::<super::Wet>().is_some_and(|w| w.0);
     let mix = mix(s.def.biome);
+    let detail = world.get_resource::<engine::gfx::QualityPreset>().map_or(1.0, |p| p.detail_scale[q.min(3)]);
+    let lods = Lods::new(view, q, detail);
     // Poly Haven's `pine_bark` scan: as is for the pines, greyer for the spruces.
     let bark = pbr(world, "bark", |m| {
         m.base_color = Color::srgb(1.0, 0.96, 0.92);
@@ -504,15 +673,25 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
             Species::Olive => (ATLAS_OLIVE.set, Color::srgb(0.95, 0.98, 0.88)),
         };
         let crown_mat = pbr(world, set, |m| foliage(m, tint, wet));
-        let far_mat = pbr(world, set, |m| {
+        let far = pbr(world, set, |m| {
             foliage(m, tint, wet);
             m.normal_map_texture = None;
+            m.opaque_render_method = OpaqueRendererMethod::Forward;
         });
+        let base = world.resource_mut::<Assets<StandardMaterial>>().remove(&far).unwrap_or_default();
+        let range = Vec4::new(lods.lod1 - FADE1, lods.lod1, lods.reach - FAR_FADE, lods.reach);
+        let imp_mat = world.resource_mut::<Assets<ImpostorMat>>().add(ImpostorMat { base, extension: ImpostorExt { range } });
         let mut variants = Vec::new();
         for v in 0..VARIANTS {
             let g = build(sp, v);
             let mut meshes = world.resource_mut::<Assets<Mesh>>();
-            variants.push(Kind { trunk: g.trunk.as_ref().map(|t| meshes.add(t.mesh(true))), crown: meshes.add(g.crown.mesh(true)), far: g.far });
+            variants.push(Kind {
+                trunk: g.trunk.as_ref().map(|t| meshes.add(t.mesh(true))),
+                crown: meshes.add(g.crown.mesh(true)),
+                lod1: meshes.add(g.lod1.mesh(true)),
+                trunk1: g.trunk1.as_ref().map(|t| meshes.add(t.mesh(true))),
+                bill: g.bill,
+            });
         }
         let trunk_mat = match sp {
             Species::Olive => None,
@@ -520,12 +699,12 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
             Species::Spruce | Species::SnowSpruce => Some(spruce_bark.clone()),
             Species::Pine => Some(bark.clone()),
         };
-        species.insert(sp, SpeciesKit { variants, trunk_mat, crown_mat, far_mat });
+        species.insert(sp, SpeciesKit { variants, trunk_mat, crown_mat, imp_mat });
     }
     // Every road (the open world has many), a point every ~20 m.
     let road = s.roads().into_iter().flat_map(|r| r.pts.iter().step_by(10).map(|p| Vec2::new(p.x, p.z))).collect();
-    world.insert_resource(TreeKit { species, mix, view, road });
-    world.insert_resource(TreeField::default());
+    world.insert_resource(TreeKit { species, mix, lods, road });
+    world.insert_resource(TreeField { stats: TreeStats { lods: Some(lods), ..default() }, ..default() });
 }
 
 /// A tree for `seed` drawn from the stage's mix, as near meshes with their materials:
@@ -612,8 +791,19 @@ fn birch_bark_image() -> Image {
     img
 }
 
-/// Takes the dressing graph's `trunks` points as PCG cells finish and builds their far cards.
-pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit: Option<Res<TreeKit>>, mut field: Option<ResMut<TreeField>>, mut meshes: ResMut<Assets<Mesh>>) {
+/// Is the tree with `seed` drawn as an impostor when far? Every other one on Low (`thin`).
+fn keeps_far(seed: u64, thin: bool) -> bool {
+    !thin || pcg_core::mix64(seed ^ 0xFA2_7EE5) & 1 == 0
+}
+
+/// The impostor chunk of a PCG cell.
+fn chunk_of(cell: IVec2) -> IVec2 {
+    IVec2::new(cell.x.div_euclid(CHUNK), cell.y.div_euclid(CHUNK))
+}
+
+/// Takes the dressing graph's `trunks` points as PCG cells finish. Only data is kept here:
+/// [`stream`] makes entities and meshes for what is in range.
+pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit: Option<Res<TreeKit>>, mut field: Option<ResMut<TreeField>>) {
     let (Some(kit), Some(field)) = (kit, field.as_deref_mut()) else {
         events.clear();
         return;
@@ -625,92 +815,188 @@ pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit
         let p = &e.points;
         let cell = field.cells.entry(e.cell).or_default();
         // A re-evaluated cell replaces its trees.
-        for id in cell.far.drain(..).chain(cell.near.drain(..)) {
+        for id in cell.lod0.drain(..).chain(cell.lod1.drain(..)) {
             commands.entity(id).despawn();
         }
         cell.trees.clear();
         for k in 0..p.len() {
             let (species, variant) = pick(kit.mix, p.seed[k]);
             let (yaw, _, _) = p.rot[k].to_euler(EulerRot::YXZ);
-            cell.trees.push(Tree { pos: p.pos[k], yaw, scale: p.scale[k], species, variant });
+            cell.trees.push(Tree { pos: p.pos[k], yaw, scale: p.scale[k], species, variant, far: keeps_far(p.seed[k], kit.lods.thin) });
         }
         if cell.trees.is_empty() {
             continue;
         }
         cell.center = cell.trees.iter().map(|t| t.pos).sum::<Vec3>() / cell.trees.len() as f32;
         // A 64 m cell's trees sit within ~46 m of its centre.
-        if !kit.seen(cell.center, 50.0) {
-            continue;
+        cell.seen = kit.seen(cell.center, 50.0);
+        let (lo, hi) = cell.trees.iter().fold((Vec2::MAX, Vec2::MIN), |(lo, hi), t| (lo.min(t.pos.xz()), hi.max(t.pos.xz())));
+        let ch = field.chunks.entry(chunk_of(e.cell)).or_insert_with(|| Chunk { min: lo, max: hi, ..default() });
+        ch.min = ch.min.min(lo);
+        ch.max = ch.max.max(hi);
+        if !ch.cells.contains(&e.cell) {
+            ch.cells.push(e.cell);
         }
-        // Far cards: one merged mesh per species.
-        let mut per: HashMap<Species, Geo> = HashMap::new();
-        for t in &cell.trees {
-            let g = per.entry(t.species).or_default();
-            let kind = &kit.species[&t.species].variants[t.variant];
-            g.append(&kind.far, t.yaw, t.scale, t.pos - cell.center);
-        }
-        for (sp, g) in per {
-            field.stats.far_triangles += g.tris();
-            // GPU-only (no CPU copy kept), so the bounds go on explicitly.
-            let mut m = g.mesh(false);
-            let aabb = m.get_aabb();
-            m.asset_usage = RenderAssetUsages::RENDER_WORLD;
-            let h = meshes.add(m);
-            let range = VisibilityRange { start_margin: (FAR_START - FADE)..FAR_START, end_margin: (kit.view - 60.0)..kit.view, use_aabb: false };
-            let id = commands
-                .spawn((Name::new("trees far"), Mesh3d(h), MeshMaterial3d(kit.species[&sp].far_mat.clone()), Transform::from_translation(cell.center), range, NotShadowCaster, Scenery, KeepDetail))
-                .id();
-            if let Some(a) = aabb {
-                commands.entity(id).insert((a, bevy::camera::visibility::NoAutoAabb));
-            }
-            cell.far.push(id);
-        }
+        // Rebuilt by `stream` (if in range).
+        ch.built = false;
     }
     field.stats.cells = field.cells.len();
     field.stats.trees = field.cells.values().map(|c| c.trees.len()).sum();
+    field.stats.chunks_total = field.chunks.len();
 }
 
-/// Spawns near trees for cells around the camera and removes them for cells far away.
+/// Per-species impostor quads of a chunk being built: positions (tree base, four times),
+/// picture UVs, corner offsets, indices, bounds.
+#[derive(Default)]
+struct Quads {
+    pos: Vec<[f32; 3]>,
+    uv: Vec<[f32; 2]>,
+    off: Vec<[f32; 2]>,
+    idx: Vec<u32>,
+    lo: Vec3,
+    hi: Vec3,
+}
+
+/// One chunk's impostors: a mesh per species, every tree a quad around its base point.
+fn build_chunk(commands: &mut Commands, meshes: &mut Assets<Mesh>, kit: &TreeKit, cells: &HashMap<IVec2, Cell>, ch: &mut Chunk) {
+    for id in ch.entities.drain(..) {
+        commands.entity(id).despawn();
+    }
+    ch.triangles = 0;
+    ch.built = true;
+    let origin = (ch.min + ch.max) * 0.5;
+    let at = Vec3::new(origin.x, 0.0, origin.y);
+    let mut per: HashMap<Species, Quads> = HashMap::new();
+    for key in &ch.cells {
+        let Some(c) = cells.get(key) else { continue };
+        if !c.seen {
+            continue;
+        }
+        for t in c.trees.iter().filter(|t| t.far) {
+            let b = kit.species[&t.species].variants[t.variant].bill;
+            let q = per.entry(t.species).or_insert_with(|| Quads { lo: Vec3::MAX, hi: Vec3::MIN, ..default() });
+            let s = t.scale;
+            let base = t.pos + Quat::from_rotation_y(t.yaw) * (b.offset * s) - at;
+            let (hw, y0, y1) = (b.half_w * s.x, b.y0 * s.y, b.y1 * s.y);
+            let f = b.frame;
+            let i = q.pos.len() as u32;
+            q.pos.extend([base.to_array(); 4]);
+            q.uv.extend([[f.u0, f.v1], [f.u1, f.v1], [f.u1, f.v0], [f.u0, f.v0]]);
+            q.off.extend([[-hw, y0], [hw, y0], [hw, y1], [-hw, y1]]);
+            q.idx.extend_from_slice(&[i, i + 1, i + 2, i, i + 2, i + 3]);
+            q.lo = q.lo.min(base + Vec3::new(-hw, y0, -hw));
+            q.hi = q.hi.max(base + Vec3::new(hw, y1, hw));
+        }
+    }
+    for (sp, q) in per {
+        ch.triangles += q.idx.len() / 3;
+        let n = q.pos.len();
+        let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, q.pos);
+        m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0f32, 1.0, 0.0]; n]);
+        m.insert_attribute(Mesh::ATTRIBUTE_UV_0, q.uv);
+        m.insert_attribute(Mesh::ATTRIBUTE_UV_1, q.off);
+        m.insert_indices(Indices::U32(q.idx));
+        let h = meshes.add(m);
+        // GPU-only (no CPU copy kept), and the quads turn: bounds by hand.
+        let aabb = Aabb::from_min_max(q.lo, q.hi);
+        let id = commands
+            .spawn((Name::new("trees far"), Mesh3d(h), MeshMaterial3d(kit.species[&sp].imp_mat.clone()), Transform::from_translation(at), aabb, NoAutoAabb, NotShadowCaster, Scenery, KeepDetail))
+            .id();
+        ch.entities.push(id);
+    }
+}
+
+/// Keeps entities for what is in range of the camera: LOD0 and LOD1 trees per cell (spawned and
+/// despawned a few cells per frame), impostor chunks within the reach (built a few per frame).
 pub fn stream(
     mut commands: Commands,
     kit: Option<Res<TreeKit>>,
     field: Option<ResMut<TreeField>>,
     cams: Query<&GlobalTransform, With<MainCamera>>,
     loading: Option<Res<crate::loading::Loading>>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let (Some(kit), Some(mut field), Ok(cam)) = (kit, field, cams.single()) else { return };
-    let eye = cam.translation();
-    let d2 = |c: &Cell| Vec2::new(c.center.x - eye.x, c.center.z - eye.z).length_squared();
-    // Unload far cells.
+    let eye2 = cam.translation().xz();
+    let l = kit.lods;
+    let d2 = |c: &Cell| (c.center.xz() - eye2).length_squared();
     let field = &mut *field;
+    // Unload cells that went out of range.
+    let (unload0, unload1) = ((l.lod0 + UNLOAD_PAD).powi(2), (l.lod1 + UNLOAD_PAD).powi(2));
     for c in field.cells.values_mut() {
-        if !c.near.is_empty() && d2(c) > NEAR_UNLOAD * NEAR_UNLOAD {
-            for id in c.near.drain(..) {
-                commands.entity(id).despawn();
-            }
+        let d = d2(c);
+        if !c.lod0.is_empty() && d > unload0 {
+            c.lod0.drain(..).for_each(|id| commands.entity(id).despawn());
+        }
+        if !c.lod1.is_empty() && d > unload1 {
+            c.lod1.drain(..).for_each(|id| commands.entity(id).despawn());
         }
     }
-    // Load the nearest few missing cells.
-    let mut want: Vec<(f32, IVec2)> = field.cells.iter().filter(|(_, c)| c.near.is_empty() && !c.trees.is_empty() && d2(c) < NEAR_LOAD * NEAR_LOAD).map(|(k, c)| (d2(c), *k)).collect();
-    want.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // Load the nearest missing cells (LOD0 first: it's what is in the player's face).
+    let (load0, load1) = ((l.lod0 + LOAD_PAD).powi(2), (l.lod1 + LOAD_PAD).powi(2));
+    let mut want: Vec<(bool, f32, IVec2)> = Vec::new();
+    for (k, c) in &field.cells {
+        if c.trees.is_empty() {
+            continue;
+        }
+        let d = d2(c);
+        if c.lod0.is_empty() && d < load0 {
+            want.push((false, d, *k));
+        }
+        if c.lod1.is_empty() && d < load1 {
+            want.push((true, d, *k));
+        }
+    }
+    want.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
     // Behind the loading screen nobody sees a long frame: fill the view at once.
     let per_frame = if loading.is_some() { SPAWNS_PER_FRAME * 8 } else { SPAWNS_PER_FRAME };
-    field.waiting = want.len().saturating_sub(per_frame);
-    for (_, key) in want.into_iter().take(per_frame) {
+    let mut waiting = want.len().saturating_sub(per_frame);
+    let r0 = VisibilityRange { start_margin: 0.0..0.0, end_margin: (l.lod0 - FADE0)..l.lod0, use_aabb: false };
+    let r1 = VisibilityRange { start_margin: (l.lod0 - FADE0)..l.lod0, end_margin: (l.lod1 - FADE1)..l.lod1, use_aabb: false };
+    for (one, _, key) in want.into_iter().take(per_frame) {
         let c = field.cells.get_mut(&key).unwrap();
-        let range = VisibilityRange { start_margin: 0.0..0.0, end_margin: (NEAR_END - FADE)..NEAR_END, use_aabb: false };
         for t in &c.trees {
             let sk = &kit.species[&t.species];
             let kind = &sk.variants[t.variant];
             let tf = Transform { translation: t.pos, rotation: Quat::from_rotation_y(t.yaw), scale: t.scale };
-            if let (Some(m), Some(mat)) = (&kind.trunk, &sk.trunk_mat) {
-                c.near.push(commands.spawn((Mesh3d(m.clone()), MeshMaterial3d(mat.clone()), tf, range.clone(), Scenery, KeepDetail)).id());
+            let (out, trunk, crown, range) = if one { (&mut c.lod1, &kind.trunk1, &kind.lod1, &r1) } else { (&mut c.lod0, &kind.trunk, &kind.crown, &r0) };
+            if let (Some(m), Some(mat)) = (trunk, &sk.trunk_mat) {
+                out.push(commands.spawn((Mesh3d(m.clone()), MeshMaterial3d(mat.clone()), tf, range.clone(), Scenery, KeepDetail)).id());
             }
-            c.near.push(commands.spawn((Mesh3d(kind.crown.clone()), MeshMaterial3d(sk.crown_mat.clone()), tf, range.clone(), Scenery, KeepDetail)).id());
+            out.push(commands.spawn((Mesh3d(crown.clone()), MeshMaterial3d(sk.crown_mat.clone()), tf, range.clone(), Scenery, KeepDetail)).id());
         }
     }
-    field.stats.near_cells = field.cells.values().filter(|c| !c.near.is_empty()).count();
-    field.stats.near_entities = field.cells.values().map(|c| c.near.len()).sum();
+    // Impostor chunks: drop the ones out of reach, build the nearest missing or stale ones.
+    let mut todo: Vec<(f32, IVec2)> = Vec::new();
+    for (k, ch) in field.chunks.iter_mut() {
+        let d = ch.distance(eye2);
+        if d > l.reach + CHUNK_UNLOAD_PAD {
+            if ch.built {
+                ch.entities.drain(..).for_each(|id| commands.entity(id).despawn());
+                ch.built = false;
+                ch.triangles = 0;
+            }
+        } else if !ch.built && d < l.reach {
+            todo.push((d, *k));
+        }
+    }
+    todo.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let per_frame = if loading.is_some() { CHUNKS_PER_FRAME * 16 } else { CHUNKS_PER_FRAME };
+    waiting += todo.len().saturating_sub(per_frame);
+    for (_, key) in todo.into_iter().take(per_frame) {
+        if let Some(ch) = field.chunks.get_mut(&key) {
+            build_chunk(&mut commands, &mut meshes, &kit, &field.cells, ch);
+        }
+    }
+    field.waiting = waiting;
+    let st = &mut field.stats;
+    st.near_cells = field.cells.values().filter(|c| !c.lod0.is_empty() || !c.lod1.is_empty()).count();
+    st.lod0_entities = field.cells.values().map(|c| c.lod0.len()).sum();
+    st.lod1_entities = field.cells.values().map(|c| c.lod1.len()).sum();
+    st.near_entities = st.lod0_entities + st.lod1_entities;
+    st.chunks = field.chunks.values().filter(|c| c.built).count();
+    st.far_triangles = field.chunks.values().map(|c| c.triangles).sum();
 }
 
 #[cfg(test)]
@@ -725,7 +1011,9 @@ mod tests {
                 let n = g.crown.pos.len() as u32;
                 assert!(g.crown.idx.iter().all(|&i| i < n));
                 assert!(g.crown.tris() < 400, "{sp:?} crown {}", g.crown.tris());
-                assert!(g.far.tris() <= 12, "{sp:?} far {}", g.far.tris());
+                assert!(g.lod1.tris() < g.crown.tris(), "{sp:?} lod1 {} vs crown {}", g.lod1.tris(), g.crown.tris());
+                assert!(g.lod1.tris() <= 120, "{sp:?} lod1 {}", g.lod1.tris());
+                assert!(g.bill.half_w > 0.5 && g.bill.y1 > g.bill.y0 + 2.0, "{sp:?} impostor");
                 if let Some(t) = &g.trunk {
                     assert!(t.tris() < 120);
                 }

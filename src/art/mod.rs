@@ -43,6 +43,7 @@ impl Plugin for ArtPlugin {
         if !app.is_plugin_added::<bevy::pbr::MaterialPlugin<StandardMaterial>>() {
             return;
         }
+        trees::register(app);
         app.add_systems(Update, (trees::ingest, trees::stream).chain())
             .add_systems(Update, dressing::tag_cover)
             .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin));
@@ -94,7 +95,7 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     ground::spawn_road(world, s);
     let cat = dressing::catalog(world, s.def.biome, wet(&s.def));
     world.insert_resource(cat);
-    trees::setup(world, s, view);
+    trees::setup(world, s, view, q);
     props::spawn(world, s);
     let (graph, inputs) = crate::world::dressing(s);
     let half = stage::half_size(&s.def);
@@ -111,8 +112,60 @@ mod dev {
     use crate::drive::{DrivenCar, StageRun};
     use crate::world::StageWorld;
 
+    /// Triangles per mesh asset, noted when it is added (render-only meshes leave the main
+    /// world once extracted), for `art.triangles`.
+    #[derive(Resource, Default)]
+    struct MeshTris(std::collections::HashMap<AssetId<Mesh>, u32>);
+
+    fn note_tris(mut ev: MessageReader<AssetEvent<Mesh>>, meshes: Res<Assets<Mesh>>, mut tris: ResMut<MeshTris>) {
+        for e in ev.read() {
+            match e {
+                AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                    if let Some(m) = meshes.get(*id) {
+                        let n = m.try_indices_option().ok().flatten().map_or_else(|| m.count_vertices(), |i| i.len()) / 3;
+                        tris.0.insert(*id, n as u32);
+                    }
+                }
+                AssetEvent::Removed { id } => {
+                    tris.0.remove(id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Triangles the main camera draws this frame (meshes it sees after frustum and distance
+    /// culling; shadow passes not counted), the biggest groups by name.
+    fn triangles(world: &mut World, _: Value) -> Result<Value, String> {
+        use std::any::TypeId;
+        use std::collections::HashMap;
+        let mut cams = world.query_filtered::<&bevy::camera::visibility::VisibleEntities, With<engine::gfx::MainCamera>>();
+        let visible: Vec<Entity> = cams.iter(world).flat_map(|v| v.get(TypeId::of::<Mesh3d>()).to_vec()).collect();
+        let mut q = world.query::<(&Mesh3d, Option<&Name>)>();
+        let tris = world.resource::<MeshTris>();
+        let (mut total, mut unknown) = (0u64, 0u32);
+        let mut by: HashMap<String, (u32, u64)> = HashMap::new();
+        for e in &visible {
+            let Ok((m, name)) = q.get(world, *e) else { continue };
+            let Some(n) = tris.0.get(&m.0.id()) else {
+                unknown += 1;
+                continue;
+            };
+            total += *n as u64;
+            let g = by.entry(name.map_or("(unnamed)".into(), |n| n.as_str().to_string())).or_default();
+            g.0 += 1;
+            g.1 += *n as u64;
+        }
+        let mut rows: Vec<_> = by.into_iter().collect();
+        rows.sort_by_key(|r| std::cmp::Reverse(r.1.1));
+        let rows: Vec<_> = rows.into_iter().take(10).map(|(k, (n, t))| json!([k, n, t])).collect();
+        Ok(json!({"visible_meshes": visible.len(), "triangles": total, "unknown_meshes": unknown, "by_name": rows}))
+    }
+
     pub fn register(app: &mut App) {
-        app.add_control_command("art.stats", "Trees (near/far cells, entities, far triangles)", params(&[]), stats)
+        app.init_resource::<MeshTris>().add_systems(Last, note_tris);
+        app.add_control_command("art.triangles", "Triangles the main camera draws this frame (no shadow passes), by name", params(&[]), triangles);
+        app.add_control_command("art.stats", "Trees (cells, LOD0/LOD1 entities, impostor chunks and triangles, LOD distances)", params(&[]), stats)
             .add_control_command("art.textures", "Load state of every material texture (counts, and the first paths per state)", params(&[]), textures)
             .add_control_command(
                 "ui.click_at",
@@ -188,7 +241,8 @@ mod dev {
 
     fn stats(world: &mut World, _: Value) -> Result<Value, String> {
         let t = world.get_resource::<super::trees::TreeField>().map(|f| f.stats).unwrap_or_default();
-        Ok(json!({"trees": t.trees, "cells": t.cells, "near_cells": t.near_cells, "near_entities": t.near_entities, "far_triangles": t.far_triangles}))
+        let lods = t.lods.map(|l| json!({"lod0": l.lod0, "lod1": l.lod1, "reach": l.reach, "thin": l.thin}));
+        Ok(json!({"trees": t.trees, "cells": t.cells, "near_cells": t.near_cells, "near_entities": t.near_entities, "lod0_entities": t.lod0_entities, "lod1_entities": t.lod1_entities, "chunks": t.chunks, "chunks_total": t.chunks_total, "far_triangles": t.far_triangles, "lods": lods}))
     }
 
     fn textures(world: &mut World, _: Value) -> Result<Value, String> {
