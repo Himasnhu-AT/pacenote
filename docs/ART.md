@@ -44,11 +44,17 @@ blender -b --factory-startup -P tools/art/build_rallycar.py -- assets/models/ral
   `trees.rs` has them as constants and a test keeps the two in sync.
 - **Bushes** (`build_bushes.py`): Poly Haven has no dense bush, so `shrub_a`/`shrub_b` are shells
   of leaf-clump cards cut from `tree_small_02` (`m_shrub`), 66 / 50 triangles, base at the origin.
-- **Trees**: near = trunk (tapered cylinder, `pine_bark`; white in code for birch) + crown (three
-  crossed core cards from the crown up + drooping branch cards or leaf clumps), ≤ 400 triangles, two entities sharing meshes per species/variant (batched), cast
-  shadows; spawned for PCG cells within 220 m of the camera (3 cells per frame), removed beyond
-  270 m, fade out at 150 m. Far = the core cards merged per 64 m PCG cell, GPU-only mesh, no
-  shadows, from 104 m (to the cell centre) to the fog distance.
+- **Trees** (LOD chain, distances at High, scaled by the preset's `detail_scale`: Low 48 / 180 m):
+  LOD0 to 80 m = trunk (tapered cylinder, `pine_bark`; white in code for birch) + crown (three
+  crossed core cards from the crown up + drooping branch cards or leaf clumps), <= 400
+  triangles, two entities per tree sharing meshes per species/variant (instanced), shadows.
+  LOD1 to 300 m = the whole-tree picture on the three core cards + one whorl/clump in three
+  (birch adds a 4-sided trunk), one entity per tree, shadows. Both crossfade with per-tree
+  dithered `VisibilityRange`s and are spawned per PCG cell near the camera (3 cells a frame).
+  Beyond: impostors = one camera-facing quad per tree (cylindrical billboard,
+  `impostor.wesl`), merged per 256 m chunk and species, no shadows or prepass, fading in per
+  tree with the same dither as Bevy's ranges; built only for chunks within the fog distance
+  (at most 1.2 km) and dropped beyond. On Low every other tree has an impostor.
 - **Car**: an original 3-door gravel-rally hatchback built entirely in `build_rallycar.py`
   (no downloaded parts): the body is a loft of parametric cross-sections (bonnet → windscreen →
   roof → hatch from per-station height/width curves), wheel wells cut with booleans, then flared
@@ -90,8 +96,8 @@ Breakdown on stage 1 (A/B, same binary): trees +2.7 ms GPU, +240 MB; PCG rocks/p
 ## Known limits
 
 - Trees are cards: from directly below or very close the planes show; no wind.
-- The far tree tier is drawn per 64 m cell, so a tree can be drawn by both tiers for a few
-  metres around 100–150 m (never by neither).
+- Tree impostors are single-view (the side picture of the cards, turned to the camera): from
+  high above they look like standing cards. An octahedral impostor (8x8 baked views) would fix it.
 - Terrain layers are world-XZ projected (no triplanar): steep rock faces stretch.
 - HDRIs in `assets_src/hdri` are unused: the engine's cubemap sky needs KTX2 cubemaps and there
   is no equirect → cubemap tool yet; the atmosphere / gradient skies are used instead.
