@@ -163,7 +163,7 @@ impl Ground for StageWorld {
             // Buildings always; traffic only in free roam (events run without it, so ghosts
             // replay exactly).
             o.walls.query(p, r, out);
-            if self.event.is_none() {
+            if self.event.is_none() && o.traffic_solid.load(std::sync::atomic::Ordering::Relaxed) {
                 o.traffic.obstacles(p, r, out);
             }
         }

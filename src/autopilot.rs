@@ -92,8 +92,17 @@ fn set(w: &mut World, v: Value) -> Result<Value, String> {
 }
 
 fn state(w: &mut World) -> Value {
-    let Some(ap) = w.get_resource::<Autopilot>() else { return json!({}) };
-    json!({"on": ap.on, "pace": ap.pace, "style": if ap.drift { "drift" } else { "clean" }, "crash_at_m": ap.crash_at_m, "doing": ap.doing})
+    let Some(ap) = w.get_resource::<Autopilot>().cloned() else { return json!({}) };
+    // Where the car is: position, speed, metres along the road, damage (for tracing a drive).
+    let car = w.query::<&crate::drive::DrivenCar>().iter(w).next().map(|c| c.car.clone());
+    let along = car.as_ref().and_then(|c| w.get_resource::<StageWorld>().and_then(|st| st.road.nearest(Vec2::new(c.pos.x, c.pos.z), 60.0)).map(|r| (r.s, r.lateral)));
+    json!({
+        "on": ap.on, "pace": ap.pace, "style": if ap.drift { "drift" } else { "clean" }, "crash_at_m": ap.crash_at_m, "doing": ap.doing,
+        "pos": car.as_ref().map(|c| [c.pos.x, c.pos.y, c.pos.z]),
+        "kmh": car.as_ref().map(|c| c.vel.length() * 3.6),
+        "s_m": along.map(|a| a.0), "lateral_m": along.map(|a| a.1),
+        "damage": car.as_ref().map(|c| [c.damage.engine, c.damage.steering, c.damage.suspension]),
+    })
 }
 
 fn drive(time: Res<Time<Fixed>>, mut ap: ResMut<Autopilot>, mut out: ResMut<AutoInput>, stage: Res<StageWorld>, spec: Res<CarSpec>, run: Res<StageRun>, cars: Query<&DrivenCar>) {

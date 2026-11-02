@@ -290,7 +290,8 @@ fn curve(a: Vec2, b: Vec2, amp: f32, seed: u64) -> Vec<Vec2> {
     let raw: Vec<Vec2> = (0..=n)
         .map(|i| {
             let t = i as f32 / n as f32;
-            let fade = libm::sinf(t * core::f32::consts::PI).powf(0.7);
+            // sin(π) is a hair below zero in f32: clamp before the fractional power (NaN otherwise).
+            let fade = libm::sinf(t * core::f32::consts::PI).max(0.0).powf(0.7);
             let off = (noise(Vec2::new(t * len / 520.0, 0.3), seed) * 0.75 + noise(Vec2::new(t * len / 190.0, 2.1), seed ^ 5) * 0.25) * amp * fade;
             a + (b - a) * t + side * off
         })
@@ -539,6 +540,16 @@ mod tests {
         assert!(count(RoadKind::Forest) >= 3, "forest roads: {}", count(RoadKind::Forest));
         // Plenty to drive: tens of km.
         assert!(a.length() > 20_000.0, "{} m", a.length());
+    }
+
+    #[test]
+    fn roads_have_no_gaps() {
+        for r in &net().roads {
+            for w in r.road.pts.windows(2) {
+                let d = w[0].distance(w[1]);
+                assert!(d.is_finite() && d < 2.6 * STEP, "{:?}: {d} m between {} and {}", r.kind, w[0], w[1]);
+            }
+        }
     }
 
     #[test]

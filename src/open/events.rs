@@ -150,6 +150,10 @@ mod dev {
             super::start(w, id);
             Ok(json!({"started": id}))
         })
+        .add_control_command("open.tour", "Measuring drive: town street, east country road, 1 km of ring as the road (pair with autopilot.set {on: true})", params(&[]), |w, _| {
+            let len = super::super::tour::start(w)?;
+            Ok(json!({"tour_m": len}))
+        })
         .add_control_command("events.leave", "Back to free roam", params(&[]), |w, _| {
             super::leave(w);
             Ok(json!({"free_roam": true}))

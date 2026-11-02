@@ -1,0 +1,330 @@
+# Every shipped asset: what it is, where it came from, how the car sim treats it, its LOD chain.
+# Brief: docs/ASSETS_BRIEF.md §2. Checked by `python3 -I tools/assets/manifest.py check`
+# (every file under assets/ is covered, every source is recorded); ATTRIBUTION.md is generated
+# from this file and assets_src/SOURCES.md by `python3 -I tools/assets/manifest.py attribution`.
+#
+# Fields
+#   paths      files (globs) under assets/ this entry covers
+#   kind       texture_set | mesh | model | sound | text
+#   sources    keys of entries in assets_src/SOURCES.md ("### Title (`key`)"), or "original"
+#   credits    for sources not in SOURCES.md entries (sounds): title, author, url, licence
+#   collision  none | solid_cylinder | breakable | brush  (how vehicle.rs sees it)
+#   lod        the LOD chain, or what stands in for one today
+#   built_by   the tool that produces the shipped files
+
+# ---------------------------------------------------------------- terrain and road textures
+
+[[asset]]
+name = "meadow"
+paths = ["textures/meadow/*"]
+kind = "texture_set"
+sources = ["leafy_grass"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "moss"
+paths = ["textures/moss/*"]
+kind = "texture_set"
+sources = ["Ground037"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "heath"
+paths = ["textures/heath/*"]
+kind = "texture_set"
+sources = ["sparse_grass"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "needles"
+paths = ["textures/needles/*"]
+kind = "texture_set"
+sources = ["Ground077"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "leaves"
+paths = ["textures/leaves/*"]
+kind = "texture_set"
+sources = ["forest_leaves_02"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "dirt"
+paths = ["textures/dirt/*"]
+kind = "texture_set"
+sources = ["gravel_road"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "rock"
+paths = ["textures/rock/*"]
+kind = "texture_set"
+sources = ["rock_face_03"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "cliff"
+paths = ["textures/cliff/*"]
+kind = "texture_set"
+sources = ["cliff_side"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "snow"
+paths = ["textures/snow/*"]
+kind = "texture_set"
+sources = ["snow_02"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "gravel"
+paths = ["textures/gravel/*"]
+kind = "texture_set"
+sources = ["forest_ground_04"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "gravel_red"
+paths = ["textures/gravel_red/*"]
+kind = "texture_set"
+sources = ["rocky_gravel"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "shoulder"
+paths = ["textures/shoulder/*"]
+kind = "texture_set"
+sources = ["grass_path_2"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "tarmac"
+paths = ["textures/tarmac/*"]
+kind = "texture_set"
+sources = ["tarred_gravel"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "mud"
+paths = ["textures/mud/*"]
+kind = "texture_set"
+sources = ["muddy_tracks"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+# ---------------------------------------------------------------- rocks and plants
+
+[[asset]]
+name = "boulder"
+paths = ["models/boulder.pnm", "textures/m_boulder/*"]
+kind = "mesh"
+sources = ["boulder_01"]
+collision = "solid_cylinder"
+lod = "engine detail tier (Essential); no authored LOD chain yet"
+built_by = "tools/art/build_meshes.py, tools/art/prep_textures.sh"
+
+[[asset]]
+name = "rock_moss"
+paths = ["models/rock_moss_a.pnm", "models/rock_moss_b.pnm", "models/rock_moss_c.pnm", "models/rock_moss_d.pnm", "textures/m_rock_moss1/*", "textures/m_rock_moss2/*"]
+kind = "mesh"
+sources = ["rock_moss_set_01", "rock_moss_set_02"]
+collision = "solid_cylinder"
+lod = "engine detail tier (Essential); no authored LOD chain yet"
+built_by = "tools/art/build_meshes.py, tools/art/prep_textures.sh"
+
+[[asset]]
+name = "rock_dry"
+paths = ["models/rock_dry.pnm", "textures/m_rock_dry/*"]
+kind = "mesh"
+sources = ["namaqualand_boulder_05"]
+collision = "solid_cylinder"
+lod = "engine detail tier (Essential); no authored LOD chain yet"
+built_by = "tools/art/build_meshes.py, tools/art/prep_textures.sh"
+
+[[asset]]
+name = "stump"
+paths = ["models/stump.pnm", "textures/m_stump/*"]
+kind = "mesh"
+sources = ["tree_stump_01"]
+collision = "none"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/build_meshes.py, tools/art/prep_textures.sh"
+
+[[asset]]
+name = "fern"
+paths = ["models/fern_a.pnm", "models/fern_b.pnm", "textures/m_fern/*"]
+kind = "mesh"
+sources = ["fern_02"]
+collision = "none"
+lod = "engine detail tier (Fine), fades out ~95 m"
+built_by = "tools/art/build_meshes.py, tools/art/prep_textures.sh"
+
+[[asset]]
+name = "grass"
+paths = ["models/grass_a.pnm", "models/grass_b.pnm", "models/grass_c.pnm", "textures/m_grass1/*", "textures/m_grass2/*"]
+kind = "mesh"
+sources = ["grass_medium_01", "grass_medium_02"]
+collision = "none"
+lod = "engine detail tier (Fine), fades out ~95 m"
+built_by = "tools/art/build_meshes.py, tools/art/prep_textures.sh"
+
+[[asset]]
+name = "shrub"
+paths = ["models/shrub_a.pnm", "models/shrub_b.pnm", "textures/m_shrub/*"]
+kind = "mesh"
+sources = ["tree_small_02"]
+collision = "brush"
+lod = "engine detail tier (Fine); no authored LOD chain yet"
+built_by = "tools/art/build_bushes.py (Blender)"
+
+# ---------------------------------------------------------------- trees
+
+[[asset]]
+name = "bark"
+paths = ["textures/bark/*"]
+kind = "texture_set"
+sources = ["pine_bark"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "tree_cards_fir"
+paths = ["textures/card_fir/*", "textures/card_fir_snow/*"]
+kind = "texture_set"
+sources = ["fir_tree_01"]
+collision = "solid_cylinder"
+lod = "near cards + far merged cards per cell (src/art/trees.rs); impostors pending (brief §5)"
+built_by = "tools/art/render_tree_cards.py (Blender)"
+
+[[asset]]
+name = "tree_cards_pine"
+paths = ["textures/card_pine/*"]
+kind = "texture_set"
+sources = ["pine_tree_01"]
+collision = "solid_cylinder"
+lod = "near cards + far merged cards per cell (src/art/trees.rs); impostors pending (brief §5)"
+built_by = "tools/art/render_tree_cards.py (Blender)"
+
+[[asset]]
+name = "tree_cards_birch"
+paths = ["textures/card_birch/*"]
+kind = "texture_set"
+sources = ["tree_small_02"]
+collision = "solid_cylinder"
+lod = "near cards + far merged cards per cell (src/art/trees.rs); impostors pending (brief §5)"
+built_by = "tools/art/render_tree_cards.py (Blender)"
+
+[[asset]]
+name = "tree_cards_olive"
+paths = ["textures/card_olive/*"]
+kind = "texture_set"
+sources = ["island_tree_01"]
+collision = "solid_cylinder"
+lod = "near cards + far merged cards per cell (src/art/trees.rs); impostors pending (brief §5)"
+built_by = "tools/art/render_tree_cards.py (Blender)"
+
+# ---------------------------------------------------------------- the player car
+
+[[asset]]
+name = "player_car"
+paths = ["models/rallycar.glb"]
+kind = "model"
+sources = ["mercedes_amg_gt3_evo", "first_person_arms", "original"]
+collision = "none"
+lod = "LOD0 only (~124k tris incl. cabin); replacement with an original car and LOD0/1/2 in progress (brief §7)"
+built_by = "tools/art/import_sketchfab.py --profile gt3 (Blender)"
+note = "BLOCKER for release: depicts a real car make with a sponsor livery (trademarks). Being replaced."
+
+# ---------------------------------------------------------------- car sounds
+
+[[asset]]
+name = "engine_loops"
+paths = ["sounds/car/engine_*.ogg"]
+kind = "sound"
+sources = []
+collision = "none"
+lod = "n/a"
+built_by = "tools/audio/cook_car.py"
+credits = [
+  { title = "Kickstarter Dyno Session engine loops (Mercedes-Benz 190E 2.3-16V on a dyno)", author = "Chippy569", url = "https://freesound.org/people/Chippy569/", licence = "CC0 1.0" },
+]
+
+[[asset]]
+name = "tyre_slides"
+paths = ["sounds/car/gravel_slide.ogg", "sounds/car/tarmac_squeal.ogg"]
+kind = "sound"
+sources = []
+collision = "none"
+lod = "n/a"
+built_by = "tools/audio/cook_car.py"
+credits = [
+  { title = "S36-15 Car skids; dirt.wav", author = "craigsmith", url = "https://freesound.org/people/craigsmith/sounds/675282/", licence = "CC0 1.0" },
+  { title = "Chrysler LHS tire squeal 03; AE0090 Volvo 740 GLE handbrake turn 01", author = "audible-edge", url = "https://freesound.org/people/audible-edge/sounds/71738/", licence = "CC0 1.0" },
+]
+
+[[asset]]
+name = "body_sounds"
+paths = ["sounds/car/scrape.ogg", "sounds/car/impact_heavy.ogg", "sounds/car/impact_light.ogg", "sounds/car/snap.ogg"]
+kind = "sound"
+sources = []
+collision = "none"
+lod = "n/a"
+built_by = "tools/audio/cook_car.py"
+credits = [
+  { title = "MetalScrape_6.wav", author = "deerlord", url = "https://freesound.org/people/deerlord/sounds/534851/", licence = "CC0 1.0" },
+  { title = "S36-09 Metal foley for car crash; much crunching", author = "craigsmith", url = "https://freesound.org/people/craigsmith/sounds/675475/", licence = "CC0 1.0" },
+  { title = "Clank Car Crash Collision", author = "qubodup", url = "https://freesound.org/people/qubodup/sounds/151624/", licence = "CC0 1.0" },
+  { title = "Crack of branch 3.wav", author = "(account since deleted)", url = "https://freesound.org/people/deleted_user_2104797/sounds/164472/", licence = "CC0 1.0" },
+]
+
+[[asset]]
+name = "pops"
+paths = ["sounds/car/pop*.ogg"]
+kind = "sound"
+sources = []
+collision = "none"
+lod = "n/a"
+built_by = "tools/audio/cook_car.py"
+credits = [
+  { title = "Car Antilag (No cleanup, 32float)", author = "modusmogulus", url = "https://freesound.org/people/modusmogulus/sounds/797835/", licence = "CC0 1.0" },
+]
+
+# ---------------------------------------------------------------- text
+
+[[asset]]
+name = "credits"
+paths = ["credits.txt", "manifest.toml"]
+kind = "text"
+sources = ["original"]
+collision = "none"
+lod = "n/a"
+built_by = "by hand"

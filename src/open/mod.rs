@@ -5,6 +5,7 @@
 pub mod buildings;
 pub mod events;
 pub mod roads;
+pub mod tour;
 pub mod traffic;
 
 use std::sync::Arc;
@@ -52,6 +53,9 @@ pub struct OpenWorld {
     /// Where the traffic cars are (written by `traffic::TrafficPlugin` each step; the same
     /// `Arc` as the `TrafficSolids` resource): solid for the car in free roam.
     pub traffic: traffic::TrafficSolids,
+    /// Whether traffic is solid for the car (dev: the measuring tour turns it off so the
+    /// autopilot, which doesn't look out for traffic, isn't wrecked at a crossing).
+    pub traffic_solid: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl OpenWorld {
@@ -63,7 +67,7 @@ impl OpenWorld {
         let heights = Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z));
         let layout = buildings::layout(&net);
         let walls = buildings::ObstacleGrid::new(&buildings::obstacles(&layout), 10.0);
-        OpenWorld { net: Arc::new(net), heights: Arc::new(heights), buildings: Arc::new(layout), walls: Arc::new(walls), traffic: traffic::TrafficSolids::default() }
+        OpenWorld { net: Arc::new(net), heights: Arc::new(heights), buildings: Arc::new(layout), walls: Arc::new(walls), traffic: traffic::TrafficSolids::default(), traffic_solid: Arc::new(std::sync::atomic::AtomicBool::new(true)) }
     }
 
     /// Where the car starts and which way it faces.
