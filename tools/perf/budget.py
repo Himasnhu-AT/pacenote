@@ -8,8 +8,8 @@ Runs the dev build through engine/scripts/play.py (offscreen, governor off as in
 runs, so the quality stays where it's set). On the M5 Pro the numbers are optimistic for a base
 M1 (brief §1): treat a pass here as necessary, not sufficient.
 Measured: load time to control (game log), memory footprint (max), GPU ms per frame (p95),
-frame time (95th percentile of the drive's per-second p95s, from the session log), visible meshes (a draw
-call proxy before batching). Not measured yet: resident triangles, draw calls after batching.
+frame time (95th percentile of the drive's per-second p95s, from the session log), draw calls after batching
+(engine render.stats `draws`). Not measured yet: resident triangles.
 """
 import glob, json, os, re, subprocess, sys
 
@@ -20,7 +20,7 @@ BUDGETS = {  # brief §1: (Low, High)
     "footprint_mb": (1500.0, 2500.0),
     "gpu_ms_p95": (10.0, 12.0),
     "frame_ms_p95": (16.6, 16.6),
-    "meshes_visible": (800.0, 2500.0),
+    "draws": (800.0, 2500.0),
 }
 
 
@@ -78,7 +78,8 @@ def main():
         "footprint_mb": m.get("footprint_mb", {}).get("max"),
         "gpu_ms_p95": m.get("gpu_frame_ms", {}).get("p95"),
         "frame_ms_p95": frame_p95,
-        "meshes_visible": stats[-1].get("meshes_visible"),
+        # Draws after batching: distinct (mesh, material) pairs visible (engine render.stats).
+        "draws": stats[-1].get("draws"),
     }
     col = 0 if quality.lower() == "low" else 1
     over = 0
@@ -88,7 +89,7 @@ def main():
         ok = v is not None and v <= b
         over += not ok
         print(f"  {'ok  ' if ok else 'OVER'} {k:15} {('-' if v is None else f'{v:.1f}'):>9}  budget {b:g}")
-    print(f"  entities {stats[-1].get('entities')}, meshes total {stats[-1].get('meshes_total')}")
+    print(f"  meshes visible {stats[-1].get('meshes_visible')} (before batching), draw sets {stats[-1].get('draw_sets')}, entities {stats[-1].get('entities')}")
     sys.exit(1 if over else 0)
 
 

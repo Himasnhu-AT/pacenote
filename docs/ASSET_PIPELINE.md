@@ -58,20 +58,23 @@ over.
 | Memory footprint (max) | 1,500 / 2,500 MB | `perf.report` `footprint_mb` |
 | GPU per frame (p95) | 10 / 12 ms | `perf.report` `gpu_frame_ms` |
 | Frame time (p95) | 16.6 ms | `perf.report` `frame_p95_ms` (offscreen, no vsync) |
-| Visible meshes | 800 / 2,500 | `render.stats` `meshes_visible` (draw-call proxy before batching) |
+| Draw calls after batching | 800 / 2,500 | `render.stats` `draws` (distinct visible mesh + material pairs) |
 
-Not measured yet: resident triangles and draw calls after batching (needs an engine stat).
+Not measured yet: resident triangles.
 The reference machine for Low is an M1 8 GB; until one is available, results on the M5 Pro are
 optimistic (brief §1). Run on an otherwise idle machine: other builds inflate load and frame
 times.
 
 History (M5 Pro, Low, open world):
 
-| When | Load | Footprint | GPU p95 | Frame p95 | Visible meshes |
+| When | Load | Footprint | GPU p95 | Frame p95 | Visible meshes (draws) |
 |---|---|---|---|---|---|
 | 2 Nov, baseline (busy machine) | 5.7 s | 2,314 MB | 5.5 ms | 28.9 ms | 1,640 |
 | + tree LODs/impostors, junctions, original car (2.8 MB GLB) | 8.5 s* | 1,367 MB | 5.2 ms | — | 1,327 |
 | + dressing streamed at 600 m (engine PcgStreaming), engine texture cap and hi-DPI scale, frame p95 over the drive only (idle machine) | 4.6 s | 1,342 MB | 4.3 ms | 14.1 ms | 1,328 |
 
-\* machine busy. Remaining over budget: visible meshes (a pre-batching count; the budget is draw
-calls after batching, which needs an engine stat). Not yet measured on a base M1.
+| + draws after batching measured (engine 92de8b1) | 4.6 s | 1,334 MB | 4.0 ms | 15.6 ms | 1,325 (666 draws) |
+
+\* machine busy. **All five Low budgets pass on the M5 Pro** (2 Nov). Not yet measured on a base
+M1, where GPU and frame time will be higher (brief §1: treat this as necessary, not sufficient).
+Draw sets (distinct materials) are 474, high: many per-chunk materials that could share.
