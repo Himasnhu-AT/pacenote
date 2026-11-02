@@ -49,7 +49,8 @@ pub struct Pacenote;
 
 impl Plugin for Pacenote {
     fn build(&self, app: &mut App) {
-        let n = demo::clamp_stage(engine::cli::arg_value("stage").and_then(|v| v.parse().ok()).unwrap_or(1u32).clamp(1, 20));
+        // `--open`: the open world; `--stage N`: one of the old stages (tests, scripted runs).
+        let n = if engine::cli::has_flag("open") { open::ID } else { demo::clamp_stage(engine::cli::arg_value("stage").and_then(|v| v.parse().ok()).unwrap_or(1u32).clamp(1, 20)) };
         app.insert_resource(StageChoice(n))
             .insert_resource(Time::<Fixed>::from_hz(60.0))
             .add_plugins((drive::DrivePlugin, hud::HudPlugin, guide::GuidePlugin))

@@ -150,7 +150,8 @@ pub fn begin(world: &mut World, def: StageDef) {
         })
     };
     // The picture for the screen, alongside the generation (stage 1's is the menu backdrop).
-    let have_map = def.id == 1 && world.resource::<crate::meta::stages::StageCatalog>().map.is_some();
+    // The open world has no stage map (and no single road to draw one from).
+    let have_map = def.id == crate::open::ID || (def.id == 1 && world.resource::<crate::meta::stages::StageCatalog>().map.is_some());
     let map = (!have_map).then(|| {
         let def = def.clone();
         let a = world.resource::<engine::ui::theme::Theme>().accent.to_srgba();
@@ -206,7 +207,9 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
     };
     let facts = format!("{} \u{b7} {} \u{b7} {}, {}", biome_name(def.biome), surf, time_name(def.time), weather_name(def.weather));
     let mut kicker = format!("Stage {:02} \u{b7} {}", def.id, if mode == RunMode::Team { "Team run" } else { "Practice" });
-    if crate::meta::stages::conditions_key(def).is_some() {
+    if def.id == crate::open::ID {
+        kicker = "Free roam".into();
+    } else if crate::meta::stages::conditions_key(def).is_some() {
         kicker.push_str(&format!(" \u{b7} {} {}", time_name(def.time), weather_name(def.weather)));
     }
     let now = world.resource::<Time<Real>>().elapsed_secs();

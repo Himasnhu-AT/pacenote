@@ -87,12 +87,19 @@ impl Plugin for DrivePlugin {
 /// Spawns the car at the start line; `art::car` adds the model and drives its wheels.
 pub fn spawn_car(world: &mut World) {
     let Some(s) = world.get_resource::<StageWorld>().cloned() else { return };
-    let (pos, heading) = s.road.start();
+    let (pos, heading) = match &s.open {
+        // Free roam: in town, no countdown.
+        Some(o) => {
+            let (p, d) = o.spawn();
+            (Vec3::new(p.x, s.heights.height_at(p.x, p.z), p.z), d.x.atan2(d.y))
+        }
+        None => s.road.start(),
+    };
     let car = Car::new(pos + Vec3::Y * 0.9, heading);
     let tf = Transform::from_translation(car.pos).with_rotation(car.rot);
     let id = world.spawn((Name::new("car"), DrivenCar { prev: (car.pos, car.rot), car }, DriverInput::default(), CarBody, tf, Visibility::default(), Actor)).id();
     crate::art::car::spawn(world, id);
-    world.insert_resource(StageRun { countdown: 3.0, ..default() });
+    world.insert_resource(StageRun { countdown: if s.is_open() { 0.0 } else { 3.0 }, ..default() });
     // The view is the player's choice (Settings > Game > Camera view, kept in meta::Profile).
 }
 
@@ -187,6 +194,28 @@ fn simulate(
         }
         run.time += dt;
         let p = Vec2::new(c.car.pos.x, c.car.pos.z);
+        // Free roam: no route, so no progress, splits or finish; recover onto the nearest road,
+        // facing the way the car was going.
+        if stage.is_open() {
+            if recover.as_deref_mut().is_some_and(|r| std::mem::take(&mut r.0)) {
+                let fwd = c.car.rot * Vec3::NEG_Z;
+                let (at, h) = match stage.nearest_road(p, 400.0) {
+                    Some((road, rp)) => {
+                        let i = rp.i.min(road.len() - 1);
+                        let d = road.dir[i];
+                        let d = if d.dot(Vec2::new(fwd.x, fwd.z)) < 0.0 { -d } else { d };
+                        (road.pts[i], d.x.atan2(d.y))
+                    }
+                    None => {
+                        let (sp, sd) = stage.open.as_ref().unwrap().spawn();
+                        (Vec3::new(sp.x, stage.heights.height_at(sp.x, sp.z), sp.z), sd.x.atan2(sd.y))
+                    }
+                };
+                vehicle::recover(&mut c.car, at, h);
+                c.prev = (c.car.pos, c.car.rot);
+            }
+            continue;
+        }
         if let Some(rp) = stage.road.nearest(p, 40.0) {
             // Progress only counts near the road and forwards.
             if rp.s > run.progress && rp.s < run.progress + 40.0 {

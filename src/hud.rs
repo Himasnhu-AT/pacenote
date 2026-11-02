@@ -244,7 +244,9 @@ fn update_hud(
     let damaged = d.worst() > 0.02;
 
     // Groups on / off (settings, damage, retired).
-    let want = [prefs.hud_speed, prefs.hud_revs, prefs.hud_clock, prefs.hud_progress, prefs.hud_damage && damaged, run.retired];
+    // Free roam has no route: no clock or progress.
+    let route = !stage.is_open();
+    let want = [prefs.hud_speed, prefs.hud_revs, prefs.hud_clock && route, prefs.hud_progress && route, prefs.hud_damage && damaged, run.retired];
     if shown.groups != Some(want) {
         shown.groups = Some(want);
         for (g, mut n) in &mut groups {

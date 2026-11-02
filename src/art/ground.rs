@@ -124,9 +124,29 @@ fn wander(s: f32) -> f32 {
 /// as blended overlays that fade in and out along the road and towards the edges, and the verge
 /// strips.
 pub fn spawn_road(world: &mut World, s: &StageWorld) {
-    let road = &s.road;
+    let roads: Vec<Road> = s.roads().into_iter().cloned().collect();
+    for (k, road) in roads.iter().enumerate() {
+        // The surface most of the road has (the open world's roads differ; a stage's is its own).
+        let main = if s.is_open() { majority(&road.surface) } else { s.def.surface };
+        // Roads crossing at a junction would draw at the same height and flicker: each road a
+        // few millimetres apart.
+        spawn_one_road(world, s, road, main, (k % 8) as f32 * 0.004);
+    }
+}
+
+fn majority(v: &[Surface]) -> Surface {
+    let mut best = (v[0], 0);
+    for c in [Surface::Tarmac, Surface::Gravel, Surface::Mud, Surface::Snow] {
+        let n = v.iter().filter(|x| **x == c).count();
+        if n > best.1 {
+            best = (c, n);
+        }
+    }
+    best.0
+}
+
+fn spawn_one_road(world: &mut World, s: &StageWorld, road: &Road, main: Surface, raise: f32) {
     let wet = world.get_resource::<Wet>().is_some_and(|w| w.0);
-    let main = s.def.surface;
     let mut mats: HashMap<(&'static str, bool), Handle<StandardMaterial>> = HashMap::new();
     let mut mat = |world: &mut World, set: &'static str, blend: bool| {
         mats.entry((set, blend))
@@ -162,12 +182,12 @@ pub fn spawn_road(world: &mut World, s: &StageWorld) {
     let mut i = 0;
     while i < last {
         let j = (i + 100).min(last);
-        let (center, mesh) = ribbon(road, i, j, main, 0.04, |_, _| 1.0);
+        let (center, mesh) = ribbon(road, i, j, main, 0.04 + raise, |_, _| 1.0);
         let (h, aabb) = add_mesh(world, mesh);
         let id = world.spawn((Name::new("road"), Mesh3d(h), MeshMaterial3d(main_mat.clone()), Transform::from_translation(center), Scenery, KeepDetail)).id();
         bounds(world, id, aabb);
         for side in [-1.0f32, 1.0] {
-            let (center, mesh) = verge(s, i, j, side);
+            let (center, mesh) = verge(s, road, i, j, side);
             let (h, aabb) = add_mesh(world, mesh);
             let id = world.spawn((Name::new("verge"), Mesh3d(h), MeshMaterial3d(vmat.clone()), Transform::from_translation(center), Scenery, KeepDetail, NotShadowCaster)).id();
             bounds(world, id, aabb);
@@ -197,7 +217,7 @@ pub fn spawn_road(world: &mut World, s: &StageWorld) {
             let mut k = a;
             while k < b {
                 let l = (k + 100).min(b);
-                let (center, mesh) = ribbon(road, k, l, surf, 0.055, |st, lat| fade(st, lat, road.width[(st / stage::STEP) as usize].min(9.0) * 0.5 + 0.4));
+                let (center, mesh) = ribbon(road, k, l, surf, 0.055 + raise, |st, lat| fade(st, lat, road.width[(st / stage::STEP) as usize].min(9.0) * 0.5 + 0.4));
                 let (h, aabb) = add_mesh(world, mesh);
                 let id = world.spawn((Name::new("road patch"), Mesh3d(h), MeshMaterial3d(pm.clone()), Transform::from_translation(center), Scenery, KeepDetail, NotShadowCaster)).id();
                 bounds(world, id, aabb);
@@ -271,8 +291,7 @@ fn stitch(idx: &mut Vec<u32>, r0: u32, n0: u32, r1: u32, n1: u32) {
 
 /// A verge strip on one side (`side` −1 = right, +1 = left): from just inside the road edge
 /// (transparent) over the edge (opaque) out onto the terrain (fading out).
-fn verge(s: &StageWorld, a: usize, b: usize, side: f32) -> (Vec3, Mesh) {
-    let road = &s.road;
+fn verge(s: &StageWorld, road: &Road, a: usize, b: usize, side: f32) -> (Vec3, Mesh) {
     let center = (road.pts[a] + road.pts[b]) * 0.5 + left(road, (a + b) / 2) * side * (road.width[(a + b) / 2] * 0.5 + 1.0);
     // (offset from the ribbon edge, alpha)
     let prof = [(-0.7f32, 0.0f32), (-0.15, 0.85), (0.5, 0.9), (1.2, 0.55), (2.1, 0.0)];
@@ -384,7 +403,7 @@ mod tests {
             let (_, m) = ribbon(&s.road, 0, n - 1, def.surface, 0.04, |_, _| 1.0);
             assert!(m.count_vertices() > 100);
             for side in [-1.0, 1.0] {
-                let (_, v) = verge(&s, 0, n - 1, side);
+                let (_, v) = verge(&s, &s.road, 0, n - 1, side);
                 assert_eq!(v.count_vertices(), n * 5);
             }
         }

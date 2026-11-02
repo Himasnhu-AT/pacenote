@@ -239,8 +239,10 @@ pub fn on_menu(world: &mut World, id: &'static str) {
             let n = world.resource::<Profile>().last_stage;
             super::start_stage(world, n, RunMode::Practice);
         }
-        "host" | "select" => {
-            let mode = if id == "host" { RunMode::Team } else { RunMode::Practice };
+        // Play: straight into the open world (no stage select).
+        "select" => super::start_stage(world, crate::open::ID, RunMode::Practice),
+        "host" => {
+            let mode = RunMode::Team;
             *world.resource_mut::<StageSel>() = StageSel { mode, shown: None, keep: None };
             world.write_message(ScreenRequest::Push("stages"));
         }

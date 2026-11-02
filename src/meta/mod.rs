@@ -347,7 +347,9 @@ fn apply_menu(world: &mut World) {
 
 /// Loads stage `id` (1..=20) as practice or a team run (hosting when `Team`).
 pub fn start_stage(world: &mut World, id: u32, mode: RunMode) {
-    let id = crate::demo::clamp_stage(id.clamp(1, crate::stage::stages().len() as u32));
+    // The open world (id 0) or a stage (1..=20).
+    let open = id == crate::open::ID;
+    let id = if open { id } else { crate::demo::clamp_stage(id.clamp(1, crate::stage::stages().len() as u32)) };
     match mode {
         RunMode::Practice => {
             if netlink::role(world) != Role::Solo {
@@ -366,7 +368,9 @@ pub fn start_stage(world: &mut World, id: u32, mode: RunMode) {
     }
     world.insert_resource(mode);
     world.insert_resource(StageChoice(id));
-    world.resource_mut::<Profile>().last_stage = id;
+    if !open {
+        world.resource_mut::<Profile>().last_stage = id;
+    }
     world.write_message(ScreenRequest::Replace(None));
     // From a stage straight into another: InGame → InGame runs OnExit/OnEnter again.
     world.resource_mut::<NextState<AppState>>().set(AppState::InGame);

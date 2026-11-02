@@ -522,8 +522,8 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
         };
         species.insert(sp, SpeciesKit { variants, trunk_mat, crown_mat, far_mat });
     }
-    let step = (s.road.len() / 400).max(1);
-    let road = s.road.pts.iter().step_by(step).map(|p| Vec2::new(p.x, p.z)).collect();
+    // Every road (the open world has many), a point every ~20 m.
+    let road = s.roads().into_iter().flat_map(|r| r.pts.iter().step_by(10).map(|p| Vec2::new(p.x, p.z))).collect();
     world.insert_resource(TreeKit { species, mix, view, road });
     world.insert_resource(TreeField::default());
 }

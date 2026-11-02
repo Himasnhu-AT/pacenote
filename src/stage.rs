@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 /// Map half-size (metres) for a stage: longer stages get more room (3.2 km square at 3 km,
 /// ~4 km at 6 km).
 pub fn half_size(def: &StageDef) -> f32 {
+    if def.id == crate::open::ID {
+        return crate::open::roads::HALF;
+    }
     (1000.0 + def.length * 0.17).clamp(1200.0, 2100.0)
 }
 /// Metres between road stations.

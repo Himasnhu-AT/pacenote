@@ -411,6 +411,9 @@ pub fn with_conditions(mut def: StageDef, weather: Weather, time: TimeOfDay) -> 
 
 /// The published stage `id` as defined (its default weather and time).
 pub fn base_def(id: u32) -> Option<StageDef> {
+    if id == crate::open::ID {
+        return Some(crate::open::def());
+    }
     stage::stages().into_iter().find(|d| d.id == id)
 }
 

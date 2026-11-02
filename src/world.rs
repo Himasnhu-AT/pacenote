@@ -85,11 +85,35 @@ pub struct StageWorld {
     pub props: Arc<Vec<Prop>>,
     /// Trunks, boulders and props near the road: 8 m grid.
     obstacles: Arc<HashMap<(i32, i32), Vec<Obstacle>>>,
+    /// The open world (`def.id == open::ID`): every road, its surfaces. `road` is then the
+    /// street the car starts on.
+    pub open: Option<Arc<crate::open::OpenWorld>>,
 }
 
 const OBS_CELL: f32 = 8.0;
 
 impl StageWorld {
+    /// Free roam in the open world (no route, clock or finish).
+    pub fn is_open(&self) -> bool {
+        self.open.is_some()
+    }
+
+    /// Every road: the stage's one, or the open world's network.
+    pub fn roads(&self) -> Vec<&Road> {
+        match &self.open {
+            Some(o) => o.net.roads.iter().map(|r| &r.road).collect(),
+            None => vec![&*self.road],
+        }
+    }
+
+    /// The nearest road to `p` within `max` (any road of the network in the open world).
+    pub fn nearest_road(&self, p: Vec2, max: f32) -> Option<(&Road, stage::RoadPos)> {
+        match &self.open {
+            Some(o) => o.net.nearest(p, max).map(|n| (&o.net.roads[n.road].road, n.at)),
+            None => self.road.nearest(p, max).map(|r| (&*self.road, r)),
+        }
+    }
+
     /// Every solid obstacle the car can hit (trunk / boulder centre, radius, top), sorted: for
     /// checking stages generate the same scenery on every machine.
     pub fn obstacle_list(&self) -> Vec<(Vec2, f32, f32)> {
@@ -107,7 +131,10 @@ impl Ground for StageWorld {
         self.heights.smooth_normal_at(x, z)
     }
     fn surface(&self, x: f32, z: f32) -> Surface {
-        stage::surface_at(x, z, &self.road)
+        match &self.open {
+            Some(o) => crate::open::roads::surface(&o.net, x, z),
+            None => stage::surface_at(x, z, &self.road),
+        }
     }
     fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
         out.clear();
@@ -125,6 +152,9 @@ impl Ground for StageWorld {
 
 /// Builds everything that doesn't need the ECS (also used headless and by the guide).
 pub fn generate(def: &StageDef) -> StageWorld {
+    if def.id == crate::open::ID {
+        return generate_open(def);
+    }
     let road = stage::generate_road(def);
     let half = stage::half_size(def);
     let n = (2.0 * half / stage::SPACING) as u32 + 1;
@@ -140,6 +170,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
         crests: Arc::new(crests),
         props: Arc::new(Vec::new()),
         obstacles: Arc::new(HashMap::new()),
+        open: None,
     };
     // Collision for the car: the same points the dressing spawns, evaluated in a band along
     // the road (the trees far away can't be reached).
@@ -196,6 +227,85 @@ pub fn generate(def: &StageDef) -> StageWorld {
     world
 }
 
+/// The open world as a [`StageWorld`]: the network and terrain from [`crate::open`], trunks and
+/// boulders near any road (the dressing graph keeps them off every road and out of town).
+fn generate_open(def: &StageDef) -> StageWorld {
+    let open = crate::open::OpenWorld::generate(def.seed);
+    let (start, _) = open.spawn();
+    let street = open.net.nearest(Vec2::new(start.x, start.z), 20.0).map_or(0, |n| n.road);
+    let mut world = StageWorld {
+        def: def.clone(),
+        road: Arc::new(open.net.roads[street].road.clone()),
+        heights: open.heights.clone(),
+        corners: Arc::new(Vec::new()),
+        crests: Arc::new(Vec::new()),
+        props: Arc::new(Vec::new()),
+        obstacles: Arc::new(HashMap::new()),
+        open: Some(Arc::new(open)),
+    };
+    let (graph, inputs) = dressing(&world);
+    let net = world.open.as_ref().unwrap().net.clone();
+    // Only the trunks and boulders within reach of a road matter, so evaluate the graph on the
+    // 128 m tiles a road passes through (and their neighbours), on all cores, not on the whole
+    // 16 km2 (8 s). The graph samples on a global lattice, so a point is the same whichever
+    // tile finds it; duplicates on tile edges are dropped.
+    const TILE: f32 = 128.0;
+    let mut tiles: Vec<(i32, i32)> = net
+        .roads
+        .iter()
+        .flat_map(|r| r.road.pts.iter().step_by(16))
+        .flat_map(|p| {
+            let (tx, tz) = ((p.x / TILE).floor() as i32, (p.z / TILE).floor() as i32);
+            (-1..=1).flat_map(move |dz| (-1..=1).map(move |dx| (tx + dx, tz + dz)))
+        })
+        .collect();
+    tiles.sort_unstable();
+    tiles.dedup();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+    let chunk = tiles.len().div_ceil(threads).max(1);
+    let found: Vec<(Vec2, f32, f32)> = std::thread::scope(|sc| {
+        let jobs: Vec<_> = tiles
+            .chunks(chunk)
+            .map(|part| {
+                let (graph, inputs, net) = (&graph, &inputs, &net);
+                sc.spawn(move || {
+                    let mut v = Vec::new();
+                    for &(tx, tz) in part {
+                        let a = Area::new(Vec2::new(tx as f32, tz as f32) * TILE, Vec2::new(tx as f32 + 1.0, tz as f32 + 1.0) * TILE);
+                        let Ok(out) = pcg_core::evaluate(graph, inputs, Some(a)) else { continue };
+                        for (port, radius) in [("trunks", 0.32f32), ("boulders", 0.85)] {
+                            let Some(p) = out.emits.get(port) else { continue };
+                            for k in 0..p.len() {
+                                let c = Vec2::new(p.pos[k].x, p.pos[k].z);
+                                if c.x < a.min.x || c.y < a.min.y || c.x >= a.max.x || c.y >= a.max.y || net.nearest(c, 30.0).is_none() {
+                                    continue;
+                                }
+                                v.push((c, radius * p.scale[k].x, p.pos[k].y + 4.0 * p.scale[k].y));
+                            }
+                        }
+                    }
+                    v
+                })
+            })
+            .collect();
+        jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect()
+    });
+    {
+        let mut grid: HashMap<(i32, i32), Vec<Obstacle>> = HashMap::new();
+        let cell = |c: Vec2| ((c.x / OBS_CELL).floor() as i32, (c.y / OBS_CELL).floor() as i32);
+        for (c, r, top) in found {
+            grid.entry(cell(c)).or_default().push(Obstacle::solid(c, r, top));
+        }
+        // Same order on every machine (thread and HashMap order aren't); drop tile-edge twins.
+        for v in grid.values_mut() {
+            v.sort_by(|a, b| a.pos.x.total_cmp(&b.pos.x).then(a.pos.y.total_cmp(&b.pos.y)).then(a.radius.total_cmp(&b.radius)));
+            v.dedup_by(|a, b| a.pos == b.pos);
+        }
+        world.obstacles = Arc::new(grid);
+    }
+    world
+}
+
 /// Marker posts both sides every 50 m and a kilometre board on the right every 1000 m, set
 /// off the edge by the road's own width (plain arithmetic on the road and the heightfield: the
 /// same on every machine). (kind, base, yaw, scale, seed)
@@ -237,15 +347,21 @@ fn road_area(road: &Road, pad: f32) -> Area {
 
 /// The dressing graph and its inputs for a stage.
 pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
-    let road = &w.road;
     let half = stage::half_size(&w.def);
-    // The road as rects (20 m pieces) to keep things off it.
+    // Every road as rects (20 m pieces) to keep things off it.
     let mut rects = Vec::new();
-    for i in (0..road.len().saturating_sub(10)).step_by(10) {
-        let (a, b) = (road.pts[i], road.pts[i + 10]);
-        let mid = (a + b) * 0.5;
-        let d = Vec2::new(b.x - a.x, b.z - a.z);
-        rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: libm::atan2f(d.x, d.y), y: mid.y, tag: "road".into() });
+    for road in w.roads() {
+        for i in (0..road.len().saturating_sub(10)).step_by(10) {
+            let (a, b) = (road.pts[i], road.pts[i + 10]);
+            let mid = (a + b) * 0.5;
+            let d = Vec2::new(b.x - a.x, b.z - a.z);
+            rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: libm::atan2f(d.x, d.y), y: mid.y, tag: "road".into() });
+        }
+    }
+    // The open world's town: no forest, rocks or bushes (buildings and lawns go there).
+    if let Some(o) = &w.open {
+        let t = crate::open::roads::PLATEAU.0;
+        rects.push(Rect { center: Vec2::ZERO, half: Vec2::splat(t), yaw: 0.0, y: o.net.town_y, tag: "road".into() });
     }
     let hf = &w.heights;
     let inputs = Inputs::default()

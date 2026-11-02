@@ -15,6 +15,26 @@ pub use roads::{RoadKind, RoadNet};
 
 /// Seed of the one world.
 pub const SEED: u64 = 0x0E11_0001;
+/// The open world's stage id: everything that loads "a stage" loads the world for this id
+/// (`world::generate`). Real stages are 1..=20.
+pub const ID: u32 = 0;
+
+/// The open world as a stage definition (its look, biome and seed; no route of its own).
+pub fn def() -> crate::stage::StageDef {
+    use crate::stage::{Biome, StageDef, TimeOfDay, Weather};
+    StageDef {
+        id: ID,
+        name: "Open world".into(),
+        seed: SEED,
+        biome: Biome::PineForest,
+        length: 0.0,
+        surface: Surface::Tarmac,
+        patches: 0.0,
+        time: TimeOfDay::Afternoon,
+        weather: Weather::Clear,
+        twist: 0.0,
+    }
+}
 /// Terrain sample spacing (m).
 pub const SPACING: f32 = 2.0;
 
@@ -53,5 +73,33 @@ impl Ground for OpenWorld {
     }
     fn obstacles(&self, _p: Vec2, _r: f32, out: &mut Vec<Obstacle>) {
         out.clear();
+    }
+}
+
+#[cfg(test)]
+mod timing {
+    #[test]
+    #[ignore]
+    fn generation_cost() {
+        let t = std::time::Instant::now();
+        let net = super::roads::generate(super::SEED);
+        eprintln!("roads {:.2} s", t.elapsed().as_secs_f32());
+        let t = std::time::Instant::now();
+        let mut acc = 0.0;
+        for i in 0..200_000 {
+            let p = bevy::math::Vec2::new((i % 2000) as f32 * 2.0 - 2000.0, (i / 2000) as f32 * 20.0 - 2000.0);
+            acc += super::roads::base_height(p, net.seed);
+        }
+        eprintln!("base x200k {:.3} s ({acc})", t.elapsed().as_secs_f32());
+        let t = std::time::Instant::now();
+        let mut n = 0;
+        for i in 0..200_000 {
+            let p = bevy::math::Vec2::new((i % 2000) as f32 * 2.0 - 2000.0, (i / 2000) as f32 * 20.0 - 2000.0);
+            n += net.nearest(p, 52.0).is_some() as u32;
+        }
+        eprintln!("nearest x200k {:.3} s ({n})", t.elapsed().as_secs_f32());
+        let t = std::time::Instant::now();
+        let w = crate::world::generate(&super::def());
+        eprintln!("world::generate {:.2} s, obstacles near spawn {}", t.elapsed().as_secs_f32(), w.obstacle_list().len());
     }
 }

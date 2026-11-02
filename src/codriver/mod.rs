@@ -168,6 +168,10 @@ fn talk(
             cd.subtitle = None;
         }
     }
+    // No co-driver in free roam: the voice reads pace notes for events only.
+    if stage.is_open() {
+        return;
+    }
     if cd.planner.is_none() || cd.stage != stage.def.id {
         cd.planner = Some(Planner::new(&stage.corners, &stage.crests, stage.road.length()));
         cd.stage = stage.def.id;
