@@ -85,7 +85,6 @@ impl WorldData {
     /// The world the seed makes, as data.
     pub fn generate(seed: u64) -> WorldData {
         let net = roads::generate(seed);
-        let layout = buildings::layout(&net);
         let (pos, dir) = roads::spawn(&net);
         WorldData {
             version: VERSION,
@@ -96,22 +95,93 @@ impl WorldData {
             roads: net.roads.iter().map(road_data).collect(),
             events: events::specs(&net),
             grades: Vec::new(),
-            lots: buildings::lots(&layout),
+            lots: buildings::town_lots(seed),
         }
     }
 
     /// The road network: every road rebuilt from its points, junctions found where they meet.
+    /// Road `k` of the network is `self.roads[k]` (events and grades refer to roads by index).
+    /// Needs data that passed [`WorldData::validate`] (a road needs two points).
     pub fn net(&self) -> RoadNet {
-        let roads: Vec<NetRoad> = self.roads.iter().filter(|r| r.points.len() >= 2).map(net_road).collect();
+        let roads: Vec<NetRoad> = self.roads.iter().map(net_road).collect();
         let junctions = roads::find_junctions(&roads);
         RoadNet { seed: self.seed, roads, junctions, town_y: self.town_y }
+    }
+
+    /// Checks data from a level file before anything is built from it: version, sizes, finite
+    /// numbers in range, and every road, event, grade and lot referring to something that exists.
+    /// Building from data that fails it can panic or run out of memory.
+    pub fn validate(&self) -> Result<(), String> {
+        let fin = |v: f32| v.is_finite();
+        let inside = |p: Vec3| fin(p.x) && fin(p.y) && fin(p.z) && p.x.abs() <= LIMIT_XZ && p.z.abs() <= LIMIT_XZ && p.y.abs() <= LIMIT_Y;
+        if self.version == 0 || self.version > VERSION {
+            return Err(format!("world data version {} (this build reads 1..={VERSION})", self.version));
+        }
+        if !fin(self.town_y) || self.town_y.abs() > LIMIT_Y {
+            return Err(format!("town height {}", self.town_y));
+        }
+        if !inside(self.home.pos) || !fin(self.home.dir.x) || !fin(self.home.dir.y) || self.home.dir.length() < 0.5 {
+            return Err(format!("home {:?}", self.home));
+        }
+        if self.roads.is_empty() || self.roads.len() > MAX_ROADS {
+            return Err(format!("{} roads (1..={MAX_ROADS})", self.roads.len()));
+        }
+        let mut points = 0;
+        for (k, r) in self.roads.iter().enumerate() {
+            let n = r.points.len();
+            points += n;
+            if n < 2 || points > MAX_POINTS {
+                return Err(format!("road {k}: {n} points (2 or more, {MAX_POINTS} in all)"));
+            }
+            if let Some(v) = r.speed_kmh
+                && !(fin(v) && (5.0..=300.0).contains(&v))
+            {
+                return Err(format!("road {k}: speed limit {v} km/h"));
+            }
+            for (i, p) in r.points.iter().enumerate() {
+                if !inside(p.pos) || !(fin(p.width) && (MIN_WIDTH..=MAX_WIDTH).contains(&p.width)) || !(fin(p.bank) && p.bank.abs() <= MAX_BANK) {
+                    return Err(format!("road {k} point {i}: {p:?}"));
+                }
+                // Stations about `STEP` apart (the road is sampled every STEP m).
+                let next = if i + 1 < n { Some(&r.points[i + 1]) } else if r.closed { Some(&r.points[0]) } else { None };
+                if let Some(q) = next {
+                    let d = Vec2::new(q.pos.x - p.pos.x, q.pos.z - p.pos.z).length();
+                    if !(MIN_GAP..=MAX_GAP).contains(&d) {
+                        return Err(format!("road {k}: point {i} is {d:.2} m from the next ({MIN_GAP}..={MAX_GAP})"));
+                    }
+                }
+            }
+        }
+        let len = |road: u32| self.roads.get(road as usize).map(|r| r.points.len());
+        for e in &self.events {
+            let Some(n) = len(e.road) else { return Err(format!("event {}: no road {}", e.id, e.road)) };
+            let ok = if e.kind == events::EventKind::Lap { self.roads[e.road as usize].closed && (e.from as usize) < n } else { e.from < e.to && (e.to as usize) < n };
+            if !ok {
+                return Err(format!("event {}: stations {}..={} on road {} ({n} points)", e.id, e.from, e.to, e.road));
+            }
+        }
+        if self.events.iter().enumerate().any(|(i, e)| self.events[..i].iter().any(|o| o.id == e.id)) {
+            return Err("two events share an id".into());
+        }
+        for g in &self.grades {
+            if len(g.road).is_none_or(|n| g.station as usize >= n) || !(1..=6).contains(&g.grade) {
+                return Err(format!("grade {g:?}"));
+            }
+        }
+        for l in &self.lots {
+            if l.i >= buildings::TOWN_BLOCKS || l.j >= buildings::TOWN_BLOCKS {
+                return Err(format!("lot {l:?} outside the town grid"));
+            }
+        }
+        Ok(())
     }
 
     /// Sets the grade of every corner of event `e` that a [`GradeOverride`] falls in.
     pub fn apply_grades(&self, e: &EventDef, net: &RoadNet, corners: &mut [Corner]) {
         for g in &self.grades {
             let Some(s) = events::route_s(e, net, g.road as usize, g.station as usize) else { continue };
-            if let Some(c) = corners.iter_mut().find(|c| c.start <= s && s <= c.end) {
+            // (A corner's `end` is where the next one may start: half-open.)
+            if let Some(c) = corners.iter_mut().find(|c| c.start <= s && s < c.end) {
                 c.grade = g.grade.clamp(1, 6);
             }
         }
@@ -137,6 +207,17 @@ fn net_road(d: &RoadData) -> NetRoad {
     nr.limit = d.speed_kmh.map(|v| v / 3.6);
     nr
 }
+
+// Limits for [`WorldData::validate`].
+const LIMIT_XZ: f32 = roads::HALF + 200.0;
+const LIMIT_Y: f32 = 2_000.0;
+const MAX_ROADS: usize = 1_000;
+const MAX_POINTS: usize = 200_000;
+const MIN_WIDTH: f32 = 2.0;
+const MAX_WIDTH: f32 = 40.0;
+const MAX_BANK: f32 = 0.5;
+const MIN_GAP: f32 = 0.01;
+const MAX_GAP: f32 = 4.0 * crate::stage::STEP;
 
 const SURFACES: [Surface; 6] = [Surface::Gravel, Surface::Tarmac, Surface::Mud, Surface::Snow, Surface::Verge, Surface::Rough];
 const KINDS: [RoadKind; 4] = [RoadKind::Street, RoadKind::Highway, RoadKind::Country, RoadKind::Forest];
@@ -221,6 +302,79 @@ mod tests {
         let text = ron::ser::to_string(&data).expect("serialise");
         let back: WorldData = ron::from_str(&text).expect("parse");
         assert_eq!(back, data);
+    }
+
+    #[test]
+    fn generated_data_is_valid() {
+        WorldData::generate(crate::open::SEED).validate().unwrap();
+    }
+
+    /// Bad level data is refused before anything is built from it (no panic, no huge work).
+    #[test]
+    fn validate_refuses_bad_data() {
+        let good = WorldData::generate(crate::open::SEED);
+        type Break = Box<dyn Fn(&mut WorldData)>;
+        let bad: Vec<(&str, Break)> = vec![
+            ("negative width", Box::new(|d| d.roads[0].points[3].width = -4.0)),
+            ("NaN width", Box::new(|d| d.roads[0].points[3].width = f32::NAN)),
+            ("infinite position", Box::new(|d| d.roads[1].points[0].pos.x = f32::INFINITY)),
+            ("far position", Box::new(|d| d.roads[1].points[0].pos.x = 1e9)),
+            ("one-point road", Box::new(|d| d.roads[2].points.truncate(1))),
+            ("stretched segment", Box::new(|d| d.roads[0].points[5].pos.x += 50.0)),
+            ("no roads", Box::new(|d| d.roads.clear())),
+            ("event on a missing road", Box::new(|d| d.events[0].road = 999)),
+            ("event past the road's end", Box::new(|d| d.events[0].to = 1_000_000)),
+            ("event backwards", Box::new(|d| d.events[0].from = d.events[0].to)),
+            ("lap on an open road", Box::new(|d| {
+                let open = d.roads.iter().position(|r| !r.closed).unwrap() as u32;
+                let lap = d.events.iter_mut().find(|e| e.kind == events::EventKind::Lap).unwrap();
+                lap.road = open;
+            })),
+            ("duplicate event id", Box::new(|d| d.events[1].id = d.events[0].id)),
+            ("grade 9", Box::new(|d| d.grades.push(GradeOverride { road: 0, station: 1, grade: 9 }))),
+            ("grade off the road", Box::new(|d| d.grades.push(GradeOverride { road: 0, station: 99_999, grade: 2 }))),
+            ("speed limit NaN", Box::new(|d| d.roads[0].speed_kmh = Some(f32::NAN))),
+            ("home NaN", Box::new(|d| d.home.pos.y = f32::NAN)),
+            ("lot outside the town", Box::new(|d| d.lots.push(LotData { i: 40, j: 0, kind: buildings::LotKind::Park }))),
+            ("future version", Box::new(|d| d.version = VERSION + 1)),
+        ];
+        for (what, f) in bad {
+            let mut d = good.clone();
+            f(&mut d);
+            assert!(d.validate().is_err(), "accepted: {what}");
+            assert!(crate::open::OpenWorld::from_data(d).is_err(), "built: {what}");
+        }
+    }
+
+    /// A road ending part way along another road's segment (not on a station, as an editor
+    /// draws them) still makes a junction.
+    #[test]
+    fn junction_between_stations() {
+        let pt = |x: f32, z: f32| RoadPoint { pos: Vec3::new(x, 0.0, z), width: 7.0, bank: 0.0, surface: Surface::Tarmac };
+        let main: Vec<RoadPoint> = (0..=50).map(|i| pt(i as f32 * 2.0, 0.0)).collect();
+        // Ends 0.5 m short of the main road's centreline, at x = 41 (between stations 20 and 21).
+        let side: Vec<RoadPoint> = (0..=30).map(|i| pt(41.0, 60.5 - i as f32 * 2.0)).collect();
+        let mut d = WorldData::generate(crate::open::SEED);
+        d.roads = vec![
+            RoadData { kind: RoadKind::Country, closed: false, speed_kmh: None, points: main },
+            RoadData { kind: RoadKind::Country, closed: false, speed_kmh: None, points: side },
+        ];
+        let net = d.net();
+        assert_eq!(net.junctions.len(), 1, "{:?}", net.junctions);
+        let j = &net.junctions[0];
+        assert!(j.roads.contains(&(1, 30)), "{j:?}");
+        assert!(j.roads.iter().any(|r| r.0 == 0 && (20..=21).contains(&r.1)), "{j:?}");
+    }
+
+    /// Event routes drive on the road's own banking (an edit to it reaches the event).
+    #[test]
+    fn edited_bank_reaches_the_event() {
+        let mut d = WorldData::generate(crate::open::SEED);
+        let e = d.events[0].clone();
+        d.roads[e.road as usize].points[e.from as usize + 10].bank = 0.05;
+        let net = d.net();
+        let ev = events::build(&net, &d.events);
+        assert_eq!(ev[0].route.bank[10], 0.05);
     }
 
     #[test]

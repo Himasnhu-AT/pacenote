@@ -123,16 +123,10 @@ pub fn find_junctions(roads: &[NetRoad]) -> Vec<Junction> {
                 if b == a || p.x < rb.lo.x || p.y < rb.lo.y || p.x > rb.hi.x || p.y > rb.hi.y {
                     continue;
                 }
+                // On `b`'s centreline (anywhere along a segment, not only at its stations).
                 let Some(at) = rb.road.nearest(p, JOIN) else { continue };
-                if at.lateral.abs() > JOIN {
-                    continue;
-                }
                 // The station of `b` nearest the point (the end of the segment past half way).
                 let j = if at.t < 0.5 { at.i } else { (at.i + 1).min(rb.road.len() - 1) };
-                let q = rb.road.pts[j];
-                if Vec2::new(q.x, q.z).distance(p) > JOIN {
-                    continue;
-                }
                 // Only where `a` meets `b`: an end of `a`, or a crossing (`a` runs on along
                 // both sides of the point, so it doesn't just touch).
                 let end = !ra.closed && (i == 0 || i + 1 == ra.road.len());
@@ -140,7 +134,9 @@ pub fn find_junctions(roads: &[NetRoad]) -> Vec<Junction> {
                 if !end && !at_end_of_b && !crosses(&ra.road, i, &rb.road, j) {
                     continue;
                 }
-                let k = match out.iter().position(|o| o.pos.distance(p) <= JOIN) {
+                // A road crossing between stations can come within JOIN of the other at two of
+                // its stations: one junction.
+                let k = match out.iter().position(|o| o.pos.distance(p) <= 2.0 * STEP) {
                     Some(k) => k,
                     None => {
                         out.push(Junction { pos: p, roads: Vec::new() });

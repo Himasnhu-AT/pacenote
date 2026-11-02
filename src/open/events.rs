@@ -65,7 +65,10 @@ const RALLY_NAMES: [&str; 4] = ["Fernhollow", "Blackpine", "Mossgate", "Cold Spr
 fn slice(road: &Road, a: usize, b: usize) -> Road {
     let pts: Vec<Vec2> = road.pts[a..=b].iter().map(|p| Vec2::new(p.x, p.z)).collect();
     let y: Vec<f32> = road.pts[a..=b].iter().map(|p| p.y).collect();
-    Road::from_centreline(&pts, &y, road.width[a..=b].to_vec(), road.surface[a..=b].to_vec())
+    let mut r = Road::from_centreline(&pts, &y, road.width[a..=b].to_vec(), road.surface[a..=b].to_vec());
+    // The road's own banking (it may be edited), so the route drives as the road does in free roam.
+    r.bank = road.bank[a..=b].to_vec();
+    r
 }
 
 /// A closed road driven once round from station `from`, ending where it started.
@@ -74,7 +77,9 @@ fn lap(road: &Road, from: usize) -> Road {
     let idx: Vec<usize> = (0..=n).map(|k| (from + k) % n).collect();
     let pts: Vec<Vec2> = idx.iter().map(|&i| Vec2::new(road.pts[i].x, road.pts[i].z)).collect();
     let y: Vec<f32> = idx.iter().map(|&i| road.pts[i].y).collect();
-    Road::from_centreline(&pts, &y, idx.iter().map(|&i| road.width[i]).collect(), idx.iter().map(|&i| road.surface[i]).collect())
+    let mut r = Road::from_centreline(&pts, &y, idx.iter().map(|&i| road.width[i]).collect(), idx.iter().map(|&i| road.surface[i]).collect());
+    r.bank = idx.iter().map(|&i| road.bank[i]).collect();
+    r
 }
 
 /// Every event of the world, in a fixed order (their ids): the generated set
@@ -167,6 +172,9 @@ pub fn route_s(e: &EventDef, net: &RoadNet, road: usize, station: usize) -> Opti
         return None;
     }
     let n = net.roads.get(road)?.road.len();
+    if station >= n {
+        return None;
+    }
     let k = if e.kind == EventKind::Lap { (station + n - e.from) % n } else { station.checked_sub(e.from)? };
     (k < e.route.len()).then_some(k as f32 * STEP)
 }
@@ -250,7 +258,6 @@ fn setup(world: &mut World) {
             world.spawn((
                 Name::new(format!("event marker: {}", e.name)),
                 Marker,
-                super::placeable::EventStart { event: e.id },
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat),
                 Transform::from_translation(p + Vec3::Y * 3.5),

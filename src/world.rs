@@ -261,6 +261,8 @@ pub fn generate(def: &StageDef) -> StageWorld {
 fn generate_open(def: &StageDef) -> StageWorld {
     let open = crate::open::OpenWorld::generate(def.seed);
     let (start, _) = open.spawn();
+    // The world data sets the time of day.
+    let def = &StageDef { time: open.data.time, ..def.clone() };
     let street = open.net.nearest(Vec2::new(start.x, start.z), 20.0).map_or(0, |n| n.road);
     let mut world = StageWorld {
         def: def.clone(),

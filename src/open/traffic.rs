@@ -309,8 +309,12 @@ impl LaneGraph {
             for (a, b, na, nb) in segs {
                 let ta = (trim[na] / STEP).ceil() as usize;
                 let tb = (trim[nb] / STEP).ceil() as usize;
-                let (i0, i1) = (a + ta, b.saturating_sub(tb));
-                assert!(i1 > i0, "road {r} segment {a}..{b} too short for its junctions");
+                let (i0, i1) = (a.saturating_add(ta), b.saturating_sub(tb));
+                // (Edited roads can put junctions too close together for a lane between them.)
+                if i1 <= i0 {
+                    warn!("traffic: road {r} segment {a}..{b} too short for its junctions; no lanes on it");
+                    continue;
+                }
                 for forward in [true, false] {
                     let lat = if forward { -off } else { off };
                     let mut pts = Vec::with_capacity(i1 - i0 + 1);

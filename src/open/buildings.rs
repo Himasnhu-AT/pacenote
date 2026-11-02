@@ -10,6 +10,7 @@
 //!   material: a procedural facade atlas (windows, shopfronts, doors, planks, roof tiles,
 //!   paving) tinted by vertex colour. Nothing spawns in headless runs.
 
+use bevy::log::warn;
 use bevy::math::{Vec2, Vec3};
 
 use super::roads::{self, BLOCK, PLATEAU, RING_R, RoadKind, RoadNet, TOWN};
@@ -323,23 +324,20 @@ pub struct LotData {
     pub kind: LotKind,
 }
 
-/// The town's block kinds as [`layout`] picks them (for the world data).
-pub fn lots(layout: &Layout) -> Vec<LotData> {
-    layout.blocks.iter().filter_map(|b| b.cell.map(|(i, j)| LotData { i, j, kind: b.kind })).collect()
+/// Blocks along each side of the town grid.
+pub const TOWN_BLOCKS: u32 = (2.0 * TOWN / BLOCK + 0.5) as u32;
+
+/// Which ring of blocks block (`i`, `j`) is in (0 = the four round the centre).
+fn ring_of(i: u32, j: u32) -> u32 {
+    let n = TOWN_BLOCKS;
+    let c = |k: u32| (k as i32 * 2 - (n as i32 - 1)).unsigned_abs() / 2;
+    c(i).max(c(j))
 }
 
-/// [`layout`] with the block kinds in `lots` instead of the generated ones (a block's
-/// buildings come from its own seed, so the other blocks don't change). Farms stay generated.
-pub fn layout_with(net: &RoadNet, lots: &[LotData]) -> Layout {
-    let seed = net.seed;
-    let y = net.town_y;
-    let n = (2.0 * TOWN / BLOCK).round() as u32;
-    let inset = RoadKind::Street.width() * 0.5 + SIDEWALK;
-    // Block kinds by ring (0 = the four round the centre), shuffled per ring.
-    let ring_of = |i: u32, j: u32| {
-        let c = |k: u32| (k as i32 * 2 - (n as i32 - 1)).unsigned_abs() / 2;
-        c(i).max(c(j))
-    };
+/// The town's block kinds as the seed picks them.
+fn town_kinds(seed: u64) -> std::collections::BTreeMap<(u32, u32), LotKind> {
+    let n = TOWN_BLOCKS;
+    // Shuffled per ring.
     let mut rng = Rng::new(seed ^ 0xB11D_0000);
     let mut kinds = std::collections::BTreeMap::new();
     for ring in 0..n.div_ceil(2) {
@@ -362,11 +360,27 @@ pub fn layout_with(net: &RoadNet, lots: &[LotData]) -> Layout {
             kinds.insert(c, k);
         }
     }
+    kinds
+}
+
+/// The town's block kinds as the seed picks them, as world data.
+pub fn town_lots(seed: u64) -> Vec<LotData> {
+    town_kinds(seed).into_iter().map(|((i, j), kind)| LotData { i, j, kind }).collect()
+}
+
+/// [`layout`] with the block kinds in `lots` instead of the generated ones (a block's
+/// buildings come from its own seed, so the other blocks don't change). Farms stay generated.
+pub fn layout_with(net: &RoadNet, lots: &[LotData]) -> Layout {
+    let seed = net.seed;
+    let y = net.town_y;
+    let n = TOWN_BLOCKS;
+    let inset = RoadKind::Street.width() * 0.5 + SIDEWALK;
+    let mut kinds = town_kinds(seed);
     for l in lots {
-        if let Some(k) = kinds.get_mut(&(l.i, l.j))
-            && l.kind != LotKind::Farm
-        {
-            *k = l.kind;
+        match kinds.get_mut(&(l.i, l.j)) {
+            Some(_) if l.kind == LotKind::Farm => warn!("lot ({}, {}): a town block can't be a farm; kept as generated", l.i, l.j),
+            Some(k) => *k = l.kind,
+            None => warn!("lot ({}, {}) is outside the town grid; ignored", l.i, l.j),
         }
     }
     let mut blocks = Vec::new();

@@ -67,18 +67,21 @@ pub struct OpenWorld {
 impl OpenWorld {
     /// The world the seed makes (a second or two): captured as data, then built from it.
     pub fn generate(seed: u64) -> OpenWorld {
-        OpenWorld::from_data(data::WorldData::generate(seed))
+        // (Covered by `data::tests::generated_data_is_valid`.)
+        OpenWorld::from_data(data::WorldData::generate(seed)).expect("the generated world data is valid")
     }
 
-    /// Builds the network, the terrain and the town from the world data.
-    pub fn from_data(data: data::WorldData) -> OpenWorld {
+    /// Builds the network, the terrain and the town from the world data, once it passes
+    /// [`data::WorldData::validate`].
+    pub fn from_data(data: data::WorldData) -> Result<OpenWorld, String> {
+        data.validate()?;
         let net = data.net();
         let n = (2.0 * roads::HALF / SPACING) as u32 + 1;
         let origin = Vec2::splat(-roads::HALF);
         let heights = Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z));
         let layout = buildings::layout_with(&net, &data.lots);
         let walls = buildings::ObstacleGrid::new(&buildings::obstacles(&layout), 10.0);
-        OpenWorld {
+        Ok(OpenWorld {
             data: Arc::new(data),
             net: Arc::new(net),
             heights: Arc::new(heights),
@@ -86,7 +89,7 @@ impl OpenWorld {
             walls: Arc::new(walls),
             traffic: traffic::TrafficSolids::default(),
             traffic_solid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-        }
+        })
     }
 
     /// Where the car starts and which way it faces (home).
