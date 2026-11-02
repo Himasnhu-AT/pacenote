@@ -258,11 +258,11 @@ built_by = "tools/art/render_tree_cards.py (Blender)"
 name = "player_car"
 paths = ["models/rallycar.glb"]
 kind = "model"
-sources = ["mercedes_amg_gt3_evo", "first_person_arms", "original"]
+sources = ["original"]
 collision = "none"
-lod = "LOD0 only (~124k tris incl. cabin); replacement with an original car and LOD0/1/2 in progress (brief §7)"
-built_by = "tools/art/import_sketchfab.py --profile gt3 (Blender)"
-note = "BLOCKER for release: depicts a real car make with a sponsor livery (trademarks). Being replaced."
+lod = "LOD0/1/2: body and wheels built three times (Body_lod1/2, Wheel*_lod1/2), VisibilityRange in src/art/car.rs; exterior 17.5k / 5.0k / 2.3k tris, cockpit 27.8k (LOD0 only)"
+built_by = "tools/art/build_rallycar.py (Blender, procedural; design sheet docs/cars/rally_hatch.md)"
+note = "The Talus rally hatch: an original design, no third-party content, no marks. The driver's arms are drawn in code (src/art/hands.rs)."
 
 # ---------------------------------------------------------------- car sounds
 

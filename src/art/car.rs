@@ -1,8 +1,7 @@
 //! The car on screen (`assets/models/rallycar.glb`) under the simulated body, its wheels driven
-//! from the simulation (steer, spin, suspension travel). The model is the Mercedes-AMG GT3 Evo
-//! download (`assets_src/SOURCES.md`), converted by `tools/art/import_sketchfab.py --profile
-//! gt3`: scaled to the sim's wheelbase and track, decimated, its own cabin kept. The earlier
-//! procedural hatchback (`tools/art/build_rallycar.py`) uses the same node names.
+//! from the simulation (steer, spin, suspension travel). The model is "Talus", an original
+//! 5-door rally hatch built procedurally by `tools/art/build_rallycar.py` (design sheet:
+//! `docs/cars/rally_hatch.md`): body, livery, wheels, detachable parts, cockpit, seated driver.
 //!
 //! The rig (node names from the importer):
 //! - `Car` > `Chassis`: everything the sprung body carries (`Body`, the cabin, the cockpit
@@ -14,6 +13,11 @@
 //!   hub. Without `Steer` nodes (older models) the front hubs steer.
 //! - `Car` > `CoDriverEye`, `CoDriverTablet`: anchors for the co-driver's view (`src/guide`).
 //!
+//! Levels of detail: a mesh `X` with lower-detail twins `X_lod1`, `X_lod2` (the body and the
+//! wheels) crossfades to them with distance ([`LOD_RANGES`], Bevy `VisibilityRange`); meshes
+//! without twins fade out with LOD0 (cabin, driver, callipers), except the small parts drawn at
+//! every distance ([`EVERY_LOD`]: the detachable parts and the lamp pod).
+//!
 //! The hubs keep the model's track and wheelbase position (X/Z). Its tyres are a little bigger
 //! than the simulation's (`MODEL_WHEEL_RADIUS` vs `Spec::wheel_radius`), so hubs sit that much
 //! higher.
@@ -22,10 +26,12 @@
 //! (the guide's copy of the driver's car fills one each frame).
 //!
 //! Cockpit: the steering wheel turns with the road wheels (`STEERING_RATIO`); tacho and
-//! speedo needles (when the model has them: the GT3 has a screen instead) follow the engine
-//! and road speed, and a bonnet lamp pod (if any) is hidden in the cockpit and bonnet views.
+//! speedo needles follow the engine and road speed, and the bonnet lamp pod is hidden in the
+//! cockpit and bonnet views.
 //! The driver's hands, arms and the gear and handbrake levers are animated in `hands.rs`.
 
+use bevy::camera::visibility::VisibilityRange;
+use bevy::gltf::GltfMeshName;
 use bevy::prelude::*;
 use engine::render_budget::Actor;
 
@@ -40,13 +46,12 @@ impl Plugin for CarArtPlugin {
 }
 
 /// Bonnet camera in the model's frame (origin at hub height): over the front of the bonnet
-/// (the GT3's bonnet top is ~0.39 m above hub height there).
-const BONNET_CAM_MODEL: Vec3 = Vec3::new(0.0, 0.55, -1.55);
+/// (the bonnet top is ~0.56 m above hub height there).
+const BONNET_CAM_MODEL: Vec3 = Vec3::new(0.0, 0.72, -1.6);
 
-/// Driver's eye in the model's frame: left seat, 0.93 m above the ground (a low GT seat, the
-/// roof bar just above the windscreen's top edge), 0.47 m behind the steering wheel's centre
-/// (`hands.rs` `WHEEL_C`).
-const COCKPIT_EYE_MODEL: Vec3 = Vec3::new(-0.36, 0.595, 0.69);
+/// Driver's eye in the model's frame: left seat, 1.12 m above the ground, 0.43 m behind the
+/// steering wheel (`build_rallycar.py` / `cockpit.py`: `DRV_X`, `STEER_C`).
+const COCKPIT_EYE_MODEL: Vec3 = Vec3::new(-0.37, 0.795, 0.60);
 
 /// Bonnet camera position in the car body's frame.
 pub fn bonnet_cam(s: &crate::vehicle::Spec) -> Vec3 {
@@ -58,8 +63,7 @@ pub fn cockpit_eye(s: &crate::vehicle::Spec) -> Vec3 {
     COCKPIT_EYE_MODEL + model_offset(s)
 }
 
-/// The model's wheel centres (`import_sketchfab.py` `HALF_TRACK`, `FRONT_Y`; `build_rallycar.py`
-/// `HUB`): half track and half wheelbase, about
+/// The model's wheel centres (`build_rallycar.py` `HUB`): half track and half wheelbase, about
 /// the model origin. They match the sim's mounts (tested), so drawn and simulated wheels agree.
 pub const MODEL_HALF_TRACK: f32 = 0.78;
 pub const MODEL_HALF_WHEELBASE: f32 = 1.275;
@@ -71,11 +75,11 @@ pub fn model_offset(s: &crate::vehicle::Spec) -> Vec3 {
 }
 
 /// The cabin's fill light: under the roof between the seats (model frame) and its power.
-const CABIN_FILL_MODEL: Vec3 = Vec3::new(0.0, 0.62, 0.45);
+const CABIN_FILL_MODEL: Vec3 = Vec3::new(0.0, 0.80, 0.50);
 const CABIN_FILL_LUMENS: f32 = 6000.0;
 
-/// Model tyre radius (m), from the prepared model (the importer prints it).
-pub const MODEL_WHEEL_RADIUS: f32 = 0.337;
+/// Model tyre radius (m): `build_rallycar.py` `R`.
+pub const MODEL_WHEEL_RADIUS: f32 = 0.325;
 
 /// Steering wheel turn per radian of road-wheel steer (full lock 0.56 rad ≈ 260°).
 pub const STEERING_RATIO: f32 = 8.0;
@@ -83,6 +87,40 @@ pub const STEERING_RATIO: f32 = 8.0;
 /// Parts of the body that can come off, each its own node under `Chassis` (origin at the
 /// part's middle, model frame). Not every model has every part.
 pub const DETACHABLE: [&str; 7] = ["MirrorL", "MirrorR", "RearWing", "FrontSplitter", "FrontBumper", "RearBumper", "RearDiffuser"];
+
+/// Distance bands (m, from the camera to the mesh's origin) of the levels of detail: LOD0
+/// fades out over the first, LOD1 in; LOD1 out over the second, LOD2 in.
+pub const LOD_RANGES: [std::ops::Range<f32>; 2] = [28.0..34.0, 85.0..95.0];
+
+/// Meshes drawn at every distance (small, no twins): the detachable parts and the lamp pod.
+pub const EVERY_LOD: [&str; 8] = ["MirrorL", "MirrorR", "RearWing", "FrontSplitter", "FrontBumper", "RearBumper", "RearDiffuser", "LightPodMesh"];
+
+/// Level of detail of a model mesh (by its glTF mesh name): 0, 1, 2, or `None` for every
+/// distance.
+pub fn lod_of(mesh: &str) -> Option<u8> {
+    if mesh.ends_with("_lod1") {
+        Some(1)
+    } else if mesh.ends_with("_lod2") {
+        Some(2)
+    } else if EVERY_LOD.contains(&mesh) {
+        None
+    } else {
+        Some(0)
+    }
+}
+
+/// The visibility range of a level of detail.
+pub fn lod_range(level: u8) -> VisibilityRange {
+    let [a, b] = LOD_RANGES;
+    match level {
+        0 => VisibilityRange { start_margin: 0.0..0.0, end_margin: a, use_aabb: false },
+        1 => VisibilityRange { start_margin: a, end_margin: b, use_aabb: false },
+        _ => VisibilityRange { start_margin: b, end_margin: 1.0e9..1.0e9, use_aabb: false },
+    }
+}
+
+/// The car model's asset path.
+pub const MODEL: &str = "models/rallycar.glb";
 
 /// The model under the car entity.
 #[derive(Component)]
@@ -181,7 +219,7 @@ pub fn spawn(world: &mut World, car: Entity) {
         return;
     }
     let spec = world.get_resource::<CarSpec>().map(|s| s.0.clone()).unwrap_or_default();
-    let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset("models/rallycar.glb"));
+    let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset(MODEL));
     let tf = Transform::from_translation(model_offset(&spec));
     let model = world.spawn((Name::new("car model"), CarModel, WorldAssetRoot(scene), tf, Visibility::default(), Actor)).id();
     world.entity_mut(car).add_child(model);
@@ -207,6 +245,7 @@ fn rig(
     children: Query<&Children>,
     names: Query<(&Name, &Transform)>,
     meshes: Query<&MeshMaterial3d<StandardMaterial>>,
+    mesh_names: Query<&GltfMeshName>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -254,6 +293,11 @@ fn rig(
         let mut glass_done = std::collections::HashSet::new();
         for e in parts {
             commands.entity(e).insert(Actor);
+            if let Ok(n) = mesh_names.get(e)
+                && let Some(level) = lod_of(&n.0)
+            {
+                commands.entity(e).insert(lod_range(level));
+            }
             if let Ok(mm) = meshes.get(e)
                 && glass_done.insert(mm.0.id())
                 && let Some(mut mat) = mats.get_mut(&mm.0)
@@ -407,10 +451,9 @@ mod tests {
     fn cameras_sit_in_and_over_the_car() {
         let s = crate::vehicle::Spec::default();
         let ground = model_height(&s) - MODEL_WHEEL_RADIUS;
-        // Driver's eye: left seat, ~0.9-1.2 m over the ground (a GT seat is low), behind the
-        // front axle.
+        // Driver's eye: left seat, ~1.1 m over the ground, behind the front axle.
         let eye = cockpit_eye(&s);
-        assert!(eye.x < -0.2 && (0.88..1.25).contains(&(eye.y - ground)) && eye.z > s.mounts[0].z, "{eye}");
+        assert!(eye.x < -0.2 && (1.0..1.25).contains(&(eye.y - ground)) && eye.z > s.mounts[0].z, "{eye}");
         let bonnet = bonnet_cam(&s);
         assert!(bonnet.z < eye.z && bonnet.y - ground > 0.85, "{bonnet}");
     }
@@ -451,6 +494,30 @@ mod tests {
         }
         for n in ["CoDriverEye", "CoDriverTablet"] {
             assert_eq!(parent(n).as_deref(), Some("Car"), "{n}");
+        }
+        // Lower-detail twins sit beside their LOD0 mesh.
+        for lv in [1, 2] {
+            assert_eq!(parent(&format!("Body_lod{lv}")).as_deref(), Some("Chassis"));
+            for k in NAMES {
+                assert_eq!(parent(&format!("Wheel{k}_lod{lv}")), Some(format!("Spin{k}")));
+            }
+        }
+    }
+
+    #[test]
+    fn levels_of_detail_hand_over() {
+        assert_eq!(lod_of("Body"), Some(0));
+        assert_eq!(lod_of("Interior"), Some(0));
+        assert_eq!(lod_of("WheelFL_lod1"), Some(1));
+        assert_eq!(lod_of("Body_lod2"), Some(2));
+        assert_eq!(lod_of("FrontBumper"), None);
+        // Each level fades in over the band the one before fades out.
+        for lv in 0..2 {
+            assert_eq!(lod_range(lv).end_margin, lod_range(lv + 1).start_margin);
+        }
+        assert!(LOD_RANGES[0].end <= LOD_RANGES[1].start);
+        for p in DETACHABLE {
+            assert!(EVERY_LOD.contains(&p), "{p}: drawn at every distance");
         }
     }
 

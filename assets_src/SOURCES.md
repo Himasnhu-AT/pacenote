@@ -6,9 +6,8 @@ Every file under `assets_src/` is listed here. Only CC0 and CC BY licences are u
 
 ## Credits that must appear in the game (CC BY)
 
-- "Mercedes-AMG GT3 Evo 2020 | www.vecarz.com" by vecarz, CC BY 4.0 (the car, with its cabin; see models/sketchfab below).
-- "First Person arms" by DJMaesen (bumstrum), CC BY 4.0 (driver's arms; see models/sketchfab below).
-- Both lines are in `assets/credits.txt`. (The CC BY Milano '95 and Car Concept below are no longer shipped. Restore their credit lines if they are ever used again.)
+- None today. The player's car (`assets/models/rallycar.glb`, the "Talus" rally hatch) is original, made for Pacenote by `tools/art/build_rallycar.py` (no third-party content; design sheet `docs/cars/rally_hatch.md`), and the driver's arms are drawn in code (`src/art/hands.rs`).
+- The CC BY GT3, First Person arms, Milano '95 and Car Concept below are no longer shipped (removed from `assets/credits.txt`). Restore their credit lines if any is ever used again; the GT3 must not be (trademarks).
 
 CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and models from Poly Haven (polyhaven.com) and ambientCG (ambientcg.com), CC0. Car sounds from Freesound (freesound.org), CC0. Smoke sprites by Kenney (kenney.nl), CC0. Hay bale and fence by carlosjorgereis (OpenGameArt), CC0."
 
@@ -32,9 +31,10 @@ CC0 assets need no credit; a courtesy line is suggested: "Textures, HDRIs and mo
 
 Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; converted by `tools/art/import_sketchfab.py`. Licence facts read from the Sketchfab API (`https://api.sketchfab.com/v3/models/<uid>`) on 2026-10-31.
 
-### Mercedes-AMG GT3 Evo 2020 (`mercedes_amg_gt3_evo`)
+### Mercedes-AMG GT3 Evo 2020 (`mercedes_amg_gt3_evo`): former player car, no longer shipped
 
-- **Use:** The player's car (`assets/models/rallycar.glb`): body, wheels and its own cabin (seat, dash, cage, yoke steering wheel). Converted by `tools/art/import_sketchfab.py -- car <file> --profile gt3`: scaled to the sim's wheelbase and track, decimated ~496k → ~124k triangles, textures capped at 2048 (opaque ones as JPEG), its steering wheel made the animated `SteeringWheel` node, our shifter and handbrake added, cabin ambient occlusion baked. Rigged: Chassis (body), Hub/Steer/Spin per wheel, detachable MirrorL/R, RearWing, FrontSplitter, Front/RearBumper, RearDiffuser; a passenger seat mirrored from the driver's (the battery box on that floor removed); CoDriverEye/CoDriverTablet anchors.
+- **Status (2026-11-02):** replaced by the original Talus rally hatch (`tools/art/build_rallycar.py`); not shipped, not to be used again (trademarks, below). Its converter profile was removed from `tools/art/import_sketchfab.py`.
+- **Use (until 2026-11-02):** The player's car (`assets/models/rallycar.glb`): body, wheels and its own cabin (seat, dash, cage, yoke steering wheel). Converted by `tools/art/import_sketchfab.py -- car <file> --profile gt3`: scaled to the sim's wheelbase and track, decimated ~496k → ~124k triangles, textures capped at 2048 (opaque ones as JPEG), its steering wheel made the animated `SteeringWheel` node, our shifter and handbrake added, cabin ambient occlusion baked. Rigged: Chassis (body), Hub/Steer/Spin per wheel, detachable MirrorL/R, RearWing, FrontSplitter, Front/RearBumper, RearDiffuser; a passenger seat mirrored from the driver's (the battery box on that floor removed); CoDriverEye/CoDriverTablet anchors.
 - **Path:** `assets_src/sketchfab/mercedes_amg_gt3_evo/mercedes_benz_amg_gt3_red_bull.glb` (from the owner's download `mercedes-amg-gt3-red-bull-racing.zip`, 2026-11-01; the zip's `textures/` folder only repeats the images embedded in the glb)
 - **Source page:** https://sketchfab.com/3d-models/mercedes-amg-gt3-evo-2020-wwwvecarzcom-39e77243109f4e5cb7134b6f31c8f619
 - **Download:** Sketchfab download dialog (login required), by the owner
@@ -57,7 +57,9 @@ Downloaded by the owner (Sketchfab needs a login) into `assets_src/sketchfab/`; 
 - **Resolution / polys:** 18,064 faces, 11,130 vertices; 8 materials, 20 textures (Sketchfab API)
 - **Credit line:** REQUIRED: "Milano '95 - Low poly model" by Daniel Zhabotinsky (sketchfab.com/DanielZhabotinsky), licensed under CC BY 4.0. Modified: scaled, wheels split, interior replaced.
 
-### First Person arms (`first_person_arms`)
+### First Person arms (`first_person_arms`): not shipped
+
+- **Status (2026-11-02):** not in `assets/` (no `driver_arms.glb`); the game draws the arms in code (`src/art/hands.rs`), so its credit line was removed from `assets/credits.txt`. Restore it if the converted arms are ever shipped.
 
 - **Use:** The driver's arms and gloved hands in the cockpit view, posed by `src/art/hands.rs`.
 - **Path:** `assets_src/sketchfab/` (as downloaded)
@@ -819,7 +821,7 @@ Same authors and licence as the models above. ~3.3 MB in total.
 
 - `assets/textures/<set>/`: cooked KTX2 (engine cook) from the ground textures, the rock/plant model textures, the `pine_bark` trunk texture, tree card atlases rendered in Blender from `fir_tree_01`, `pine_tree_01` and `tree_small_02` (`tools/art/render_tree_cards.py`) and `island_tree_01` (scrub tree; `tools/art/prep_textures.sh`).
 - `assets/models/*.pnm`: decimated rocks, ferns, grass and a stump (`tools/art/build_meshes.py`); the bushes `shrub_a`/`shrub_b` are clusters of leaf-clump cards cut from `tree_small_02` (texture set `m_shrub`, `tools/art/build_bushes.py`), since Poly Haven's `shrub_02` is a sparse weed rather than a bush.
-- `assets/models/rallycar.glb`: the Mercedes-AMG GT3 Evo (above, CC BY), converted and rigged by `tools/art/import_sketchfab.py --profile gt3`. (The original procedural hatchback, `tools/art/build_rallycar.py`, has no third-party content.)
+- `assets/models/rallycar.glb`: the Talus rally hatch, original, made for Pacenote: built procedurally by `tools/art/build_rallycar.py` (with `cockpit.py`, `driver.py`), no third-party content (design sheet `docs/cars/rally_hatch.md`).
 - Credits: `assets/credits.txt`.
 
 ## audio_car (car sounds, added 2026-11-02)

@@ -29,7 +29,7 @@ memgate -- blender -b --factory-startup -P tools/art/render_tree_cards.py -- <as
 memgate -- blender -b --factory-startup -P tools/art/build_bushes.py -- <assets_src> assets   # bushes: m_shrub atlas + shrub_a/b.pnm
 memgate -- cargo run --manifest-path <engine>/tools/cook/Cargo.toml -- assets/textures       # → KTX2 (BC7/BC5), alpha kept
 blender -b --factory-startup -P tools/art/build_meshes.py -- <assets_src> assets/models      # rocks/ferns/grass/stump → .pnm
-blender -b --factory-startup -P tools/art/build_rallycar.py -- assets/models/rallycar.glb [preview_dir]   # car (no sources needed)
+memgate -- blender -b --factory-startup -P tools/art/build_rallycar.py -- assets/models/rallycar.glb [--preview DIR] [--no-bake]   # car (no sources needed)
 ```
 
 - **Tree cards** (`render_tree_cards.py`) are orthographic renders of Poly Haven's full-size
@@ -55,20 +55,32 @@ blender -b --factory-startup -P tools/art/build_rallycar.py -- assets/models/ral
   `impostor.wesl`), merged per 256 m chunk and species, no shadows or prepass, fading in per
   tree with the same dither as Bevy's ranges; built only for chunks within the fog distance
   (at most 1.2 km) and dropped beyond. On Low every other tree has an impostor.
-- **Car**: an original 3-door gravel-rally hatchback built entirely in `build_rallycar.py`
-  (no downloaded parts): the body is a loft of parametric cross-sections (bonnet → windscreen →
-  roof → hatch from per-station height/width curves), wheel wells cut with booleans, then flared
-  arches, mud flaps, skid plate, tow hooks, roof scoop and spoiler, mirrors, lamps, and a 4-lamp
-  bonnet pod (node `LightPod`). Livery (white, navy, orange; door number panel "14") is a
-  generated 1024² atlas: sides map by (y, height) with the number drawn un-mirrored on each
-  side, top by (y, x), ends by (x, height). Wheels: knobbly gravel tyres (R 0.325 m), white
-  six-spoke rims, discs, orange calipers; rig `Hub*` (steer + suspension, caliper) → `Spin*`.
-  ~16 k triangles, 15 materials, 0.5 MB. Every material is single-sided: the body shell is
-  invisible from inside, so the cockpit shows the interior's own skin (the shell's opaque cabin
-  faces copied 3.5 cm in and flipped), dash, binnacle with live gauges (`Tacho`, `Speedo`),
-  steering wheel (`SteeringWheel`, turns about its column), seats with harnesses, shifter,
-  hydraulic handbrake and a roll cage; the glass (alpha blended) shows only from outside.
-  `preview_dir` renders Workbench previews (four exterior views and the driver's eye).
+- **Car**: "Talus", an original 5-door gravel-rally hatch (design sheet `docs/cars/rally_hatch.md`)
+  built entirely in `build_rallycar.py` (no downloaded parts): the body is a loft of parametric
+  cross-sections (bonnet → windscreen → roof → steep tailgate, from per-station height/width
+  curves), closed at the ends by horizontal strips so the bumpers split off below the flank
+  crease; squared superellipse wheel arches cut with booleans, then flared box-section arch
+  lips, arch liners, mud flaps, skid plate, roof scoop, roof-edge wing, mirrors, square lamps,
+  grille, tow loops, crash structure behind the bumpers (seen when one comes off) and a 4-lamp
+  bonnet pod (node `LightPod`). Livery (slate teal, chalk band and roof, ochre pinstripes, black
+  sills and bumpers, number 27 on the doors and roof; no marks) is a generated 2048×1024 atlas
+  (JPEG): sides map by (y, height) with the number drawn un-mirrored on each side, top by
+  (y, x), ends by (x, height); `--paint RRGGBB` and `--number NN` change it. Paint has a light
+  clear coat. Wheels: knobbly gravel tyres (R 0.325 m), anthracite six-spoke rims, vented
+  discs, ochre callipers; rig `Hub*` (suspension) → `Steer*` (front: steering, calliper) →
+  `Spin*` → `Wheel*`. Detachable `MirrorL/R`, `RearWing`, `FrontSplitter`, `Front/RearBumper`,
+  `RearDiffuser` (origin at their middle; `props.rs` throws a copy off as debris). Levels of
+  detail: the body and wheels are built three times (`Body_lod1/2`, `Wheel*_lod1/2`, coarser
+  stations and arches, opaque dark glass), switched by `VisibilityRange` in `car.rs`
+  (28–34 m, 85–95 m); parts and the pod draw at every distance. ~17.5 k exterior + ~28 k
+  cockpit triangles at LOD0, 5.0 k at LOD1, 2.3 k at LOD2; 2.8 MB. Every material is
+  single-sided unless noted: the body shell is invisible from inside, so the cockpit shows the
+  interior's own skin (the shell's opaque cabin faces copied 3.5 cm in and flipped), dash,
+  binnacle with live gauges (`Tacho`, `Speedo`), steering wheel (`SteeringWheel`, turns about its
+  column), seats with harnesses (the empty passenger seat's is `SeatHarness`), shifter,
+  hydraulic handbrake and a roll cage, AO baked into vertex colours; the seated driver
+  (`driver.py`, `DriverBody`) shows from outside; the glass (alpha blended) shows only from
+  outside. `--preview DIR` renders Workbench previews (exterior views, the driver's eye, LOD1/2).
 - **Cameras** (`drive.rs` `CameraView`, `C` cycles): cockpit (default; driver's eye at the left
   seat, view direction lagged ~55 ms behind the body to filter suspension shake, pitched 3°
   down) → bonnet → chase. The lamp pod is hidden in cockpit and bonnet views.

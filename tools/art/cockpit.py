@@ -398,8 +398,9 @@ def doors(M, cab):
         M.box((x - sx * 0.012, 0.32, zg(0.80)), (0.012, 0.09, 0.02), "Alu")
 
 
-def bucket(M, x, cab):
-    """A fibreglass bucket seat: back and cushion shells (black outside, fabric inside)."""
+def bucket(M, x, cab, H=None):
+    """A fibreglass bucket seat: back and cushion shells (black outside, fabric inside); its
+    harness goes in `H` if given (else in `M`)."""
     rec = math.radians(14)
     up = Vector((0, -math.sin(rec), math.cos(rec)))
     fwd = Vector((0, math.cos(rec), math.sin(rec)))
@@ -427,7 +428,7 @@ def bucket(M, x, cab):
     for sx in (-1, 1):
         M.box((x + sx * 0.265, -0.45 + SEAT_DY, zg(0.40)), (0.01, 0.30, 0.10), "Alu")
         M.box((x + sx * 0.18, -0.41 + SEAT_DY, zg(cab.floor + 0.03)), (0.03, 0.52, 0.06), "Metal")
-    harness(M, x, base, up, fwd, L, cab)
+    harness(H if H is not None else M, x, base, up, fwd, L, cab)
 
 
 def u_profile(w, d, t):
@@ -634,16 +635,18 @@ def bake_ao(ob, samples=48):
     attr.data.foreach_set("color", c.ravel())
 
 
-def build(root, skin=None, cab=Cabin, bake=True):
+def build(root, skin=None, cab=Cabin, bake=True, seat_harness=False):
     """The cockpit under `root`: a static "Interior" (with `skin`, the cabin lining, if given)
-    and the moving nodes. Call materials() first."""
+    and the moving nodes. With `seat_harness`, the passenger seat's harness is its own mesh
+    "SeatHarness" under `root`. Call materials() first."""
     M, D = Mesh(), Mesh()
+    H = Mesh() if seat_harness else None
     dash(M, D, cab)
     console(M, cab)
     footwell(M, cab)
     doors(M, cab)
     for x in (DRV_X, -DRV_X):
-        bucket(M, x, cab)
+        bucket(M, x, cab, H if x > 0 else None)
     cage(M, cab)
     codriver(M, D, cab)
     parts = [M.obj("InteriorParts", recalc=True, smooth_angle=35), D.obj("InteriorDecals", recalc=False)]
@@ -654,5 +657,7 @@ def build(root, skin=None, cab=Cabin, bake=True):
     ob.parent = root
     if bake:
         bake_ao(ob)
+    if H is not None:
+        H.obj("SeatHarness", root, recalc=True, smooth_angle=40)
     add_nodes(root)
     return ob

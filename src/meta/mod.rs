@@ -216,6 +216,11 @@ pub struct GhostCar {
 #[derive(Component)]
 struct GhostBody;
 
+/// The ghost's copy of the car model, waiting to be dressed: its far level of detail only,
+/// in the ghost material ([`dress_ghosts`]).
+#[derive(Component)]
+struct GhostModel(Handle<StandardMaterial>);
+
 /// Menu events collected for the exclusive handler.
 #[derive(Resource, Default)]
 struct MenuQueue(Vec<&'static str>);
@@ -240,7 +245,7 @@ impl Plugin for MetaPlugin {
             .add_systems(Update, poll_catalog)
             .add_systems(Update, (sync_camera, free_pointer))
             .add_systems(Update, (collect_menu, apply_menu).chain().after(engine::ui::UiSet::Screens))
-            .add_systems(Update, (stage_ready, watch_finish, follow_ghost).chain().run_if(resource_exists::<StageWorld>))
+            .add_systems(Update, (stage_ready, watch_finish, follow_ghost, dress_ghosts).chain().run_if(resource_exists::<StageWorld>))
             .add_systems(OnExit(AppState::InGame), teardown);
         #[cfg(feature = "dev")]
         dev::register(app);
@@ -556,9 +561,6 @@ fn spawn_ghost(world: &mut World, g: Ghost, road: &crate::stage::Road, hash: &st
         ))
         .id();
     let (Some(_), Some(_)) = (world.get_resource::<Assets<Mesh>>(), world.get_resource::<Assets<StandardMaterial>>()) else { return };
-    let size = spec.size;
-    let body = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(size.x, size.y * 0.75, size.z));
-    let cabin = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(size.x * 0.82, size.y * 0.5, size.z * 0.5));
     let c = Color::srgba(0.45, 0.85, 1.0, opacity);
     let mat = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
         base_color: c,
@@ -567,13 +569,40 @@ fn spawn_ghost(world: &mut World, g: Ghost, road: &crate::stage::Road, hash: &st
         unlit: true,
         ..default()
     });
-    // The box is centred on the body (`spec.body_centre`, above the low centre of mass the
-    // ghost's transform follows).
-    let o = spec.body_centre;
-    world.entity_mut(id).with_children(|p| {
-        p.spawn((Mesh3d(body), MeshMaterial3d(mat.clone()), Transform::from_translation(o + Vec3::new(0.0, -0.05, 0.0)), bevy::light::NotShadowCaster));
-        p.spawn((Mesh3d(cabin), MeshMaterial3d(mat), Transform::from_translation(o + Vec3::new(0.0, 0.4, 0.25)), bevy::light::NotShadowCaster));
-    });
+    // The player's car model at its far level of detail (~2k triangles), placed like the
+    // driven car's (`art::car::model_offset`), all in the ghost material.
+    let Some(assets) = world.get_resource::<AssetServer>() else { return };
+    let scene = assets.load(GltfAssetLabel::Scene(0).from_asset(crate::art::car::MODEL));
+    let tf = Transform::from_translation(crate::art::car::model_offset(&spec));
+    world.spawn((Name::new("ghost model"), GhostModel(mat), WorldAssetRoot(scene), tf, Visibility::default(), ChildOf(id)));
+}
+
+/// Once a ghost's model is in: keeps its far level of detail (and the parts drawn at every
+/// distance) in the ghost material, drops the rest.
+fn dress_ghosts(
+    mut commands: Commands,
+    models: Query<(Entity, &GhostModel)>,
+    children: Query<&Children>,
+    meshes: Query<Option<&bevy::gltf::GltfMeshName>, With<Mesh3d>>,
+) {
+    for (e, look) in &models {
+        let mut found = false;
+        for d in children.iter_descendants(e) {
+            let Ok(name) = meshes.get(d) else { continue };
+            found = true;
+            match name.and_then(|n| crate::art::car::lod_of(n)) {
+                Some(2) | None if name.is_some() => {
+                    commands.entity(d).insert((MeshMaterial3d(look.0.clone()), bevy::light::NotShadowCaster));
+                }
+                _ => {
+                    commands.entity(d).despawn();
+                }
+            }
+        }
+        if found {
+            commands.entity(e).remove::<GhostModel>();
+        }
+    }
 }
 
 /// Keeps the ghost on the same fixed step as the driven car, drawn interpolated like it.

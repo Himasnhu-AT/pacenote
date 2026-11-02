@@ -21,12 +21,13 @@ def lin(c):
     return tuple(((x + 0.055) / 1.055) ** 2.4 if x > 0.04045 else x / 12.92 for x in c)
 
 
-def material(name, color, rough=0.5, metal=0.0, emit=None, alpha=None, image=None, normal=None, emit_image=None):
+def material(name, color, rough=0.5, metal=0.0, emit=None, alpha=None, image=None, normal=None, emit_image=None, coat=None, double=False):
     """A Principled material. `image` drives base colour, `normal` a tangent-space normal map,
-    `emit_image` the emission colour (with strength emit[3] if given, else 1)."""
+    `emit_image` the emission colour (with strength emit[3] if given, else 1), `coat` a clear
+    coat (weight, roughness; glTF KHR_materials_clearcoat). `double`: drawn from both sides."""
     m = bpy.data.materials.new(name)
     m.use_nodes = True
-    m.use_backface_culling = True
+    m.use_backface_culling = not double
     m.diffuse_color = (*color[:3], 1.0)
     nt = m.node_tree
     bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
@@ -36,6 +37,9 @@ def material(name, color, rough=0.5, metal=0.0, emit=None, alpha=None, image=Non
     if emit is not None:
         bsdf.inputs["Emission Color"].default_value = (*emit[:3], 1.0)
         bsdf.inputs["Emission Strength"].default_value = emit[3]
+    if coat is not None:
+        bsdf.inputs["Coat Weight"].default_value = coat[0]
+        bsdf.inputs["Coat Roughness"].default_value = coat[1]
     if alpha is not None:
         bsdf.inputs["Alpha"].default_value = alpha
         m.surface_render_method = "BLENDED"

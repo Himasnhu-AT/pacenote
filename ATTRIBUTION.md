@@ -34,8 +34,6 @@ made for Pacenote. Licences allowed: CC0, CC BY (credited), SIL OFL for fonts (d
 | Fir Tree 01 | Rob Tuytel, Rico Cilliers / Poly Haven | https://polyhaven.com/a/fir_tree_01 | CC0 1.0 Universal (Public Domain Dedication) | tree_cards_fir (textures/card_fir/*, textures/card_fir_snow/*) |
 | Pine Tree 01 | Rob Tuytel, Rico Cilliers / Poly Haven | https://polyhaven.com/a/pine_tree_01 | CC0 1.0 Universal (Public Domain Dedication) | tree_cards_pine (textures/card_pine/*) |
 | Island Tree 01 | Rob Tuytel, Rico Cilliers / Poly Haven | https://polyhaven.com/a/island_tree_01 | CC0 1.0 Universal (Public Domain Dedication) | tree_cards_olive (textures/card_olive/*) |
-| Mercedes-AMG GT3 Evo 2020 | vecarz (https://sketchfab.com/heynic) | https://sketchfab.com/3d-models/mercedes-amg-gt3-evo-2020-wwwvecarzcom-39e77243109f4e5cb7134b6f31c8f619 | CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) | player_car (models/rallycar.glb) |
-| First Person arms | DJMaesen (Sketchfab user bumstrum, https://sketchfab.com/bumstrum) | https://sketchfab.com/3d-models/first-person-arms-e3c42c05b22944e5839deb8e003f0987 | CC BY 4.0 (Sketchfab "CC Attribution", http://creativecommons.org/licenses/by/4.0/) | player_car (models/rallycar.glb) |
 | Kickstarter Dyno Session engine loops (Mercedes-Benz 190E 2.3-16V on a dyno) | Chippy569 | https://freesound.org/people/Chippy569/ | CC0 1.0 | engine_loops (sounds/car/engine_*.ogg) |
 | S36-15 Car skids; dirt.wav | craigsmith | https://freesound.org/people/craigsmith/sounds/675282/ | CC0 1.0 | tyre_slides (sounds/car/gravel_slide.ogg, sounds/car/tarmac_squeal.ogg) |
 | Chrysler LHS tire squeal 03; AE0090 Volvo 740 GLE handbrake turn 01 | audible-edge | https://freesound.org/people/audible-edge/sounds/71738/ | CC0 1.0 | tyre_slides (sounds/car/gravel_slide.ogg, sounds/car/tarmac_squeal.ogg) |
@@ -48,9 +46,8 @@ made for Pacenote. Licences allowed: CC0, CC BY (credited), SIL OFL for fonts (d
 
 ## Must be credited in game (CC BY)
 
-- Mercedes-AMG GT3 Evo 2020 by vecarz (https://sketchfab.com/heynic) (CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/))
-- First Person arms by DJMaesen (Sketchfab user bumstrum, https://sketchfab.com/bumstrum) (CC BY 4.0 (Sketchfab "CC Attribution", http://creativecommons.org/licenses/by/4.0/))
+- none
 
 ## Flags
 
-- **player_car**: BLOCKER for release: depicts a real car make with a sponsor livery (trademarks). Being replaced.
+- **player_car**: The Talus rally hatch: an original design, no third-party content, no marks. The driver's arms are drawn in code (src/art/hands.rs).
