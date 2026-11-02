@@ -75,6 +75,10 @@ pub fn pbr(world: &mut World, set: &str, f: impl FnOnce(&mut StandardMaterial)) 
     world.resource_mut::<Assets<StandardMaterial>>().add(mat)
 }
 
+/// The streamed dressing volume (rocks, bushes, ground cover).
+#[derive(Component)]
+pub struct DressingVolume;
+
 /// Is the stage wet?
 pub fn wet(def: &StageDef) -> bool {
     def.weather == Weather::Rain
@@ -105,11 +109,17 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     let area = Area::new(Vec2::splat(-half), Vec2::splat(half));
     // Rocks, bushes, ground cover: evaluated and kept only near the camera (the engine drops far
     // cells). Its own "trunks" points are ignored by the trees.
-    let (graph, inputs) = crate::world::dressing(s);
-    world.spawn((PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area, cell: 64.0 }, engine::pcg::PcgStreaming::radius(DRESSING_REACH)));
+    let (mut graph, inputs) = crate::world::dressing(s);
+    // The trees come from their own volume: without its trunk points here, a tree picked in
+    // the editor's Foliage tool belongs to one volume only.
+    graph.nodes.retain(|n| n.id != "trunks");
+    let edits = s.open.as_ref().map(|o| ((*o.trees).clone(), (*o.dressing).clone())).unwrap_or_default();
+    let v = world.spawn((PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area, cell: 64.0 }, engine::pcg::PcgStreaming::radius(DRESSING_REACH), DressingVolume, edits.1)).id();
+    crate::open::level::adopt_volume(world, v);
     // Trees: every cell (far impostors reach the fog), from the tree part of the same graph.
     let (graph, inputs) = crate::world::tree_graph(s);
-    world.spawn((PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area, cell: 64.0 }, trees::TreeVolume));
+    let v = world.spawn((PcgVolume { graph: PcgGraphRef::Inline(Arc::new(graph)), inputs: Arc::new(inputs), area, cell: 64.0 }, trees::TreeVolume, edits.0)).id();
+    crate::open::level::adopt_volume(world, v);
     spray::setup(world, &s.def);
 }
 

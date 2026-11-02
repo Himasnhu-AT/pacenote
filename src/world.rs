@@ -281,7 +281,8 @@ fn generate_open(def: &StageDef) -> StageWorld {
     // Every trunk and boulder is solid (the car can leave the roads). The tiles a road passes
     // through (and their neighbours) are built now, on all cores; the rest around the car as
     // it drives (`open::forest`).
-    let forest = crate::open::forest::ForestSolids::new(graph, inputs);
+    let o = world.open.as_ref().unwrap();
+    let forest = crate::open::forest::ForestSolids::with_overrides(graph, inputs, &o.trees, &o.dressing);
     let mut tiles: Vec<(i32, i32)> = net
         .roads
         .iter()

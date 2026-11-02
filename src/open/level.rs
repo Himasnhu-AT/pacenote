@@ -95,7 +95,13 @@ pub struct LevelTypesPlugin;
 
 impl Plugin for LevelTypesPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<RoadSpline>().register_type::<WorldDoc>().register_type::<Foliage>().add_systems(PreStartup, pick_source);
+        app.register_type::<RoadSpline>()
+            .register_type::<WorldDoc>()
+            .register_type::<Foliage>()
+            .add_systems(PreStartup, pick_source)
+            .add_systems(Update, adopt_volumes);
+        #[cfg(feature = "dev")]
+        app.add_systems(PostUpdate, hide_game_ui.run_if(resource_exists::<engine::editor::EditorMode>));
     }
 }
 
@@ -278,6 +284,70 @@ pub fn from_level(world: &mut World) -> Result<WorldData, String> {
     Ok(data)
 }
 
+/// Moves the generated PCG volume `v` (the trees or the dressing) onto the level's [`Foliage`]
+/// entity of its kind, if the level has one, so the editor's Foliage tool edits the level's
+/// `PcgOverrides` (the level entity's own overrides replace the copy `v` carries).
+pub fn adopt_volume(world: &mut World, v: Entity) {
+    use crate::art::{DressingVolume, trees::TreeVolume};
+    use engine::pcg::{PcgStreaming, PcgVolume};
+    let Ok(e) = world.get_entity(v) else { return };
+    if e.contains::<LevelEntity>() || !e.contains::<PcgVolume>() {
+        return;
+    }
+    let kind = if e.contains::<TreeVolume>() {
+        Foliage::Trees
+    } else if e.contains::<DressingVolume>() {
+        Foliage::Dressing
+    } else {
+        return;
+    };
+    let Some(target) = world.query_filtered::<(Entity, &Foliage), With<LevelEntity>>().iter(world).find(|(_, f)| **f == kind).map(|(t, _)| t) else { return };
+    let mut e = world.entity_mut(v);
+    let volume = e.take::<PcgVolume>();
+    let streaming = e.take::<PcgStreaming>();
+    e.despawn();
+    let mut t = world.entity_mut(target);
+    if let Some(volume) = volume {
+        t.insert(volume);
+    }
+    if let Some(s) = streaming {
+        t.insert(s);
+    }
+    match kind {
+        Foliage::Trees => t.insert(TreeVolume),
+        Foliage::Dressing => t.insert(DressingVolume),
+    };
+    if !t.contains::<PcgOverrides>() {
+        t.insert(PcgOverrides::default());
+    }
+    info!("level: the {kind:?} volume is on the level's foliage entity");
+}
+
+/// In the editor (`--editor`) the game's own screen UI (HUD, plates, countdown) stays hidden:
+/// the editor draws with egui, every Bevy UI root is the game's.
+#[cfg(feature = "dev")]
+fn hide_game_ui(mut roots: Query<&mut Visibility, (With<bevy::ui::Node>, Without<ChildOf>)>) {
+    for mut v in &mut roots {
+        if *v != Visibility::Hidden {
+            *v = Visibility::Hidden;
+        }
+    }
+}
+
+/// A level loaded after the stage was built (`--editor --level`, a hot reload): its foliage
+/// entities take over the generated volumes.
+fn adopt_volumes(world: &mut World) {
+    use engine::pcg::PcgVolume;
+    let waiting = world.query_filtered::<(), (With<Foliage>, With<LevelEntity>, Without<PcgVolume>)>().iter(world).next().is_some();
+    if !waiting {
+        return;
+    }
+    let generated: Vec<Entity> = world.query_filtered::<Entity, (With<PcgVolume>, Without<LevelEntity>)>().iter(world).collect();
+    for v in generated {
+        adopt_volume(world, v);
+    }
+}
+
 /// The terrain folder of the level at `level` (`WorldDoc::terrain` next to it).
 pub fn terrain_dir(level: &Path, terrain: &str) -> PathBuf {
     level.parent().unwrap_or(Path::new(".")).join(terrain)
@@ -307,6 +377,9 @@ pub struct Loaded {
     pub heights: engine::world::Heightfield,
     /// Where its terrain files are (sculpts are saved back there).
     pub terrain: PathBuf,
+    /// Hand edits of the trees and of the dressing.
+    pub trees: PcgOverrides,
+    pub dressing: PcgOverrides,
 }
 
 /// Reads the open world from the level at `path`: world data ([`from_level`]) and terrain
@@ -330,7 +403,9 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         dir = terrain_dir(&source_default(), &name);
     }
     let heights = TerrainData::load(&dir).and_then(|t| t.to_heightfield()).map_err(|e| format!("terrain {}: {e:?}", dir.display()))?;
-    Ok(Loaded { data, heights, terrain: dir })
+    let mut overrides = |kind: Foliage| world.query::<(&Foliage, &PcgOverrides)>().iter(world).find(|(f, _)| **f == kind).map(|(_, o)| o.clone()).unwrap_or_default();
+    let (trees, dressing) = (overrides(Foliage::Trees), overrides(Foliage::Dressing));
+    Ok(Loaded { data, heights, terrain: dir, trees, dressing })
 }
 
 fn source_default() -> PathBuf {

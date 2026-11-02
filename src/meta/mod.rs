@@ -462,8 +462,13 @@ pub fn teardown(world: &mut World) {
         roots.extend(q.iter(world));
     }
     for e in roots {
-        if let Ok(em) = world.get_entity_mut(e) {
-            em.despawn();
+        if let Ok(mut em) = world.get_entity_mut(e) {
+            // A level's foliage entity stays (the level owns it); only its volume goes.
+            if em.contains::<engine::level::LevelEntity>() {
+                em.remove::<(engine::pcg::PcgVolume, engine::pcg::PcgStreaming, crate::art::trees::TreeVolume, crate::art::DressingVolume)>();
+            } else {
+                em.despawn();
+            }
         }
     }
     world.remove_resource::<StageWorld>();

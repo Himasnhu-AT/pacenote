@@ -29,13 +29,22 @@ type Tile = HashMap<(i32, i32), Vec<Obstacle>>;
 pub struct ForestSolids {
     graph: Graph,
     inputs: Inputs,
+    /// Hand edits (the level's tree and dressing `PcgOverrides`), as the volumes apply them.
+    trees: Option<engine::pcg::OverrideIndex>,
+    dressing: Option<engine::pcg::OverrideIndex>,
     tiles: RwLock<HashMap<(i32, i32), Arc<Tile>>>,
     pending: Mutex<HashSet<(i32, i32)>>,
 }
 
 impl ForestSolids {
     pub fn new(graph: Graph, inputs: Inputs) -> ForestSolids {
-        ForestSolids { graph, inputs, tiles: RwLock::default(), pending: Mutex::default() }
+        ForestSolids::with_overrides(graph, inputs, &Default::default(), &Default::default())
+    }
+
+    /// With the hand edits of the trees (`trunks`) and the dressing (`boulders`).
+    pub fn with_overrides(graph: Graph, inputs: Inputs, trees: &engine::pcg::PcgOverrides, dressing: &engine::pcg::PcgOverrides) -> ForestSolids {
+        let ix = |o: &engine::pcg::PcgOverrides| (!o.is_empty()).then(|| o.index(TILE));
+        ForestSolids { graph, inputs, trees: ix(trees), dressing: ix(dressing), tiles: RwLock::default(), pending: Mutex::default() }
     }
 
     pub fn tile_of(p: Vec2) -> (i32, i32) {
@@ -55,8 +64,18 @@ impl ForestSolids {
         }
         let a = Area::new(Vec2::new(t.0 as f32, t.1 as f32) * TILE, Vec2::new(t.0 as f32 + 1.0, t.1 as f32 + 1.0) * TILE);
         let Ok(out) = pcg_core::evaluate(&self.graph, &self.inputs, Some(a)) else { return tile };
-        for (port, radius) in [("trunks", 0.32f32), ("boulders", 0.85)] {
+        for (port, radius, edits) in [("trunks", 0.32f32, &self.trees), ("boulders", 0.85, &self.dressing)] {
             let Some(p) = out.emits.get(port) else { continue };
+            let edited;
+            let p = match edits {
+                Some(ix) => {
+                    let mut q = p.clone();
+                    ix.apply_points(port, a, &mut q);
+                    edited = q;
+                    &edited
+                }
+                None => p,
+            };
             for k in 0..p.len() {
                 let c = Vec2::new(p.pos[k].x, p.pos[k].z);
                 // Only this tile's own points (a neighbour finds the rest).
@@ -268,6 +287,33 @@ fn prefetch_around_car(stage: Res<crate::world::StageWorld>, cars: Query<&crate:
 mod tests {
     use super::*;
     use crate::vehicle::Ground;
+
+    /// A no-tree area painted in the level (the trees' `PcgOverrides`) clears the trunks there
+    /// for the car too; the boulders (dressing) stay.
+    #[test]
+    fn a_cleared_area_has_no_trunks() {
+        use engine::pcg::{OverrideArea, PcgOverrides};
+        let w = crate::world::generate(&super::super::def());
+        let (graph, inputs) = crate::world::dressing(&w);
+        let plain = ForestSolids::new(graph.clone(), inputs.clone());
+        // A tile away from the roads with trunks in it.
+        let net = &w.open.as_ref().unwrap().net;
+        let t = (-15..15)
+            .flat_map(|z| (-15..15).map(move |x| (x, z)))
+            .find(|&(x, z)| net.nearest(Vec2::new(x as f32 + 0.5, z as f32 + 0.5) * TILE, 100.0).is_none() && plain.build((x, z)).values().flatten().any(|o| o.radius < 0.6))
+            .expect("a tile of forest");
+        let c = Vec2::new(t.0 as f32 + 0.5, t.1 as f32 + 0.5) * TILE;
+        let square = vec![c + Vec2::new(-20.0, -20.0), c + Vec2::new(20.0, -20.0), c + Vec2::new(20.0, 20.0), c + Vec2::new(-20.0, 20.0)];
+        let trees = PcgOverrides { areas: vec![OverrideArea { polygon: square, density: 0.0, nodes: None }], ..default() };
+        let edited = ForestSolids::with_overrides(graph, inputs, &trees, &PcgOverrides::default());
+        let inside = |tile: &Tile, trunk: bool| tile.values().flatten().filter(|o| (o.pos - c).abs().max_element() < 19.0 && (o.radius < 0.6) == trunk).count();
+        let (before, after) = (plain.build(t), edited.build(t));
+        eprintln!("trunks in the square: {} -> {}; boulders {} -> {}", inside(&before, true), inside(&after, true), inside(&before, false), inside(&after, false));
+        assert!(inside(&before, true) > 0, "no trunks to clear at {c}");
+        assert_eq!(inside(&after, true), 0);
+        assert_eq!(inside(&after, false), inside(&before, false));
+        assert!(after.values().flatten().count() > 0, "the rest of the tile keeps its trees");
+    }
 
     /// Trees well away from any road are solid too, and a tile builds the same twice.
     #[test]
