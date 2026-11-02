@@ -204,7 +204,7 @@ fn spawn_camera(mut commands: Commands, screen: Res<GuideScreen>, tablet: Option
     let layer = layers(*screen);
     match *screen {
         GuideScreen::Map => {
-            commands.spawn((Name::new("guide map camera"), GuideView, MapCamera, Camera2d, Camera { clear_color: ClearColorConfig::Custom(BG), ..default() }, projection, IsDefaultUiCamera));
+            commands.spawn((Name::new("guide map camera"), GuideView, MapCamera, Camera2d, Camera { clear_color: ClearColorConfig::Custom(BG), ..default() }, projection, IsDefaultUiCamera, Msaa::Off));
         }
         GuideScreen::InCar => {
             // Drawn before the 3D view, which shows the image on the tablet the same frame.
@@ -215,6 +215,9 @@ fn spawn_camera(mut commands: Commands, screen: Res<GuideScreen>, tablet: Option
                 MapCamera,
                 Camera2d,
                 Camera { order: -1, clear_color: ClearColorConfig::Custom(BG), ..default() },
+                // Single-sampled like every engine camera (mixed MSAA on one target fails GPU
+                // validation since Bevy 0.20).
+                Msaa::Off,
                 RenderTarget::from(t.0.clone()),
                 projection,
                 layer.clone(),
