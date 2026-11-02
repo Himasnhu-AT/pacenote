@@ -48,6 +48,9 @@ pub struct Prefs {
     /// Driving assists (applied to the car before a run starts).
     pub traction_control: bool,
     pub abs: bool,
+    /// A wreck repairs the car and puts it back on the road (+10 s on a timed route) instead
+    /// of retiring the run.
+    pub repair_on_wreck: bool,
     /// The guide's view: 0 in the car (tablet), 1 the map screen.
     pub guide_view: u32,
 }
@@ -72,6 +75,7 @@ impl Default for Prefs {
             stick_deadzone: 0.05,
             traction_control: true,
             abs: true,
+            repair_on_wreck: true,
             guide_view: 0,
         }
     }
@@ -109,7 +113,7 @@ impl Plugin for PrefsPlugin {
             .settings_panel("Co-driver", codriver_preview)
             .settings_panel("Voice chat", voice_panel)
             .add_systems(Startup, layout)
-            .add_systems(Update, (sync_codriver, sync_steering, apply_assists, refresh_previews));
+            .add_systems(Update, (sync_codriver, sync_steering, sync_wreck, apply_assists, refresh_previews));
         register(app);
     }
 }
@@ -189,6 +193,14 @@ fn register(app: &mut App) {
         .register_setting(toggle("hud_revs", "HUD", "Rev bar", "Engine revs, lighting up to the red line.", |w| b(p(w).hud_revs), |w, v| pm(w).hud_revs = v > 0.5))
         .register_setting(toggle("hud_clock", "HUD", "Stage clock", "Stage time and penalties, bottom left.", |w| b(p(w).hud_clock), |w, v| pm(w).hud_clock = v > 0.5))
         .register_setting(toggle("hud_progress", "HUD", "Stage progress", "Distance done and to go, under the clock.", |w| b(p(w).hud_progress), |w, v| pm(w).hud_progress = v > 0.5))
+        .register_setting(toggle(
+            "repair_on_wreck",
+            "Driving",
+            "Repair after a wreck",
+            "A wreck puts the car back on the road, repaired (+10 s in an event). Off: a wreck ends the run.",
+            |w| b(p(w).repair_on_wreck),
+            |w, v| pm(w).repair_on_wreck = v > 0.5,
+        ))
         .register_setting(FieldDef {
             key: "steer_speed",
             tab: "Driving",
@@ -242,6 +254,7 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("steer_speed", "Driving", None, None),
     ("traction_control", "Driving", None, None),
     ("abs", "Driving", None, None),
+    ("repair_on_wreck", "Driving", None, None),
     ("camera_view", "Driving", None, None),
     ("fov_deg", "Driving", Some("Field of view"), Some("Wider shows more of the road; narrower makes the cockpit feel faster.")),
     ("camera_shake", "Driving", Some("Camera shake"), Some("How much bumps, jumps and landings move the cockpit and bonnet views.")),
@@ -353,6 +366,13 @@ fn sync_codriver(cd: Option<ResMut<CoDriver>>, mut prefs: ResMut<Prefs>, mut las
 }
 
 /// Prefs → the steering input shaping (input only: ghosts and boards don't change).
+fn sync_wreck(prefs: Res<Prefs>, rule: Option<ResMut<crate::drive::WreckRule>>) {
+    let Some(mut rule) = rule else { return };
+    if rule.repair != prefs.repair_on_wreck {
+        rule.repair = prefs.repair_on_wreck;
+    }
+}
+
 fn sync_steering(prefs: Res<Prefs>, steer: Option<ResMut<crate::drive::SteerSettings>>) {
     let Some(mut steer) = steer else { return };
     let want = crate::drive::SteerSettings { keyboard_speed: prefs.steer_speed, stick_linearity: prefs.stick_linearity, stick_deadzone: prefs.stick_deadzone };

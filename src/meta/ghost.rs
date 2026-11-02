@@ -44,6 +44,10 @@ pub struct Ghost {
     pub inputs: Vec<[u32; 5]>,
     /// Recoveries: `[after this many steps, x, y, z, heading (f32 bits)]`.
     pub recovers: Vec<[u32; 5]>,
+    /// Repairs after a wreck (`vehicle::repair`), after this many steps (applied after a
+    /// recovery at the same step). Older ghosts have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repairs: Vec<u32>,
 }
 
 impl Ghost {
@@ -104,6 +108,7 @@ pub struct Recorder {
     pub steps: u32,
     pub inputs: Vec<[u32; 5]>,
     pub recovers: Vec<[u32; 5]>,
+    pub repairs: Vec<u32>,
 }
 
 impl Recorder {
@@ -127,6 +132,12 @@ impl Recorder {
         }
         self.recovers.push([self.steps, pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits(), heading.to_bits()]);
     }
+    /// `vehicle::repair(car)` was applied after the steps so far (after any recovery then).
+    pub fn repair(&mut self, car: Entity) {
+        if self.car == Some(car) {
+            self.repairs.push(self.steps);
+        }
+    }
     pub fn reset(&mut self) {
         *self = Recorder::default();
     }
@@ -145,6 +156,7 @@ impl Recorder {
             hz,
             inputs: self.inputs.clone(),
             recovers: self.recovers.clone(),
+            repairs: self.repairs.clone(),
         }
     }
 }
@@ -158,12 +170,13 @@ pub struct Replay {
     run: usize,
     in_run: u32,
     next_recover: usize,
+    next_repair: usize,
 }
 
 impl Replay {
     /// Starts a replay of `g` from `start` (the car on the start line).
     pub fn new(g: &Ghost, start: Car) -> Replay {
-        let mut r = Replay { car: start, step: 0, run: 0, in_run: 0, next_recover: 0 };
+        let mut r = Replay { car: start, step: 0, run: 0, in_run: 0, next_recover: 0, next_repair: 0 };
         r.apply_recovers(g);
         r
     }
@@ -194,6 +207,10 @@ impl Replay {
             let pos = Vec3::new(f32::from_bits(r[1]), f32::from_bits(r[2]), f32::from_bits(r[3]));
             vehicle::recover(&mut self.car, pos, f32::from_bits(r[4]));
             self.next_recover += 1;
+        }
+        while g.repairs.get(self.next_repair).is_some_and(|&at| at <= self.step) {
+            vehicle::repair(&mut self.car);
+            self.next_repair += 1;
         }
     }
 }
@@ -251,6 +268,41 @@ mod tests {
         assert_eq!(back, ghost);
         let replayed = replay(&back, start, &spec, &g, dt);
         assert_eq!(replayed, car, "replay must end in exactly the recorded state");
+    }
+
+    #[test]
+    fn a_repair_after_a_wreck_replays_too() {
+        let spec = Spec::default();
+        let g = Flat(0.0, Surface::Gravel);
+        let dt = 1.0 / 60.0;
+        let start = Car::new(Vec3::new(0.0, 0.9, 0.0), 0.4);
+        let mut car = start.clone();
+        let mut rec = Recorder::default();
+        let e = Entity::from_raw_u32(9).unwrap();
+        for i in 0..600 {
+            let input = input_at(i);
+            rec.input(e, input);
+            vehicle::step(&mut car, &spec, input, &g, dt);
+            if i == 300 {
+                // As drive::simulate does on a wreck: recover, then repair.
+                car.damage.engine = 1.0;
+                car.damage.detached = 0b101;
+                let (p, h) = (car.pos, 0.2);
+                vehicle::recover(&mut car, p, h);
+                vehicle::repair(&mut car);
+                rec.recover(e, p, h);
+                rec.repair(e);
+                assert_eq!((car.damage.engine, car.damage.detached), (0.0, 0), "repaired");
+            }
+        }
+        let ghost = rec.ghost(1, "aa", &sim_hash(&spec, 60), "A", "B", 10.0, 0, "0.1.0", 60);
+        assert_eq!(ghost.repairs, vec![301]);
+        let back: Ghost = serde_json::from_str(&serde_json::to_string(&ghost).unwrap()).unwrap();
+        assert_eq!(replay(&back, start, &spec, &g, dt), car, "the replay repairs at the same step");
+        // A ghost from before repairs existed (no field) still loads.
+        let old = serde_json::to_string(&Ghost { repairs: Vec::new(), ..ghost }).unwrap();
+        assert!(!old.contains("repairs"));
+        assert!(serde_json::from_str::<Ghost>(&old).is_ok());
     }
 
     #[test]

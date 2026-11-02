@@ -1036,6 +1036,14 @@ pub fn recover(car: &mut Car, pos: Vec3, heading: f32) {
     car.broken = broken;
 }
 
+/// Puts the car right after a wreck (Settings > Driving > Repair after a wreck): no engine,
+/// steering or suspension damage and every body part back on. The hit count is kept (it only
+/// grows: the co-driver and telemetry watch it). Applied between steps like [`recover`], and
+/// recorded in ghosts so replays match.
+pub fn repair(car: &mut Car) {
+    car.damage = Damage { hits: car.damage.hits, ..Damage::default() };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

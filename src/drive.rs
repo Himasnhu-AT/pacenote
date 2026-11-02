@@ -69,6 +69,7 @@ impl Plugin for DrivePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CarSpec>()
             .init_resource::<SteerSettings>()
+            .init_resource::<WreckRule>()
             .init_resource::<RecoverPress>()
             .init_resource::<StageRun>()
             .init_resource::<CameraView>()
@@ -142,8 +143,10 @@ fn simulate(
     settings: Option<Res<SteerSettings>>,
     mut recover: Option<ResMut<RecoverPress>>,
     auto: Option<Res<AutoInput>>,
+    wreck: Option<Res<WreckRule>>,
 ) {
     let settings = settings.map(|s| *s).unwrap_or_default();
+    let wreck = wreck.map(|w| *w).unwrap_or_default();
     let dt = time.delta_secs();
     // Nothing moves behind the loading screen (the ghost recording starts with the countdown).
     if loading.is_some() {
@@ -188,8 +191,41 @@ fn simulate(
             continue;
         }
         if c.car.damage.wrecked() {
-            info!("retired: car wrecked at {:.0} m ({:?})", run.progress, c.car.damage);
-            run.retired = true;
+            if !wreck.repair {
+                info!("retired: car wrecked at {:.0} m ({:?})", run.progress, c.car.damage);
+                run.retired = true;
+                continue;
+            }
+            // Repair: back on the road (the route at the progress, else the nearest road, facing
+            // the way the car was going), damage cleared; +10 s on a timed route.
+            let p = Vec2::new(c.car.pos.x, c.car.pos.z);
+            let fwd = c.car.rot * Vec3::NEG_Z;
+            let (at, h) = if stage.free_roam() {
+                match stage.nearest_road(p, 400.0) {
+                    Some((road, rp)) => {
+                        let i = rp.i.min(road.len() - 1);
+                        let d = road.dir[i];
+                        let d = if d.dot(Vec2::new(fwd.x, fwd.z)) < 0.0 { -d } else { d };
+                        (road.pts[i], d.x.atan2(d.y))
+                    }
+                    None => (c.car.pos, fwd.x.atan2(-fwd.z)),
+                }
+            } else {
+                let i = stage.road.station(run.progress);
+                let d = stage.road.dir[i];
+                (stage.road.pts[i], d.x.atan2(d.y))
+            };
+            info!("wreck at {:.0} m: repaired and put back on the road", run.progress);
+            vehicle::recover(&mut c.car, at, h);
+            vehicle::repair(&mut c.car);
+            if let Some(g) = ghost.as_deref_mut() {
+                g.recover(e, at, h);
+                g.repair(e);
+            }
+            c.prev = (c.car.pos, c.car.rot);
+            if !stage.free_roam() {
+                run.penalty += REPAIR_PENALTY;
+            }
             continue;
         }
         run.time += dt;
@@ -319,6 +355,22 @@ impl CarLog {
         }
     }
 }
+
+/// What a wreck does (Settings > Driving > Repair after a wreck, `prefs`): repair the car and
+/// put it back on the road (+10 s on a timed route), or retire the run.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct WreckRule {
+    pub repair: bool,
+}
+
+impl Default for WreckRule {
+    fn default() -> Self {
+        WreckRule { repair: true }
+    }
+}
+
+/// Seconds added to a timed run when the car is repaired after a wreck.
+pub const REPAIR_PENALTY: f32 = 10.0;
 
 /// Player steering settings (the Settings page's Driving tab). Input shaping only: it runs
 /// before the input is recorded, so ghosts replay exactly whatever the setting was, and it
