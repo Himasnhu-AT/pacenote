@@ -328,3 +328,89 @@ fn render_scenes() {
     }
     println!("mean block {:.1} µs, worst {:.1} µs (budget {:.0} µs)", all_ns / all_n as f64 / 1e3, worst / 1e3, BLOCK as f64 / 0.048);
 }
+
+/// `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_previews -- --ignored
+/// --nocapture`: the engine alone on slow rpm sweeps (full load, no load, chase and cockpit),
+/// and co-driver lines over a driving engine. Writes WAVs (+ a CSV of rpm per 0.1 s for the
+/// sweeps) for listening and for loudness checks.
+#[test]
+#[ignore]
+fn render_previews() {
+    use super::car::CarParams;
+    use super::voice;
+    let dir = std::env::var("PACENOTE_AUDIO_OUT").unwrap_or_else(|_| "/tmp".into());
+    std::fs::create_dir_all(&dir).unwrap();
+    let params = |rpm: f32, throttle: f32, interior: f32| CarParams { active: true, rpm, idle_rpm: 950.0, redline: 7600.0, throttle, gear: 3, interior, ..CarParams::default() };
+    // Sweeps: 1000 → 7500 → 1000 rpm over 16 s (log rpm), parameters every 60 Hz frame.
+    for (name, throttle, interior) in [("sweep_on_chase", 1.0, 0.0), ("sweep_off_chase", 0.0, 0.0), ("sweep_on_cockpit", 1.0, 1.0)] {
+        let mut s = RallySynth::new(7);
+        let (mut audio, mut csv) = (Vec::new(), String::from("t,rpm\n"));
+        let mut frac = 0.0f64;
+        for i in 0..16 * 60 {
+            let t = i as f32 / 60.0;
+            let u = 1.0 - (t / 8.0 - 1.0).abs();
+            let rpm = 1000.0 * 7.5f32.powf(u);
+            s.apply(&Frame { car: params(rpm, throttle, interior), ..Frame::default() });
+            frac += 800.0;
+            let n = (frac / BLOCK as f64) as usize;
+            frac -= (n * BLOCK) as f64;
+            s.render_into(n * BLOCK, &mut audio);
+            if i % 6 == 0 {
+                csv.push_str(&format!("{t:.2},{rpm:.0}\n"));
+            }
+        }
+        write_wav(&format!("{dir}/{name}.wav"), &audio);
+        std::fs::write(format!("{dir}/{name}.csv"), csv).unwrap();
+        println!("{name}: {:.1} s", audio.len() as f32 / 96_000.0);
+    }
+    // Co-driver over the engine: the start, a run of notes, damage calls, a split, the finish.
+    let bank = voice::bank().unwrap();
+    let lines = [
+        "Ready. 150 left four long, into right three.",
+        "90 over crest, left two, careful.",
+        "60 right hairpin, narrows.",
+        "Ouch. The suspension took a knock.",
+        "200 six left, into five right over crest.",
+        "Split 1, 42 point 1 seconds.",
+        "Big hit! The engine is badly damaged, nurse it home.",
+        "100 to flying finish, flat out.",
+        "Stop! Stage time 1 minute 23 point 4.",
+    ];
+    let mut s = RallySynth::new(9);
+    let mut audio = Vec::new();
+    let (mut serial, mut next_at, mut idx) = (0u32, 0.8f32, 0usize);
+    let mut cur = voice::Utterance::default();
+    let mut frac = 0.0f64;
+    for i in 0..36 * 60 {
+        let t = i as f32 / 60.0;
+        let rpm = 4300.0 + 1500.0 * (t * 0.45).sin() + 600.0 * (t * 1.7).sin();
+        let throttle = if (t * 0.45).cos() > -0.2 { 1.0 } else { 0.1 };
+        if t >= next_at && idx < lines.len() {
+            let (mut u, unknown) = bank.plan(lines[idx], 1.0);
+            assert!(unknown.is_empty(), "{unknown:?}");
+            serial += 1;
+            u.serial = serial;
+            u.gain = 1.0;
+            next_at = t + bank.duration(&u) + 0.9;
+            println!("{t:5.2} s: {:?} ({:.2} s)", lines[idx], bank.duration(&u));
+            cur = u;
+            idx += 1;
+        }
+        s.apply(&Frame { car: params(rpm, throttle, 0.0), voice: cur, ..Frame::default() });
+        frac += 800.0;
+        let n = (frac / BLOCK as f64) as usize;
+        frac -= (n * BLOCK) as f64;
+        s.render_into(n * BLOCK, &mut audio);
+    }
+    write_wav(&format!("{dir}/codriver_over_engine.wav"), &audio);
+    // The voice alone (the same lines, no car) for checking the joins.
+    let mut s = RallySynth::new(9);
+    let mut audio = Vec::new();
+    for (k, l) in lines.iter().enumerate() {
+        let (mut u, _) = bank.plan(l, 1.0);
+        u.serial = k as u32 + 1;
+        s.apply(&Frame { voice: u, ..Frame::default() });
+        s.render_into(((bank.duration(&u) + 0.5) * 48_000.0) as usize, &mut audio);
+    }
+    write_wav(&format!("{dir}/codriver_voice_only.wav"), &audio);
+}

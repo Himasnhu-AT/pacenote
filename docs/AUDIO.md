@@ -1,7 +1,7 @@
 # Audio: car and stage (`src/audio/`)
 
 The car plays recordings (engine, tyres, impacts, scrapes, pops: `assets/sounds/car/`, all
-CC0); wind, stones, suspension thumps, rattles and the stage ambience are synthesised in
+CC0) and the co-driver speaks from a phrase bank (`assets/sounds/voice/`, public domain); wind, stones, suspension thumps, rattles and the stage ambience are synthesised in
 code. One plugin, `audio::RallyAudioPlugin`.
 
 ```text
@@ -44,8 +44,9 @@ Files: `samples.rs` (the recordings: loading, loop and one-shot players), `power
 inside/outside mix), `dsp.rs` (building blocks), `stream.rs` (bus gains and master dynamics),
 `scenes.rs` (offline renders, tests only).
 
-**Recordings** (`samples.rs`). 22 CC0 recordings from Freesound, cooked by
-`tools/audio/cook_car.py` into `assets/sounds/car/*.ogg` (mono, 48 kHz, Ogg Vorbis, 868 KB;
+**Recordings** (`samples.rs`). CC0 recordings from Freesound, cooked by
+`tools/audio/cook_car.py` into `assets/sounds/car/*.ogg` (63 files: 52 engine loops and 11
+others; mono, 48 kHz, Ogg Vorbis, ~1 MB;
 sources, authors and the parts used are in `assets_src/SOURCES.md`). At startup, when the
 output is a device or `--car-audio-wav`, a worker thread reads and decodes them
 (`samples::start_loading`, from the engine's `AssetsDir`, so dev runs and shipped builds both
@@ -59,20 +60,33 @@ tools/audio/cook_car.py --report`; needs ffmpeg and oggenc).
 
 **Engine** (`powertrain.rs`). A Mercedes-Benz 190E 2.3-16V (2.3 l 16-valve 4-cylinder)
 recorded on a dyno at steady rpm, with two mics at once: the engine bay (above the headlight:
-intake, valve train, block) and the exhaust. Five loops, measured from their firing frequency
-(rpm/30 Hz):
+intake, valve train, block) and the exhaust. The session (Chippy569's "Dyno Sessions: 190E",
+all CC0) has steady recordings at only three rpm per load (idle ~1000, ~2500, ~6300); its
+sweeps are 2-10 s transient pulls with each mic from a different take, so they aren't used.
+The game has 26 loops per mic, ~16 % apart:
 
-| Loop | rpm | Load |
-|---|---|---|
-| `idle` | 1006 | none (bottom of both sets) |
-| `off_lo`, `off_hi` | 2431, 6297 | none (neutral, free revving) |
-| `on_lo`, `on_hi` | 2556, 6208 | full |
+| Set | rpm (recorded in **bold**, the rest re-synthesised) |
+|---|---|
+| both | **1006** (idle) |
+| full load (`on_*`) | 1450, 1670, 1925, 2218, **2556**, 2963, 3434, 3980, 4613, 5347, **6208**, 7200 |
+| no load (`off_*`) | 1166, 1351, 1566, 1815, 2103, **2431**, 2849, 3339, 3913, 4586, 5374, **6297**, 7300 |
 
-- Every loop plays all the time at `rpm / its rpm`, so all of them sit on the car's rpm; a
-  loop's two mics share one play position (they were recorded together).
-- By rpm: an equal-power crossfade in log rpm between the two loops of a set that bracket the
-  car's rpm (the furthest a loop is pitched is ×1.55 up or ×0.65 down, mid-way between 2.5k
-  and 6.3k). Above 6.3k the top loop is pitched up (×1.21 at the 7600 redline).
+- The points between recordings are made at cook time by pitch-synchronous overlap-add
+  (PSOLA): each firing of the two recordings of that load that bracket the point (weighted in
+  log rpm) is cut out, centred on its pulse, with a Hann window two firing periods long (of the
+  shorter period), and laid down again at the new firing period; then the level is ridden flat
+  (120 ms). Unlike resampling, the pulse shapes, and so the intake and exhaust resonances, stay
+  where they were recorded. Derived loops are 1.3 s, recordings 1.5-2.6 s, all whole firings,
+  each starting on a firing's pulse.
+- One firing clock drives every loop (loop `i` plays firing `clock mod its firings`), so all
+  loops sit on the car's rpm and their pulses line up: loops added together morph the firing's
+  shape instead of beating. A loop is played at `rpm / its rpm`: the louder of the two heard
+  is never more than ±8 % off its rpm (between 1.5k and the redline), the quieter at most
+  ±16 %. Only loops with gain read samples (about four of the 26).
+- By rpm: a crossfade in log rpm between the two loops of a set that bracket the car's rpm,
+  with weights whose 1.5-norm is 1 (between equal gain, right for pulses in phase, and equal
+  power, right for noise: within ~2 dB either way). Below idle and above the top loop (7200 /
+  7300) the end loop is pitched (×1.06 at the 7600 redline).
 - By load: an equal-power crossfade between the full-load and no-load sets, on the smoothed
   throttle (30 ms up, 60 ms down). Loudness grows with rpm (idle about 10 dB under the top)
   and load (the overrun about 6 dB under full load at the same rpm).
@@ -139,8 +153,33 @@ compressor (above ≈ −7 dBFS, 3:1, 4 ms / 180 ms) and a 1 ms look-ahead peak 
 (ceiling ≈ −1 dBFS), then a soft clip as the last guard. Normal driving stays under the
 compressor; impacts are caught.
 
-**Co-driver.** While the co-driver's system voice speaks (`CoDriver::speaking`), the car
-ducks to 0.63 (≈ −4 dB). Voice chat ducks through the mixer snapshot as before.
+**Co-driver** (`voice.rs`, `codriver/speech.rs`). The co-driver speaks from a phrase bank, not
+a text-to-speech engine, so it sounds the same on macOS and Windows:
+- 130 clips in `assets/sounds/voice/` (mono 24 kHz Ogg Vorbis, ~1 MB; `bank.txt` lists what
+  each says): numbers 0-59 (times, splits; 2-6 double as the grades), distances 60-190 by 10
+  and 200-1000 by 50 ("one fifty", "two hundred"), the note words (left, right, hairpin, long,
+  over crest, narrows, careful, into, flying finish, flat out, ready, …), times (split, minute,
+  point, seconds, stop, stage time), damage ("Big hit!", "the engine", "is badly damaged",
+  "nurse it home", "it's pulling left", …) and recovery ("We're on the roof.", "Press R to get
+  back on the road.", …).
+- Rendered once by `tools/audio/cook_voice.py` with Piper (neural TTS, build time only) and the
+  `en_GB-cori-high` voice (public domain: trained from scratch on LibriVox recordings; see
+  `assets_src/SOURCES.md`). Each clip is trimmed (15 ms before the speech, 40 ms faded tail)
+  and levelled (speech RMS −17 dBFS, peaks ≤ −1.5 dBFS).
+- Main thread (`VoiceBank::plan`): the line's text → clip ids and pauses. Longest phrase
+  first ("over crest" before "over"); commas pause 110 ms, full stops 230 ms; a number the bank
+  lacks is read digit by digit; an unknown word is skipped (logged once at debug), never an
+  error. The pace setting (195/230/265 wpm) scales pauses and overlaps. The line's length is
+  known from the clips, so the queue moves on without asking the audio thread.
+- Audio thread (`VoicePlayer`, inside the rally stream): a new serial in the `Frame` starts a
+  line (cutting the last off with a 12 ms fade); each word starts while the last one's faded
+  tail plays (35 ms overlap: a short crossfade); mixed in the centre after the car's
+  compressor, before the soft clip. Gain: co-driver volume × the engine mixer's `voice` bus.
+- Ducking: while it talks the car (engine, tyres, wind, impacts) goes down 5 dB and the
+  ambience 3 dB (30 ms down, 250 ms back). Voice chat ducks through the mixer snapshot as before.
+- `--os-tts` (dev): the old system voice (`say`, `espeak`, PowerShell) instead; the car ducks
+  the same while it speaks.
+- Not loaded yet, or no audio output: lines are timed by word count and show as subtitles only.
 
 **Ambience** (`ambience.rs`, `Recipe::of`):
 
@@ -181,6 +220,9 @@ gain; tested).
   car sim and the synth together and writes `sim.wav` plus `sim.wav.csv` (frame, rpm,
   throttle).
 - `cargo test --lib report_levels -- --ignored --nocapture` prints the levels of each part.
+- `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_previews -- --ignored
+  --nocapture` writes rpm sweeps (full load and no load, chase; full load, cockpit) and
+  co-driver lines over a driving engine (and the voice alone).
 - `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_scenes -- --ignored
   --nocapture` renders twelve scripted scenes through the real car sim (`scenes.rs`):
   idle, full throttle through the gears, lift-off pops, a handbrake slide on gravel, a
@@ -202,11 +244,12 @@ Apple M-series, dev profile (game crate at opt-level 1):
 |---|---|
 | Car (recordings + synthesised parts) + bus + dynamics, per 256-frame block (5.3 ms of audio), scenes renderer | **~35 µs mean, ≤ 0.23 ms worst: 0.65 % of real time.** The all-synthesised car before 2 Nov: ~23 µs (0.43 %) |
 | Same with ambience on the main thread (`--car-audio-wav`, stage 3), synthesised car | `dsp_load` 0.64 % |
-| Recordings in memory | 22 sounds, ~95 s of mono 48 kHz f32: ~18 MB, decoded once on a worker thread |
+| Recordings in memory | car: 63 sounds, ~126 s of mono 48 kHz f32: ~24 MB (engine 79 s = 15 MB, was 7 MB); co-driver: 130 clips, 92 s at 24 kHz: 8.9 MB. ~33 MB in all (budget 60 MB on Low), decoded once on a worker thread |
+| Preview renders (`render_previews`) | rpm sweeps 1000-7500-1000 in 16 s: full load −20.9 LUFS, true peak −8.4 dBFS; no load −26.8 LUFS; cockpit −21.1 LUFS; largest step between 150 ms windows 2.4 dB (full load), 3.9 dB once (no load near 1700 rpm, noise-dominated); co-driver over the engine −16.3 LUFS, true peak −2.5 dBFS; no clipped samples, no clicks (5 ms high-band spikes over 6× their surround) |
 | Allocation | None per frame. `Frame` is `Copy` and exchanged with `try_lock` once per 256-frame block. Players and voice pools are fixed arrays inside the synth, which is boxed once at start; the recordings are read from a `&'static` bank |
 | Levels over the twelve scenes | RMS −20.6 to −23 dBFS (idle −36.5), peaks ≤ 0.73 (−2.7 dBFS), no clipped samples, DC < 0.0001, no dropouts (silencedetect), no clicks: no 20 ms window has a high-band spike over 12× its own level except at backfire pops |
 
-## Tests (`cargo test --lib audio`, 37 tests + 2 ignored reports)
+## Tests (`cargo test --lib audio`, 42 tests + 3 ignored renders/reports; `codriver` adds the bank coverage test)
 
 - DSP blocks:
   - noise, sine approximation, biquads, ring decay, envelopes and smoothing, wander;
@@ -231,7 +274,15 @@ Apple M-series, dev profile (game crate at opt-level 1):
   - the level holds through the crossfades (no step over 3 dB between 150 ms windows on a
     slow 1000–7400 rpm sweep, on and off load);
   - wind grows with speed.
-- Engine crossfade weights are equal power and never pitch a loop past its neighbour.
+- Engine crossfade weights are normalised, never pitch a loop past its neighbour, and keep the
+  louder loop within ±8.5 %; every engine loop loads, both mics the same length, and wraps
+  seamlessly.
+- Co-driver voice: plans longest phrases, pauses and skips unknown words; plays as long as
+  planned with silent pauses; a new line cuts the last off within 13 ms; the real bank loads;
+  the car ducks 5 dB under it and it is heard; the queue sends lines to the audio thread and
+  urgent lines cut in; **every line the co-driver can produce** (pace notes over six stages
+  with every option, the start, splits, times, all damage combinations, recovery) is covered
+  by the bank.
 - Recordings: every sound loads, is longer than 0.1 s and within ±1; a loop wraps smoothly;
   a one-shot plays once.
 - Ambience: every biome × weather × inside/outside is finite and quiet, recipes differ as
@@ -261,11 +312,15 @@ Apple M-series, dev profile (game crate at opt-level 1):
   against obstacles aren't heard: the sim only reports the body touching the ground.
 - The synth runs at a fixed 48 kHz; rodio resamples to the device rate.
 - The sound is tuned by numbers and spectrograms, not yet by ear on many speakers.
-- The engine has only three rpm points per load. Between 2.5k and 6.3k the two loops are
-  pitched up to ×1.55 / down to ×0.65, so mid-range timbre is a blend of a sped-up low loop
-  and a slowed-down high one. A recording with steady loops at ~4000 rpm (on and off load,
-  same car) would make the middle more natural. Partial throttle is a blend of the full-load
-  and no-load sets.
+- Only five of the 26 engine loops are recordings; the rest are PSOLA blends of the two
+  recordings around them, so the mid-range timbre (3-5k rpm) is an interpolation between
+  ~2.5k and ~6.2k, not a recording at that rpm. Steady recordings at 500 rpm steps (on and
+  off load, same car, two mics) would replace them one for one. Partial throttle is a blend
+  of the full-load and no-load sets. Granular playback (grains picked live from the nearest
+  loop) is the next step.
+- The co-driver is a synthetic voice reading single words: the joins are clean but the
+  intonation is flat (each clip is said on its own). Recording a human co-driver for the same
+  130 entries (`bank.txt`) would drop in without code changes.
 - The engine is a naturally aspirated 190E: there is no turbo sound. The dyno mics are the
   engine bay and the exhaust; the cockpit is built from them with filters (there is no
   recording from inside this car).
