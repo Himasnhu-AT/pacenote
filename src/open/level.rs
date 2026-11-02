@@ -256,7 +256,7 @@ pub fn spawn_level(world: &mut World, data: &WorldData, splines: &[(Spline, Road
     for e in placeable::spawn(world, data, net) {
         level(world, e);
     }
-    for (name, f) in [("trees", Foliage::Trees), ("dressing", Foliage::Dressing)] {
+    for (name, f) in [("Trees", Foliage::Trees), ("Dressing", Foliage::Dressing)] {
         let e = world.spawn((Name::new(name), f, PcgOverrides::default(), Transform::IDENTITY)).id();
         level(world, e);
     }

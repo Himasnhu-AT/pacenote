@@ -21767,7 +21767,7 @@
       4294967262: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
-          "bevy_ecs::name::Name": "trees",
+          "bevy_ecs::name::Name": "Trees",
           "bevy_transform::components::transform::Transform": (
             translation: (0.0, 0.0, 0.0),
             rotation: (0.0, 0.0, 0.0, 1.0),
@@ -21788,7 +21788,7 @@
       4294967261: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
-          "bevy_ecs::name::Name": "dressing",
+          "bevy_ecs::name::Name": "Dressing",
           "bevy_transform::components::transform::Transform": (
             translation: (0.0, 0.0, 0.0),
             rotation: (0.0, 0.0, 0.0, 1.0),
