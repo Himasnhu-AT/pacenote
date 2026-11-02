@@ -68,7 +68,7 @@ impl Plugin for Pacenote {
         #[cfg(feature = "dev")]
         app.add_plugins(autopilot::AutopilotPlugin);
         #[cfg(feature = "dev")]
-        app.add_systems(Update, keep_game_focused.run_if(resource_exists::<Messages<bevy::window::WindowFocused>>));
+        app.add_systems(Update, keep_game_focused);
         #[cfg(feature = "dev")]
         app.add_systems(Update, full_rate_while_measuring);
     }
@@ -116,17 +116,12 @@ mod tests {
 /// other window of ours gains focus, hand it straight back to the game window (the metrics
 /// window still scrolls under the mouse without focus). F4 still toggles it.
 #[cfg(feature = "dev")]
-fn keep_game_focused(
-    mut focus: MessageReader<bevy::window::WindowFocused>,
-    mut primary: Query<(Entity, &mut Window), With<bevy::window::PrimaryWindow>>,
-) {
-    let Ok((game, mut window)) = primary.single_mut() else {
-        focus.clear();
-        return;
-    };
-    if focus.read().last().is_some_and(|e| e.focused && e.window != game) {
-        // Bevy synced `focused = false` from the event; setting it back calls focus_window.
-        window.focused = true;
+fn keep_game_focused(mut primary: Query<&mut Window, With<bevy::window::PrimaryWindow>>, others: Query<&Window, Without<bevy::window::PrimaryWindow>>) {
+    // From state, not events: "metrics gained" and "game lost" can arrive in either order or
+    // frame, and Bevy only calls focus_window when `focused` goes false -> true.
+    let Ok(mut game) = primary.single_mut() else { return };
+    if !game.focused && others.iter().any(|w| w.focused) {
+        game.focused = true;
     }
 }
 
