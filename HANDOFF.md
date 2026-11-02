@@ -68,6 +68,11 @@ Steps: `{"sleep": 3}, {"cmd": "engine.start"}, {"cmd": "input.key", "params": {"
 "action": "down"}}, {"shot": "name"}, {"cmd": "perf.stats"}, {"cmd": "voice.status"}`. The game
 log is `<dir>/game.log`; grep it for `ERROR`.
 
+Metrics history (works with the game closed): every run's summary and per-second perf log are
+kept in the data dir. `python3 -I /Users/himanshu/codes/game/engine/scripts/metrics_report.py
+pacenote` writes `~/Library/Application Support/pacenote/metrics/report.html` (runs table,
+per-run charts and events) and opens it. In game, F4 shows the live metrics window.
+
 Driver + guide on one machine: start the driver's play.py in the background, wait ~4 s, then
 start the guide's:
 
