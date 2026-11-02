@@ -191,7 +191,7 @@ pub fn noise(p: Vec2, seed: u64) -> f32 {
     top + (bot - top) * s.y
 }
 
-fn fbm(p: Vec2, octaves: u32, seed: u64) -> f32 {
+pub(crate) fn fbm(p: Vec2, octaves: u32, seed: u64) -> f32 {
     let (mut sum, mut amp, mut freq, mut norm) = (0.0, 1.0, 1.0, 0.0);
     for o in 0..octaves {
         sum += noise(p * freq, seed ^ (o as u64).wrapping_mul(0x632B_E59B)) * amp;
@@ -253,6 +253,35 @@ pub struct RoadPos {
 }
 
 impl Road {
+    /// A road from its centreline (XZ, one point every [`STEP`] m), heights, widths and
+    /// surfaces (one per point): direction, curvature, banking and the lookup grid derived.
+    /// Used by the open world (`crate::open`) for every road in its network.
+    pub fn from_centreline(pts2: &[Vec2], y: &[f32], width: Vec<f32>, surface: Vec<Surface>) -> Road {
+        let n = pts2.len();
+        assert!(n >= 2 && y.len() == n && width.len() == n && surface.len() == n, "road arrays must match");
+        let pts: Vec<Vec3> = pts2.iter().zip(y).map(|(p, h)| Vec3::new(p.x, *h, p.y)).collect();
+        let dir: Vec<Vec2> = (0..n)
+            .map(|i| {
+                let (a, b) = (pts2[i.saturating_sub(1)], pts2[(i + 1).min(n - 1)]);
+                (b - a).normalize_or(Vec2::Y)
+            })
+            .collect();
+        let raw: Vec<f32> = (0..n)
+            .map(|i| {
+                if i == 0 || i == n - 1 {
+                    return 0.0;
+                }
+                let (a, b) = (pts2[i] - pts2[i - 1], pts2[i + 1] - pts2[i]);
+                let len = 0.5 * (a.length() + b.length());
+                if len < 1e-4 { 0.0 } else { libm::atan2f(a.perp_dot(b), a.dot(b)) / len }
+            })
+            .collect();
+        let curv = smooth(&raw, 3);
+        let bank: Vec<f32> = curv.iter().map(|k| (-k * 9.0).clamp(-0.07, 0.07)).collect();
+        let grid = SegGrid::build(&pts, 32.0);
+        Road { pts, dir, curv, width, bank, surface, grid }
+    }
+
     pub fn len(&self) -> usize {
         self.pts.len()
     }
@@ -592,7 +621,7 @@ fn angle_diff(a: f32, b: f32) -> f32 {
     d
 }
 
-fn smooth(v: &[f32], r: usize) -> Vec<f32> {
+pub(crate) fn smooth(v: &[f32], r: usize) -> Vec<f32> {
     let n = v.len();
     let mut pre = vec![0.0f64; n + 1];
     for i in 0..n {
@@ -614,10 +643,21 @@ fn smooth(v: &[f32], r: usize) -> Vec<f32> {
 /// [`CUT_GRADE`] (a bank), blending into the natural hills [`BLEND`] out.
 pub fn height(x: f32, z: f32, def: &StageDef, road: &Road) -> f32 {
     let base = base_height(x, z, def);
-    let Some(r) = road.nearest(Vec2::new(x, z), BLEND.1) else { return base };
-    let half = road.half_width(&r);
+    match road.nearest(Vec2::new(x, z), BLEND.1) {
+        Some(r) => shaped(base, road, &r),
+        None => base,
+    }
+}
+
+/// How far from a road (m) the ground is shaped by it ([`shaped`]); beyond it the land is
+/// its own.
+pub const SHAPE_REACH: f32 = BLEND.1;
+
+/// The ground `base` m high at `r` (a point beside `road`), shaped by the road: see [`height`].
+pub fn shaped(base: f32, road: &Road, r: &RoadPos) -> f32 {
+    let half = road.half_width(r);
     let d = r.lateral.abs();
-    let road_y = road.height_at(&r);
+    let road_y = road.height_at(r);
     let o = d - half - 0.6;
     if o <= 0.0 {
         return road_y;

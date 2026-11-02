@@ -12,6 +12,7 @@ pub mod drive;
 pub mod guide;
 pub mod hardware;
 pub mod hud;
+pub mod open;
 pub mod loading;
 pub mod meta;
 pub mod net_session;
