@@ -333,6 +333,7 @@ Measured on an Apple M5 Pro (24 GB) unless noted:
 | Old stage 1, High, before fixes | ~2.4 GB | 6.6 ms | 152k trees across the map, 913k far-card triangles |
 | Old stage 1, Low, after fixes | ~1.9 GB | ~3–6 ms | far cards halved, Retina render scale 70 % |
 | Open world, High (with buildings, traffic) | ~2.4 GB | ~6.4 ms | 40k entities, 37k meshes |
+| Open world, Low, 2 Nov evening (budget tour) | ~1.34 GB | 4.3 ms p95 | streamed dressing, tree LODs, original car; 4 of 5 Low budgets pass (`docs/ASSET_PIPELINE.md`) |
 
 Measures in place: first-launch quality from hardware (8 GB → Low; base Apple chip or 16 GB →
 Medium; else High), draw distance by quality, far tree cards only near roads, render-scale cap

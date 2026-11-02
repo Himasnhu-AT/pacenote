@@ -65,6 +65,13 @@ The reference machine for Low is an M1 8 GB; until one is available, results on 
 optimistic (brief §1). Run on an otherwise idle machine: other builds inflate load and frame
 times.
 
-Baseline (2 Nov 2026, M5 Pro, Low, machine busy with parallel builds): load 5.7 s (ok),
-footprint 2,314 MB (over), GPU p95 5.5 ms (ok), frame p95 28.9 ms (over), visible meshes 1,640
-(over). Trees (whole-map resident far cards) are the main memory and mesh cost; see brief §5.
+History (M5 Pro, Low, open world):
+
+| When | Load | Footprint | GPU p95 | Frame p95 | Visible meshes |
+|---|---|---|---|---|---|
+| 2 Nov, baseline (busy machine) | 5.7 s | 2,314 MB | 5.5 ms | 28.9 ms | 1,640 |
+| + tree LODs/impostors, junctions, original car (2.8 MB GLB) | 8.5 s* | 1,367 MB | 5.2 ms | — | 1,327 |
+| + dressing streamed at 600 m (engine PcgStreaming), engine texture cap and hi-DPI scale, frame p95 over the drive only (idle machine) | 4.6 s | 1,342 MB | 4.3 ms | 14.1 ms | 1,328 |
+
+\* machine busy. Remaining over budget: visible meshes (a pre-batching count; the budget is draw
+calls after batching, which needs an engine stat). Not yet measured on a base M1.
