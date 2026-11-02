@@ -68,9 +68,7 @@ impl Plugin for Pacenote {
         #[cfg(feature = "dev")]
         app.add_plugins(autopilot::AutopilotPlugin);
         #[cfg(feature = "dev")]
-        app.add_systems(Update, keep_game_focused);
-        #[cfg(feature = "dev")]
-        app.add_systems(Update, full_rate_while_measuring);
+        app.add_systems(Update, full_rate_unfocused);
     }
 }
 
@@ -111,29 +109,14 @@ mod tests {
     }
 }
 
-/// The engine's dev metrics window opens at start beside the game; on a laptop screen it lands
-/// on top and macOS gives it focus, and the unfocused game drops to 8 updates/s. Whenever any
-/// other window of ours gains focus, hand it straight back to the game window (the metrics
-/// window still scrolls under the mouse without focus). F4 still toggles it.
+/// Unfocused, the engine paces menus at 8 updates/s to save power. In dev builds the metrics
+/// viewer (its own process) is usually what has focus, and it would then show "Waiting (vsync /
+/// cap)" and a frozen-looking game: dev menus keep their focused rate.
 #[cfg(feature = "dev")]
-fn keep_game_focused(mut primary: Query<&mut Window, With<bevy::window::PrimaryWindow>>, others: Query<&Window, Without<bevy::window::PrimaryWindow>>) {
-    // From state, not events: "metrics gained" and "game lost" can arrive in either order or
-    // frame, and Bevy only calls focus_window when `focused` goes false -> true.
-    let Ok(mut game) = primary.single_mut() else { return };
-    if !game.focused && others.iter().any(|w| w.focused) {
-        game.focused = true;
-    }
-}
-
-/// Unfocused, the engine paces menus at 8 updates/s to save power, and the metrics window then
-/// shows "Waiting (vsync / cap)" and a frozen-looking game whenever you look at another app.
-/// While the metrics window is open (dev builds), menus keep their focused rate.
-#[cfg(feature = "dev")]
-fn full_rate_while_measuring(view: Option<Res<engine::devtools::MetricsView>>, pacing: Option<ResMut<engine::render_budget::FramePacing>>) {
-    let (Some(view), Some(mut pacing)) = (view, pacing) else { return };
-    let want = if view.open { pacing.menus.focused_mode } else { engine::render_budget::FramePacing::default().menus.unfocused_mode };
-    if pacing.menus.unfocused_mode != want {
-        pacing.menus.unfocused_mode = want;
+fn full_rate_unfocused(pacing: Option<ResMut<engine::render_budget::FramePacing>>) {
+    let Some(mut pacing) = pacing else { return };
+    if pacing.menus.unfocused_mode != pacing.menus.focused_mode {
+        pacing.menus.unfocused_mode = pacing.menus.focused_mode;
     }
 }
 
