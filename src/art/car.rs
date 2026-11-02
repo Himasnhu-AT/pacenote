@@ -207,7 +207,7 @@ fn rig(
     children: Query<&Children>,
     names: Query<(&Name, &Transform)>,
     meshes: Query<&MeshMaterial3d<StandardMaterial>>,
-    mats: Res<Assets<StandardMaterial>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     for m in &models {
@@ -251,8 +251,16 @@ fn rig(
         }
         // glTF textures come without mips (shimmer at distance): build them once, on the CPU.
         let mut done = std::collections::HashSet::new();
+        let mut glass_done = std::collections::HashSet::new();
         for e in parts {
             commands.entity(e).insert(Actor);
+            if let Ok(mm) = meshes.get(e)
+                && glass_done.insert(mm.0.id())
+                && let Some(mut mat) = mats.get_mut(&mm.0)
+                && is_glass(&mat)
+            {
+                tint_glass(&mut mat);
+            }
             if let Ok(mm) = meshes.get(e)
                 && let Some(mat) = mats.get(&mm.0)
             {
@@ -269,6 +277,22 @@ fn rig(
         }
         commands.entity(m).insert(CarRig { hub, knuckle, spin, rest, dials, pod, driver, chassis, parts: detached });
     }
+}
+
+/// The model's windows: blended and see-through (the importer gives glass a fixed alpha).
+fn is_glass(m: &StandardMaterial) -> bool {
+    matches!(m.alpha_mode, AlphaMode::Blend | AlphaMode::Premultiplied | AlphaMode::Add) && m.base_color.alpha() < 0.9
+}
+
+/// Clear, slightly smoked glass. The import's white at 45% read as frosted from the cockpit
+/// with Bevy 0.20 (the whole outside view washed out to white).
+fn tint_glass(m: &mut StandardMaterial) {
+    m.base_color = Color::srgba(0.06, 0.07, 0.08, 0.12);
+    m.perceptual_roughness = 0.05;
+    m.reflectance = 0.25;
+    m.metallic = 0.0;
+    m.specular_transmission = 0.0;
+    m.diffuse_transmission = 0.0;
 }
 
 /// Wheel hubs from the simulation: suspension height (hub), steering (front knuckle, else the
