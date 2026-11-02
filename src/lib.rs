@@ -63,6 +63,7 @@ impl Plugin for Pacenote {
             .add_plugins(codriver::CoDriverPlugin)
             .add_plugins(telemetry::TelemetryPlugin)
             .add_plugins(open::events::EventsPlugin)
+            .add_plugins(open::traffic::TrafficPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
         fullscreen_on_first_run(app);
         app.add_plugins(hardware::HardwarePlugin);

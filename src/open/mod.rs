@@ -46,6 +46,12 @@ pub const SPACING: f32 = 2.0;
 pub struct OpenWorld {
     pub net: Arc<RoadNet>,
     pub heights: Arc<Heightfield>,
+    /// Town and farm buildings, and their walls as solid cylinders for the car.
+    pub buildings: Arc<buildings::Layout>,
+    pub walls: Arc<buildings::ObstacleGrid>,
+    /// Where the traffic cars are (written by `traffic::TrafficPlugin` each step; the same
+    /// `Arc` as the `TrafficSolids` resource): solid for the car in free roam.
+    pub traffic: traffic::TrafficSolids,
 }
 
 impl OpenWorld {
@@ -55,7 +61,9 @@ impl OpenWorld {
         let n = (2.0 * roads::HALF / SPACING) as u32 + 1;
         let origin = Vec2::splat(-roads::HALF);
         let heights = Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z));
-        OpenWorld { net: Arc::new(net), heights: Arc::new(heights) }
+        let layout = buildings::layout(&net);
+        let walls = buildings::ObstacleGrid::new(&buildings::obstacles(&layout), 10.0);
+        OpenWorld { net: Arc::new(net), heights: Arc::new(heights), buildings: Arc::new(layout), walls: Arc::new(walls), traffic: traffic::TrafficSolids::default() }
     }
 
     /// Where the car starts and which way it faces.
@@ -74,8 +82,10 @@ impl Ground for OpenWorld {
     fn surface(&self, x: f32, z: f32) -> Surface {
         roads::surface(&self.net, x, z)
     }
-    fn obstacles(&self, _p: Vec2, _r: f32, out: &mut Vec<Obstacle>) {
+    fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
         out.clear();
+        self.walls.query(p, r, out);
+        self.traffic.obstacles(p, r, out);
     }
 }
 

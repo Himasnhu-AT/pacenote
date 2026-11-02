@@ -241,6 +241,13 @@ pub fn start(world: &mut World, id: u32) {
         s.road = e.route.clone();
         s.event = Some(EventRef { id: e.id, name: e.name.clone() });
     }
+    // Events run without traffic (clean racing; ghosts replay exactly).
+    world.remove_resource::<super::traffic::Traffic>();
+    if let Some(t) = world.get_resource::<super::traffic::TrafficSolids>()
+        && let Ok(mut v) = t.0.write()
+    {
+        v.clear();
+    }
     info!("event {} \"{}\": {:.1} km", e.id, e.name, e.route.length() / 1000.0);
     world.remove_resource::<crate::meta::StageNow>();
     crate::meta::restart_stage(world);
@@ -267,6 +274,10 @@ pub fn leave(world: &mut World) {
         world.entity_mut(g).despawn();
     }
     world.insert_resource(engine::flow::PauseAllowed(true));
+    // Traffic back.
+    if crate::art::visual(world) {
+        world.insert_resource(super::traffic::Traffic::new(&open.net, super::traffic::TrafficConfig::default()));
+    }
 }
 
 #[cfg(test)]

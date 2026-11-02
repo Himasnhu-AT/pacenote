@@ -159,6 +159,14 @@ impl Ground for StageWorld {
                 }
             }
         }
+        if let Some(o) = &self.open {
+            // Buildings always; traffic only in free roam (events run without it, so ghosts
+            // replay exactly).
+            o.walls.query(p, r, out);
+            if self.event.is_none() {
+                o.traffic.obstacles(p, r, out);
+            }
+        }
     }
 }
 
@@ -372,10 +380,14 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
             rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: libm::atan2f(d.x, d.y), y: mid.y, tag: "road".into() });
         }
     }
-    // The open world's town: no forest, rocks or bushes (buildings and lawns go there).
+    // The open world's town: no forest, rocks or bushes (buildings and lawns go there); none
+    // through the farm buildings outside it either.
     if let Some(o) = &w.open {
         let t = crate::open::roads::PLATEAU.0;
         rects.push(Rect { center: Vec2::ZERO, half: Vec2::splat(t), yaw: 0.0, y: o.net.town_y, tag: "road".into() });
+        for b in o.buildings.buildings.iter().filter(|b| b.centre.x.abs().max(b.centre.y.abs()) > t) {
+            rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(4.0), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
+        }
     }
     let hf = &w.heights;
     let inputs = Inputs::default()
@@ -475,6 +487,15 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
         error!("terrain: {e}");
     }
     crate::art::spawn_stage(world, s);
+    if let Some(o) = &s.open {
+        let hf = o.heights.clone();
+        crate::open::buildings::spawn(world, &o.buildings, &move |x, z| hf.height_at(x, z));
+        // Traffic shares its solids with the car's ground (the same Arc).
+        world.insert_resource(o.traffic.clone());
+        if crate::art::visual(world) {
+            world.insert_resource(crate::open::traffic::Traffic::new(&o.net, crate::open::traffic::TrafficConfig::default()));
+        }
+    }
     world.insert_resource(s.clone());
 }
 
