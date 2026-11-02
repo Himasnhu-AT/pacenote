@@ -16,8 +16,16 @@ pub fn view_distance(def: &StageDef) -> f32 {
     }
 }
 
-/// The look for a stage.
-pub fn stage_look(def: &StageDef) -> Look {
+/// The stage's view distance at graphics quality `q` (0 = Low … 3 = Ultra): Low and Medium
+/// draw less of the far forest (fog closes in to match). Never below 350 m, or the stage's own
+/// distance when that is shorter (fog stages).
+pub fn quality_view(base: f32, q: usize) -> f32 {
+    const SCALE: [f32; 4] = [0.45, 0.7, 1.0, 1.0];
+    (base * SCALE[q.min(3)]).max(base.min(350.0))
+}
+
+/// The look for a stage, fogged at `vis` metres (see [`view_distance`], [`quality_view`]).
+pub fn stage_look(def: &StageDef, vis: f32) -> Look {
     let (az, el, sun_col, lux) = match def.time {
         TimeOfDay::Morning => (105.0, 22.0, Rgb::new(1.0, 0.88, 0.74), 65_000.0),
         TimeOfDay::Noon => (170.0, 58.0, Rgb::new(1.0, 0.97, 0.93), 100_000.0),
@@ -45,7 +53,6 @@ pub fn stage_look(def: &StageDef) -> Look {
         look.fog.color = Rgb::new(0.62, 0.56, 0.55);
         look.ambient.color = Rgb::new(0.6, 0.66, 0.9);
     }
-    let vis = view_distance(def);
     // Exposure follows the light (sunny 16 rule, a bit brighter for low sun).
     look.exposure.ev100 = match def.time {
         TimeOfDay::Noon => 14.6,
@@ -99,7 +106,7 @@ mod tests {
     #[test]
     fn every_stage_has_a_look_with_fog_inside_view() {
         for def in crate::stage::stages() {
-            let l = stage_look(&def);
+            let l = stage_look(&def, view_distance(&def));
             assert!(l.fog.visibility <= view_distance(&def) + 1.0);
             assert!(l.sun.illuminance > 1000.0, "stage {}", def.id);
             assert!(l.exposure.ev100 > 9.0);

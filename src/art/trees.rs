@@ -427,6 +427,18 @@ pub struct TreeKit {
     species: HashMap<Species, SpeciesKit>,
     mix: &'static [(Species, f32)],
     view: f32,
+    /// The road every ~20 m (x, z): the camera never leaves it, so a forest cell further
+    /// than `view` from all of these is never seen and gets no far cards.
+    road: Vec<Vec2>,
+}
+
+impl TreeKit {
+    /// Can a camera on the road see trees around `p` (within `margin` of it)?
+    fn seen(&self, p: Vec3, margin: f32) -> bool {
+        let reach = (self.view + margin).powi(2);
+        let p = Vec2::new(p.x, p.z);
+        self.road.iter().any(|r| r.distance_squared(p) <= reach)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -510,7 +522,9 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32) {
         };
         species.insert(sp, SpeciesKit { variants, trunk_mat, crown_mat, far_mat });
     }
-    world.insert_resource(TreeKit { species, mix, view });
+    let step = (s.road.len() / 400).max(1);
+    let road = s.road.pts.iter().step_by(step).map(|p| Vec2::new(p.x, p.z)).collect();
+    world.insert_resource(TreeKit { species, mix, view, road });
     world.insert_resource(TreeField::default());
 }
 
@@ -624,6 +638,10 @@ pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit
             continue;
         }
         cell.center = cell.trees.iter().map(|t| t.pos).sum::<Vec3>() / cell.trees.len() as f32;
+        // A 64 m cell's trees sit within ~46 m of its centre.
+        if !kit.seen(cell.center, 50.0) {
+            continue;
+        }
         // Far cards: one merged mesh per species.
         let mut per: HashMap<Species, Geo> = HashMap::new();
         for t in &cell.trees {

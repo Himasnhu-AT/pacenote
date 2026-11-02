@@ -202,6 +202,8 @@ fn spawn_seat(mut commands: Commands, cars: Query<&Transform, With<GuideCar>>) {
         SeatCamera,
         MainCamera,
         Camera3d::default(),
+        // Off from the start (see `loading::begin`).
+        Msaa::Off,
         bevy::ui::IsDefaultUiCamera,
         Transform::from_translation(tf.translation + Vec3::Y * 1.2).with_rotation(tf.rotation),
     ));

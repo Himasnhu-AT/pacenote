@@ -77,8 +77,9 @@ pub fn wet(def: &StageDef) -> bool {
 /// Spawns the stage's visuals after the terrain: road, dressing, trees, sky and atmosphere.
 pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     world.insert_resource(Wet(wet(&s.def)));
-    let view = look::view_distance(&s.def);
-    world.insert_resource(look::stage_look(&s.def));
+    let q = world.get_resource::<engine::settings::CoreSettings>().map_or(2, |c| c.quality.index());
+    let view = look::quality_view(look::view_distance(&s.def), q);
+    world.insert_resource(look::stage_look(&s.def, view));
     // Scenery (rocks, bushes) stops where the fog hides it.
     if let Some(mut r) = world.get_resource_mut::<SceneryRanges>() {
         r.view = view.min(400.0);

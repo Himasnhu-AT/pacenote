@@ -134,7 +134,9 @@ pub fn begin(world: &mut World, def: StageDef) {
     if !crate::art::visual(world) {
         let s = crate::world::generate(&def);
         crate::world::spawn(world, &s);
-        world.spawn((engine::gfx::MainCamera, Camera3d::default(), Transform::from_xyz(0.0, 50.0, 0.0)));
+        // MSAA off from the start: the engine turns it off a frame later, and a render-scaled
+        // frame drawn in between fails GPU validation (MSAA depth, single-sample colour).
+        world.spawn((engine::gfx::MainCamera, Camera3d::default(), Msaa::Off, Transform::from_xyz(0.0, 50.0, 0.0)));
         crate::drive::spawn_car(world);
         return;
     }
@@ -333,7 +335,9 @@ fn advance(world: &mut World) {
                 crate::guide::seat::build_scene(world, &s);
             } else {
                 crate::world::spawn(world, &s);
-                world.spawn((engine::gfx::MainCamera, Camera3d::default(), Transform::from_xyz(0.0, 50.0, 0.0)));
+                // MSAA off from the start: the engine turns it off a frame later, and a render-scaled
+                // frame drawn in between fails GPU validation (MSAA depth, single-sample colour).
+                world.spawn((engine::gfx::MainCamera, Camera3d::default(), Msaa::Off, Transform::from_xyz(0.0, 50.0, 0.0)));
                 crate::drive::spawn_car(world);
             }
             // Evaluate the dressing with every spare core while nobody is driving.

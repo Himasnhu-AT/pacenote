@@ -10,6 +10,7 @@ pub mod codriver;
 pub mod demo;
 pub mod drive;
 pub mod guide;
+pub mod hardware;
 pub mod hud;
 pub mod loading;
 pub mod meta;
@@ -61,6 +62,7 @@ impl Plugin for Pacenote {
             .add_plugins(telemetry::TelemetryPlugin)
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
         fullscreen_on_first_run(app);
+        app.add_plugins(hardware::HardwarePlugin);
         #[cfg(feature = "dev")]
         app.add_plugins(capture::CapturePlugin);
         #[cfg(feature = "dev")]
@@ -76,22 +78,26 @@ impl Plugin for Pacenote {
 fn fullscreen_on_first_run(app: &mut App) {
     use engine::settings::{CoreSettings, SettingsStore, WindowModeSetting};
     let Some(path) = app.world().get_resource::<SettingsStore>().map(|s| s.path.clone()) else { return };
-    if !window_mode_saved(std::fs::read_to_string(path).ok().as_deref())
+    if !core_setting_saved(std::fs::read_to_string(path).ok().as_deref(), "window_mode")
         && let Some(mut core) = app.world_mut().get_resource_mut::<CoreSettings>()
     {
         core.window_mode = WindowModeSetting::Borderless;
     }
 }
 
-/// Does this settings file (its text, if any) hold a window mode?
-fn window_mode_saved(file: Option<&str>) -> bool {
+/// Does this settings file (its text, if any) hold the engine setting `key`?
+pub(crate) fn core_setting_saved(file: Option<&str>, key: &str) -> bool {
     file.and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
-        .is_some_and(|v| v.get("core").and_then(|c| c.get("window_mode")).is_some())
+        .is_some_and(|v| v.get("core").and_then(|c| c.get(key)).is_some())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::window_mode_saved;
+    use super::core_setting_saved;
+
+    fn window_mode_saved(file: Option<&str>) -> bool {
+        core_setting_saved(file, "window_mode")
+    }
 
     #[test]
     fn fullscreen_only_without_a_saved_window_mode() {
