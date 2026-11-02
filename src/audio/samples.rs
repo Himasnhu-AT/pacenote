@@ -27,12 +27,9 @@ pub enum Id {
     OnLoExh,
     OnHiBay,
     OnHiExh,
-    /// Tyres and surfaces (loops).
-    GravelRoll,
+    /// Tyres sliding (loops).
     GravelSlide,
-    TarmacRoll,
     TarmacSqueal,
-    SnowRoll,
     /// Body (scrape is a loop, the rest one-shots).
     Scrape,
     ImpactHeavy,
@@ -57,11 +54,8 @@ pub const FILES: [&str; COUNT] = [
     "engine_on_lo_exh",
     "engine_on_hi_bay",
     "engine_on_hi_exh",
-    "gravel_roll",
     "gravel_slide",
-    "tarmac_roll",
     "tarmac_squeal",
-    "snow_roll",
     "scrape",
     "impact_heavy",
     "impact_light",

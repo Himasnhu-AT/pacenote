@@ -90,23 +90,20 @@ intake, valve train, block) and the exhaust. Five loops, measured from their fir
   hunts (rpm wobble).
 - A stopped engine (rpm below ~300) is silent.
 
-**Tyres** (`tyres.rs`), by each wheel's surface, load share, rolling speed and slip speeds.
-Sideways sliding (slip angle) counts about twice as much as wheelspin or a locked wheel at
-the same slip speed, so a handbrake slide stands out from a straight-line launch. Each loop is
-read twice, half a loop apart, for decorrelated left and right channels. Rolling loops were
-recorded at low speed and play faster with the car (gravel ×0.8 at rest to ×1.5 at 40 m/s).
+**Tyres** (`tyres.rs`): drift only. Rolling road noise (gravel crunch, tarmac roar, snow) and
+the synthesised stones were removed on 2 Nov 2026 (the gravel crunch was tiring): a car that
+grips is quiet and the engine carries the sound. Sliding plays by each wheel's surface and slip
+speeds; sideways sliding (slip angle) counts about twice as much as wheelspin or a locked wheel
+at the same slip speed. Each loop is read twice, half a loop apart, for decorrelated left and
+right channels; it fades out below ~6 m/s.
 
-| Class | Rolling | Sliding |
-|---|---|---|
-| gravel | `gravel_roll`: tyres on a gravel road, mic at the wheel | `gravel_slide`: nine dirt skids joined |
-| tarmac | `tarmac_roll`: highway tyre roar from inside a car | `tarmac_squeal`: a tonal squeal at ~1 kHz, past the grip peak, pitch wandering and rising a little with slip |
-| mud | `gravel_roll` slowed and low-passed at 650 Hz | `gravel_slide` low-passed at 900 Hz |
-| snow | `snow_roll`: tyres creeping over snow and ice (faster when sliding) | plus `gravel_slide` low-passed at 2.4 kHz |
-| off-road (verge, rough) | `gravel_roll` low-passed at 1.8 kHz, plus a synthesised bumpy rumble | `gravel_slide` low-passed at 1.6 kHz |
-
-Stones ping into the arches (1.8–6.5 kHz) and thud on the floor (260–720 Hz with a floor-pan
-resonance) on gravel, off-road and snow, synthesised. The rate grows with roll and much more
-with slide.
+| Class | Sliding |
+|---|---|
+| gravel | `gravel_slide`: nine dirt skids joined |
+| tarmac | `tarmac_squeal`: a tonal squeal at ~1 kHz, past the grip peak, pitch wandering and rising a little with slip |
+| mud | `gravel_slide` low-passed at 900 Hz |
+| snow | `gravel_slide` low-passed at 2.4 kHz, a little faster |
+| off-road (verge, rough) | `gravel_slide` low-passed at 1.6 kHz |
 
 **Wind** (synthesised). Outside: low-passed noise whose cut-off rises with speed. Inside: low
 buffeting and a door-seal whistle. Both go as speed², with slow gusts.

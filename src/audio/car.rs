@@ -252,14 +252,13 @@ impl CarSynth {
         // Pops: direct outside, softer inside.
         let pop_g = out + 0.5 * inside;
         let (pop_l, pop_r) = (eng.pops.0 * pop_g, eng.pops.1 * pop_g);
-        // Tyres: full band outside, muffled inside; stones on the floor are louder inside.
+        // Tyres (drift): full band outside, muffled inside.
         let tl = ty.l * out + self.cabin_l.run(ty.l + rush) * 0.6 * inside;
         let tr = ty.r * out + self.cabin_r.run(ty.r + rush) * 0.6 * inside;
-        let floor = 0.65 + 0.7 * inside;
         let shell = body.shell * (0.6 * inside);
         let mono = engine + rush * out + cabin_wind * inside + shell;
-        let l = (mono + pop_l + tl + ty.floor_l * floor + body.l) * act;
-        let r = (mono + pop_r + tr + ty.floor_r * floor + body.r) * act;
+        let l = (mono + pop_l + tl + body.l) * act;
+        let r = (mono + pop_r + tr + body.r) * act;
         (l, r)
     }
 }
@@ -488,16 +487,15 @@ mod tests {
     }
 
     #[test]
-    fn tyres_by_surface_and_slip() {
+    fn tyres_only_sound_when_drifting() {
         for surf in [GRAVEL, TARMAC, MUD, SNOW, OFFROAD] {
             let (roll, _) = tyre_level(surf, 1.0, 0.0);
             let (slide, _) = tyre_level(surf, 1.0, 1.5);
-            assert!(roll > 3e-3, "surface {surf} rolls: {roll}");
-            assert!(slide > roll * 1.4, "surface {surf}: slide {slide} vs roll {roll}");
-            assert!(slide < 0.5);
+            assert!(roll < 1e-4, "surface {surf}: rolling is silent ({roll})");
+            assert!(slide > 3e-3 && slide < 0.5, "surface {surf} drifts: {slide}");
         }
-        // Surfaces sound different: mud is the darkest.
-        let b: Vec<f32> = [GRAVEL, TARMAC, MUD, SNOW].iter().map(|&s| brightness(&tyre_level(s, 1.0, 0.0).1, 1500.0)).collect();
+        // Surfaces sound different: mud is the darkest skid.
+        let b: Vec<f32> = [GRAVEL, TARMAC, MUD, SNOW].iter().map(|&s| brightness(&tyre_level(s, 1.0, 1.5).1, 1500.0)).collect();
         assert!(b[MUD] < b[GRAVEL] && b[MUD] < b[SNOW], "mud is the darkest: {b:?}");
     }
 

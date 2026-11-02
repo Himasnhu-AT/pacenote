@@ -835,11 +835,8 @@ Cooked by `tools/audio/cook_car.py` into `assets/sounds/car/*.ogg` (mono, 48 kHz
 | `engine_off_hi_bay`, `engine_off_hi_exh` | [21_6500_4062.wav](https://freesound.org/people/Chippy569/sounds/162522/), [21_6500_D6.wav](https://freesound.org/people/Chippy569/sounds/162521/) | Chippy569 | whole loop (~6297 rpm, no load) |
 | `engine_on_lo_bay`, `engine_on_lo_exh` | [19_2500_4062.wav](https://freesound.org/people/Chippy569/sounds/162510/), [19_2500_D6.wav](https://freesound.org/people/Chippy569/sounds/162509/) | Chippy569 | whole loop (~2556 rpm, full load) |
 | `engine_on_hi_bay`, `engine_on_hi_exh` | [20_6500_4062.wav](https://freesound.org/people/Chippy569/sounds/162513/), [20_6500_D6.wav](https://freesound.org/people/Chippy569/sounds/162512/) | Chippy569 | whole loop (~6208 rpm, full load) |
-| `gravel_roll` | [car driving along gravel road cu blyth 21 6 12.flac](https://freesound.org/people/TRP/sounds/577501/) | TRP | 24–32 s, high-passed 140 Hz |
 | `gravel_slide` | [S36-15 Car skids; dirt.wav](https://freesound.org/people/craigsmith/sounds/675282/) | craigsmith | the bodies of nine skids, joined |
-| `tarmac_roll` | [Tire noise on the highway](https://freesound.org/people/ViveleVent/sounds/817389/) | ViveleVent | 15–23 s |
 | `tarmac_squeal` | [Chrysler LHS tire squeal 03](https://freesound.org/people/audible-edge/sounds/71738/) + [AE0090 Volvo 740 GLE handbrake turn 01](https://freesound.org/people/audible-edge/sounds/76804/) | audible-edge | 6.0–9.3 s + 7.55–8.95 s, high-passed 350 Hz |
-| `snow_roll` | [tires_snow_ice_slow.wav](https://freesound.org/people/dunebuggy/sounds/71099/) | dunebuggy | 0.8–6.8 s |
 | `scrape` | [MetalScrape_6.wav](https://freesound.org/people/deerlord/sounds/534851/) | deerlord | 12–18 s |
 | `impact_heavy` | [S36-09 Metal foley for car crash; much crunching](https://freesound.org/people/craigsmith/sounds/675475/) | craigsmith | 0.10–0.95 s |
 | `impact_light` | [Clank Car Crash Collision](https://freesound.org/people/qubodup/sounds/151624/) | qubodup | whole |

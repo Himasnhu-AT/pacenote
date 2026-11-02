@@ -39,17 +39,14 @@ ENGINE_RMS_DB = -20.0
 LOOPS = [
     # Tyres rolling slowly on a gravel road, mic close to the wheels (the engine rumble under
     # it is filtered out; the game speeds it up with the car).
-    ('gravel_roll', [('577501_gravel_cu.ogg', 24.0, 32.0)], 140, None, -20.0),
     # The bodies of nine separate dirt skids.
     ('gravel_slide', [('675282_dirt_skids.ogg', a, b) for a, b in
                       [(2.2, 3.8), (9.1, 10.8), (16.3, 18.6), (22.3, 24.6), (29.0, 30.8), (35.2, 37.6),
                        (42.0, 43.9), (64.2, 67.8), (76.2, 79.8)]], 90, None, -20.0),
     # Tyre roar on a highway, from inside a car.
-    ('tarmac_roll', [('817389_int_highway_tyres.ogg', 15.0, 23.0)], 35, None, -20.0),
     # Tyre squeal: a V6 saloon through hard corners, then a 4-cylinder estate's handbrake turn.
     ('tarmac_squeal', [('71738_squeal3.ogg', 6.0, 9.3), ('76804_volvo_hb1.ogg', 7.55, 8.95)], 350, None, -20.0),
     # Tyres creeping over snow and ice.
-    ('snow_roll', [('71099_snow_ice_slow.ogg', 0.8, 6.8)], 90, None, -20.0),
     # Metal scraping a hard surface.
     ('scrape', [('534851_metal_scrape6.ogg', 12.0, 18.0)], 150, None, -20.0),
 ]

@@ -16,7 +16,7 @@ Poly Haven (polyhaven.com): Rob Tuytel, Rico Cilliers, Amal Kumar, Dario Barresi
 ambientCG (ambientcg.com): Lennart Demes.
 
 Car sounds (CC0, with thanks):
-Recorded by Chippy569 (engine), TRP, craigsmith, ViveleVent, audible-edge, dunebuggy, deerlord, qubodup and modusmogulus, from Freesound (freesound.org).
+Recorded by Chippy569 (engine), craigsmith, audible-edge, deerlord, qubodup and modusmogulus, from Freesound (freesound.org).
 
 Thanks:
 Everyone who reads the road out loud.
