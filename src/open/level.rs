@@ -380,6 +380,19 @@ pub struct Loaded {
     /// Hand edits of the trees and of the dressing.
     pub trees: PcgOverrides,
     pub dressing: PcgOverrides,
+    /// Hash of the level file and its terrain heights: any edit changes it (ghosts and boards
+    /// of the open world's events are keyed by it).
+    pub content: u64,
+}
+
+/// Hash of `bytes` (stable across machines and runs).
+fn hash_bytes(h: &mut crate::meta::board::Hasher, bytes: &[u8]) {
+    for c in bytes.chunks(8) {
+        let mut b = [0u8; 8];
+        b[..c.len()].copy_from_slice(c);
+        h.u64(u64::from_le_bytes(b));
+    }
+    h.u64(bytes.len() as u64);
 }
 
 /// Reads the open world from the level at `path`: world data ([`from_level`]) and terrain
@@ -405,7 +418,11 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
     let heights = TerrainData::load(&dir).and_then(|t| t.to_heightfield()).map_err(|e| format!("terrain {}: {e:?}", dir.display()))?;
     let mut overrides = |kind: Foliage| world.query::<(&Foliage, &PcgOverrides)>().iter(world).find(|(f, _)| **f == kind).map(|(_, o)| o.clone()).unwrap_or_default();
     let (trees, dressing) = (overrides(Foliage::Trees), overrides(Foliage::Dressing));
-    Ok(Loaded { data, heights, terrain: dir, trees, dressing })
+    let mut h = crate::meta::board::Hasher::default();
+    for f in [path.to_path_buf(), dir.join("terrain.ron"), dir.join("terrain.r16")] {
+        hash_bytes(&mut h, &std::fs::read(&f).map_err(|e| format!("{}: {e}", f.display()))?);
+    }
+    Ok(Loaded { data, heights, terrain: dir, trees, dressing, content: h.0 })
 }
 
 fn source_default() -> PathBuf {

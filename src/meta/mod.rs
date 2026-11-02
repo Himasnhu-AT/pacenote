@@ -497,6 +497,17 @@ fn stage_ready(world: &mut World) {
         .filter(|i| stages::with_conditions(i.def.clone(), def.weather, def.time) == def)
         .map(|i| i.hash.clone())
         .unwrap_or_else(|| stages::stage_hash(&def, &road));
+    // An open-world event also depends on the rest of the level (terrain, trees, buildings):
+    // an edited level gets its own boards and ghosts.
+    let road_hash = match stage.open.as_ref().map(|o| o.content).filter(|c| *c != 0) {
+        Some(c) => {
+            let mut h = board::Hasher::default();
+            h.str(&road_hash);
+            h.u64(c);
+            format!("{:016x}", h.0)
+        }
+        None => road_hash,
+    };
     // Each weather / time of day has its own board and ghosts.
     let hash = stages::board_hash(&road_hash, &def, run_assists(world));
     world.insert_resource(StageNow { id: def.id, name: def.name.clone(), hash: hash.clone() });

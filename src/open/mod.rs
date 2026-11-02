@@ -69,6 +69,8 @@ pub struct OpenWorld {
     /// Hand edits of the trees and of the dressing (rocks, bushes), from the level.
     pub trees: Arc<engine::pcg::PcgOverrides>,
     pub dressing: Arc<engine::pcg::PcgOverrides>,
+    /// Hash of the level it was loaded from (file and terrain; 0 when generated).
+    pub content: u64,
 }
 
 impl OpenWorld {
@@ -92,11 +94,12 @@ impl OpenWorld {
         let t = std::time::Instant::now();
         match level::load(&path).and_then(|l| {
             let dir = l.terrain.clone();
-            let (trees, dressing) = (l.trees, l.dressing);
+            let (trees, dressing, content) = (l.trees, l.dressing, l.content);
             OpenWorld::from_data_with(l.data, Some(l.heights)).map(|mut o| {
                 o.terrain_dir = Some(dir);
                 o.trees = Arc::new(trees);
                 o.dressing = Arc::new(dressing);
+                o.content = content;
                 o
             })
         }) {
@@ -140,6 +143,7 @@ impl OpenWorld {
             terrain_dir: None,
             trees: Arc::default(),
             dressing: Arc::default(),
+            content: 0,
         })
     }
 
