@@ -1,4 +1,6 @@
-//! Fit the game to the machine: a first-launch graphics quality from the hardware.
+//! Fit the game to the machine: a first-launch graphics quality from the hardware. (The
+//! high-DPI render-scale ceiling and the texture-size cap per quality are the engine's:
+//! `QualityPreset::hidpi_render_scale`, `max_texture_size`.)
 //!
 //! A base MacBook Air (M1/M2, 8 GB, ~2.5k-pixel Retina panel) at High in borderless fullscreen
 //! ran out of memory and GPU and froze the whole Mac. The engine's governor only steps down
@@ -6,8 +8,6 @@
 //! point has to fit.
 
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
-use engine::render_budget::{QualityGovernor, RenderScale};
 use engine::settings::{CoreSettings, GraphicsQuality, SettingsStore};
 
 pub struct HardwarePlugin;
@@ -15,7 +15,6 @@ pub struct HardwarePlugin;
 impl Plugin for HardwarePlugin {
     fn build(&self, app: &mut App) {
         quality_on_first_run(app);
-        app.add_systems(Update, cap_render_scale);
     }
 }
 
@@ -76,34 +75,6 @@ fn quality_on_first_run(app: &mut App) {
     if let Some(mut store) = app.world_mut().get_resource_mut::<SettingsStore>() {
         store.mark_dirty();
     }
-}
-
-/// Highest render scale at each quality on a high-DPI screen (scale factor ≥ 1.5). A Retina
-/// panel at 70% still has more pixels than 1080p.
-const HIDPI_SCALE: [f32; 4] = [0.7, 0.85, 1.0, 1.0];
-
-/// The governor uses `max_scale` from its next change on, so the scale itself is set too
-/// whenever the cap changes (quality changed, window moved to another screen). Only in a
-/// loaded stage: scaling while the loading screen warms pipelines failed GPU validation on
-/// screen (MSAA depth with a single-sample colour attachment), intermittently.
-fn cap_render_scale(world: &mut World, mut last: Local<Option<f32>>) {
-    let in_stage = world.get_resource::<State<engine::flow::AppState>>().is_some_and(|s| *s.get() == engine::flow::AppState::InGame);
-    if !in_stage || crate::loading::is_loading(world) {
-        return;
-    }
-    let Some(q) = world.get_resource::<CoreSettings>().map(|c| c.quality.index()) else { return };
-    let mut windows = world.query_filtered::<&Window, With<PrimaryWindow>>();
-    let Ok(window) = windows.single(world) else { return };
-    let cap = if window.scale_factor() >= 1.5 { HIDPI_SCALE[q] } else { 1.0 };
-    if *last == Some(cap) {
-        return;
-    }
-    if !world.contains_resource::<QualityGovernor>() || !world.contains_resource::<RenderScale>() {
-        return;
-    }
-    world.resource_mut::<QualityGovernor>().max_scale = cap;
-    world.resource_mut::<RenderScale>().scale = cap;
-    *last = Some(cap);
 }
 
 #[cfg(test)]

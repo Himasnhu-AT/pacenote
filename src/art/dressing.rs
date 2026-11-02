@@ -134,12 +134,13 @@ pub fn tag_cover(
         if mats.0.contains(&m.id()) {
             for &c in children.into_iter().flatten() {
                 if tiers.get(c) == Ok(&DetailTier::Far) {
-                    commands.entity(c).despawn();
+                    // The streamed dressing volume may drop the cell this frame (try_).
+                    commands.entity(c).try_despawn();
                 }
             }
             // Merged cells measure from their centre (≤ 45 m from any plant in a 64 m cell).
             let end = if merged { COVER_END } else { COVER_END - 30.0 };
-            commands.entity(e).remove::<DetailTier>().insert((Cover, KeepDetail, NotShadowCaster, VisibilityRange { start_margin: 0.0..0.0, end_margin: (end - 15.0)..end, use_aabb: false }));
+            commands.entity(e).try_remove::<DetailTier>().try_insert((Cover, KeepDetail, NotShadowCaster, VisibilityRange { start_margin: 0.0..0.0, end_margin: (end - 15.0)..end, use_aabb: false }));
         }
     }
 }
