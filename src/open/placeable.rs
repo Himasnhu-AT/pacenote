@@ -3,11 +3,10 @@
 //! `Transform`, spawned from the world data ([`spawn`]) and read back into it ([`gather`]),
 //! snapping to the roads: drag an event start along its road and its route starts there.
 //!
-//! [`PLACEABLES`] is what the editor's Place palette lists. The engine's `Placeable`
-//! registration isn't on the engine yet; [`PlaceablePlugin`] registers the reflected types and
-//! keeps the table for when it lands.
+//! [`PlaceablePlugin`] registers them with the engine's Place palette (`register_placeable`).
 
 use bevy::prelude::*;
+use engine::level::RegisterPlaceable;
 
 use super::data::{GradeOverride, Home, WorldData};
 use super::roads::RoadNet;
@@ -47,25 +46,16 @@ pub struct PointsSpawned {
     pub unplaced_grades: Vec<GradeOverride>,
 }
 
-/// An entry of the editor's Place palette (mirrors the engine's `Placeable`).
-pub struct PlaceInfo {
-    pub type_path: &'static str,
-    pub name: &'static str,
-    pub icon: &'static str,
-    pub category: &'static str,
-}
-
-pub const PLACEABLES: &[PlaceInfo] = &[
-    PlaceInfo { type_path: "pacenote::open::placeable::HomePoint", name: "Home", icon: "home", category: "Pacenote" },
-    PlaceInfo { type_path: "pacenote::open::placeable::EventStart", name: "Event start", icon: "flag", category: "Pacenote" },
-    PlaceInfo { type_path: "pacenote::open::placeable::GradeNote", name: "Pace-note grade", icon: "note", category: "Pacenote" },
-];
-
 pub struct PlaceablePlugin;
 
 impl Plugin for PlaceablePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<HomePoint>().register_type::<EventStart>().register_type::<GradeNote>();
+        app.register_type::<HomePoint>()
+            .register_type::<EventStart>()
+            .register_type::<GradeNote>()
+            .register_placeable::<HomePoint>("Home", "home", "Pacenote")
+            .register_placeable::<EventStart>("Event start", "flag", "Pacenote")
+            .register_placeable::<GradeNote>("Pace-note grade", "note", "Pacenote");
     }
 }
 

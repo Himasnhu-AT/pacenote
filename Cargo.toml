@@ -6,9 +6,9 @@ license = "MIT OR Apache-2.0"
 description = "Two-person rally: a driver who can't see the map and a guide who can't drive, talking over voice."
 
 [dependencies]
-engine = { path = "/Users/himanshu/codes/game/engine", default-features = false, features = ["look", "vfx", "pcg", "world", "net", "sound", "actions", "props", "ktx2"] }
+engine = { path = "/Users/himanshu/codes/game/engine-pacenote-editor", default-features = false, features = ["level", "spline", "look", "vfx", "pcg", "world", "net", "sound", "actions", "props", "ktx2"] }
 # Stage generation and pure game logic (no Bevy systems).
-pcg-core = { path = "/Users/himanshu/codes/game/engine/crates/pcg-core" }
+pcg-core = { path = "/Users/himanshu/codes/game/engine-pacenote-editor/crates/pcg-core" }
 # Bevy derive macros expand to `bevy::ecs::..`, so the game names bevy itself (no features of
 # its own: the engine picks them).
 bevy = { version = "=0.20.1", default-features = false }
@@ -25,7 +25,7 @@ ashlar-trace = { git = "https://github.com/Himasnhu-AT/ashlar", rev = "561745aaf
 
 [features]
 default = ["dev"]
-dev = ["engine/devtools", "engine/devkit", "telemetry"]
+dev = ["engine/editor", "engine/devtools", "engine/devkit", "telemetry"]
 # Anonymous stats and crash reports (docs/TELEMETRY.md). Ship builds: `--no-default-features
 # --features telemetry`, with PACENOTE_TRACE_ENDPOINT / PACENOTE_TRACE_KEY set at build time.
 telemetry = ["engine/trace", "dep:ashlar-trace"]

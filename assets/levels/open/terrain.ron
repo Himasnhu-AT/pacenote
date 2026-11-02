@@ -1,0 +1,8 @@
+(
+    size_samples: (2001, 2001),
+    spacing: 2.0,
+    origin: (-2000.0, -2000.0),
+    height_min: -41.920273,
+    height_max: 49.58226,
+    splat_resolution: 0,
+)

@@ -7,6 +7,7 @@ pub mod data;
 pub mod events;
 pub mod forest;
 pub mod junctions;
+pub mod level;
 pub mod placeable;
 pub mod roads;
 pub mod tour;

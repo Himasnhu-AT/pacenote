@@ -9,5 +9,21 @@ fn main() {
             unsafe { std::env::set_var(k, v) };
         }
     }
+    // `--bake-world <file>`: write the generated open world as a level and exit.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--bake-world") {
+        let Some(path) = args.get(i + 1) else {
+            eprintln!("usage: pacenote --bake-world levels/open.level.ron");
+            std::process::exit(2);
+        };
+        match pacenote::open::level::bake(std::path::Path::new(path)) {
+            Ok(report) => println!("{report}"),
+            Err(e) => {
+                eprintln!("bake failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     engine::app(pacenote::info()).add_plugins(pacenote::Pacenote).run();
 }

@@ -65,7 +65,7 @@ impl Plugin for Pacenote {
             .add_plugins(open::events::EventsPlugin)
             .add_plugins(open::traffic::TrafficPlugin)
             .add_plugins(open::forest::ForestPlugin)
-            .add_plugins(open::placeable::PlaceablePlugin)
+            .add_plugins((open::placeable::PlaceablePlugin, open::level::LevelTypesPlugin))
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
         fullscreen_on_first_run(app);
         app.add_plugins(hardware::HardwarePlugin);
