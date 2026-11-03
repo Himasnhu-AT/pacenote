@@ -132,7 +132,7 @@ impl OpenWorld {
             }
             None => Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z)),
         };
-        let layout = buildings::layout_with(&net, &data.lots);
+        let layout = buildings::layout_baked(&net, &data.lots, &data.buildings);
         let walls = buildings::ObstacleGrid::new(&buildings::obstacles(&layout), 10.0);
         Ok(OpenWorld {
             data: Arc::new(data),

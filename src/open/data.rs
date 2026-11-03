@@ -41,6 +41,10 @@ pub struct WorldData {
     pub grades: Vec<GradeOverride>,
     /// Town block kinds.
     pub lots: Vec<LotData>,
+    /// Every building, once the world is a level (`open::level`); empty: laid out from the
+    /// streets and lots (`buildings::layout_with`).
+    #[serde(default)]
+    pub buildings: Vec<buildings::Building>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Reflect)]
@@ -96,6 +100,7 @@ impl WorldData {
             events: events::specs(&net),
             grades: Vec::new(),
             lots: buildings::town_lots(seed),
+            buildings: Vec::new(),
         }
     }
 
@@ -173,6 +178,27 @@ impl WorldData {
                 return Err(format!("lot {l:?} outside the town grid"));
             }
         }
+        if self.buildings.len() > MAX_BUILDINGS {
+            return Err(format!("{} buildings (at most {MAX_BUILDINGS})", self.buildings.len()));
+        }
+        for (k, b) in self.buildings.iter().enumerate() {
+            let ok = inside(Vec3::new(b.centre.x, b.ground, b.centre.y))
+                && fin(b.base)
+                && fin(b.axis.x)
+                && fin(b.axis.y)
+                && (b.axis.length() - 1.0).abs() < 0.01
+                && (1.0..=200.0).contains(&b.half.x)
+                && (1.0..=200.0).contains(&b.half.y)
+                && (1..=60).contains(&b.floors)
+                && (2.0..=10.0).contains(&b.floor_h)
+                && (0.0..=2.0).contains(&b.pitch)
+                && b.front < 4
+                && (b.wall as usize) < buildings::WALLS.len()
+                && (b.roof_col as usize) < buildings::ROOFS.len();
+            if !ok {
+                return Err(format!("building {k}: {b:?}"));
+            }
+        }
         Ok(())
     }
 
@@ -213,6 +239,7 @@ const LIMIT_XZ: f32 = roads::HALF + 200.0;
 const LIMIT_Y: f32 = 2_000.0;
 const MAX_ROADS: usize = 1_000;
 const MAX_POINTS: usize = 200_000;
+const MAX_BUILDINGS: usize = 20_000;
 const MIN_WIDTH: f32 = 2.0;
 const MAX_WIDTH: f32 = 40.0;
 const MAX_BANK: f32 = 0.5;

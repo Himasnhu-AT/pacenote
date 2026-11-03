@@ -17,6 +17,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use engine::level::RegisterPlaceable;
 use engine::level::{LevelEntity, new_stable_id};
 use engine::pcg::PcgOverrides;
 use engine::spline::{Spline, SplineCache, SplineMode, SplinePoint};
@@ -24,6 +25,7 @@ use engine::world::terrain_data::TerrainData;
 
 use super::data::{self, Home, RoadData, RoadPoint, WorldData};
 use super::placeable::{self, PointsSpawned};
+use super::buildings;
 use super::roads::{RoadKind, RoadNet};
 use crate::stage::{STEP, TimeOfDay};
 
@@ -78,8 +80,129 @@ impl Default for WorldDoc {
             events: Vec::new(),
             grades: Vec::new(),
             lots: Vec::new(),
+            buildings: Vec::new(),
         };
         WorldDoc { data, terrain: String::new() }
+    }
+}
+
+/// A building. Its `Transform` places it: translation = the footprint centre at floor level,
+/// rotation = which way it faces (about +Y). The game builds its mesh as a child.
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
+#[reflect(Component, Default)]
+pub struct Building {
+    pub kind: buildings::Use,
+    /// Footprint width (along its local x) and depth (m).
+    pub size: Vec2,
+    pub floors: u32,
+    /// Storey height (m).
+    pub floor_height: f32,
+    pub roof: buildings::Roof,
+    /// Roof slope (rise per metre) of pitched roofs.
+    pub roof_pitch: f32,
+    /// The side facing the street: 0 = +x, 1 = +z, 2 = −x, 3 = −z (local).
+    pub front: u8,
+    /// Facade colour 0..=9, roof colour 0..=4.
+    pub wall_colour: u8,
+    pub roof_colour: u8,
+    /// Small variations (balconies, rooftop boxes, signs).
+    pub variant: u32,
+}
+
+impl Default for Building {
+    fn default() -> Self {
+        Building { kind: buildings::Use::House, size: Vec2::new(10.0, 8.0), floors: 2, floor_height: 3.0, roof: buildings::Roof::Gable, roof_pitch: 0.7, front: 3, wall_colour: 0, roof_colour: 0, variant: 0 }
+    }
+}
+
+impl Building {
+    /// The component and transform of a laid-out building.
+    pub fn from_layout(b: &buildings::Building) -> (Building, Transform) {
+        let c = Building {
+            kind: b.use_,
+            size: b.half * 2.0,
+            floors: b.floors,
+            floor_height: b.floor_h,
+            roof: b.roof,
+            roof_pitch: b.pitch,
+            front: b.front,
+            wall_colour: b.wall,
+            roof_colour: b.roof_col,
+            variant: b.bits,
+        };
+        let t = Transform::from_xyz(b.centre.x, b.ground, b.centre.y).with_rotation(Quat::from_rotation_y(libm::atan2f(-b.axis.y, b.axis.x)));
+        (c, t)
+    }
+
+    /// The laid-out building this describes at `t` (values clamped to what the game builds).
+    pub fn to_layout(&self, t: &Transform) -> buildings::Building {
+        let x = t.rotation * Vec3::X;
+        let axis = Vec2::new(x.x, x.z).normalize_or(Vec2::X);
+        let ground = t.translation.y;
+        buildings::Building {
+            centre: Vec2::new(t.translation.x, t.translation.z),
+            axis,
+            half: (self.size * 0.5).clamp(Vec2::splat(1.0), Vec2::splat(200.0)),
+            front: self.front.min(3),
+            floors: self.floors.clamp(1, 60),
+            floor_h: self.floor_height.clamp(2.0, 10.0),
+            ground,
+            base: ground,
+            roof: self.roof,
+            pitch: self.roof_pitch.clamp(0.0, 2.0),
+            use_: self.kind,
+            wall: self.wall_colour.min(buildings::WALLS.len() as u8 - 1),
+            roof_col: self.roof_colour.min(buildings::ROOFS.len() as u8 - 1),
+            bits: self.variant,
+        }
+    }
+}
+
+/// The mesh child of a [`Building`] entity.
+#[derive(Component)]
+pub struct BuildingShape;
+
+/// Builds the mesh child of every level [`Building`] that is new or changed, and drops the
+/// loose (generated) building meshes once the level's buildings exist.
+#[allow(clippy::type_complexity)]
+fn sync_buildings(world: &mut World) {
+    let mut q = world.query_filtered::<(Entity, &Building, &Transform, Option<&Children>), (With<LevelEntity>, Or<(Changed<Building>, Changed<Transform>)>)>();
+    let todo: Vec<(Entity, Building, Transform, Vec<Entity>)> = q.iter(world).map(|(e, b, t, c)| (e, *b, *t, c.map(|c| c.iter().collect()).unwrap_or_default())).collect();
+    let any = world.query_filtered::<(), (With<Building>, With<LevelEntity>)>().iter(world).next().is_some();
+    if any {
+        let loose: Vec<Entity> = world.query_filtered::<Entity, With<buildings::LooseBuilding>>().iter(world).collect();
+        for e in loose {
+            world.entity_mut(e).despawn();
+        }
+    }
+    if todo.is_empty() || !crate::art::visual(world) {
+        return;
+    }
+    debug!("buildings: {} meshes to build", todo.len());
+    let mat = buildings::material(world);
+    let terrain = world.get_resource::<engine::world::Terrain>().map(|t| t.heightfield().clone());
+    for (e, b, t, children) in todo {
+        for c in children {
+            if world.get::<BuildingShape>(c).is_some() {
+                world.entity_mut(c).despawn();
+            }
+        }
+        let lb = b.to_layout(&t);
+        let mesh = match &terrain {
+            Some(h) => buildings::building_mesh(&lb, &|x, z| h.height_at(x, z)),
+            None => buildings::building_mesh(&lb, &|_, _| lb.ground),
+        };
+        let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&mesh);
+        let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
+        // The mesh is in world axes about the centre: undo the parent's rotation.
+        let local = Transform::from_rotation(t.rotation.inverse());
+        let mut c = world.spawn((Name::new("building mesh"), BuildingShape, Mesh3d(h), MeshMaterial3d(mat.clone()), local, engine::prelude::Scenery, engine::prelude::KeepDetail, ChildOf(e)));
+        if let Some(a) = aabb {
+            c.insert((a, bevy::camera::visibility::NoAutoAabb));
+        }
+        if !world.entity(e).contains::<Visibility>() {
+            world.entity_mut(e).insert(Visibility::default());
+        }
     }
 }
 
@@ -100,7 +223,10 @@ impl Plugin for LevelTypesPlugin {
         app.register_type::<RoadSpline>()
             .register_type::<WorldDoc>()
             .register_type::<Foliage>()
+            .register_type::<Building>()
+            .register_placeable::<Building>("Building", "building", "Pacenote")
             .add_systems(PreStartup, pick_source)
+            .add_systems(PostUpdate, sync_buildings.before(bevy::transform::TransformSystems::Propagate))
             .add_systems(Update, adopt_volumes);
         #[cfg(feature = "dev")]
         app.add_systems(PostUpdate, hide_game_ui.run_if(resource_exists::<engine::editor::EditorMode>));
@@ -256,10 +382,15 @@ pub fn spawn_level(world: &mut World, data: &WorldData, splines: &[(Spline, Road
         let e = world.spawn((Name::new(format!("road {k} ({:?})", info.kind)), spline.clone(), *info, Transform::IDENTITY)).id();
         level(world, e);
     }
-    let doc = WorldDoc { data: WorldData { roads: Vec::new(), grades: Vec::new(), ..data.clone() }, terrain: terrain.into() };
+    let doc = WorldDoc { data: WorldData { roads: Vec::new(), grades: Vec::new(), buildings: Vec::new(), ..data.clone() }, terrain: terrain.into() };
     let e = world.spawn((Name::new("open world"), doc, Transform::IDENTITY)).id();
     level(world, e);
     for e in placeable::spawn(world, data, net) {
+        level(world, e);
+    }
+    for (k, b) in data.buildings.iter().enumerate() {
+        let (c, t) = Building::from_layout(b);
+        let e = world.spawn((Name::new(format!("{} {k}", b.use_.label())), c, t)).id();
         level(world, e);
     }
     for (name, f) in [("Trees", Foliage::Trees), ("Dressing", Foliage::Dressing)] {
@@ -281,7 +412,10 @@ pub fn from_level(world: &mut World) -> Result<WorldData, String> {
     let mut q = world.query::<(&LevelEntity, &Spline, &RoadSpline, Option<&Transform>)>();
     let mut roads: Vec<_> = q.iter(world).map(|(l, s, r, t)| (l.id.0, spline_road(s, r, &t.copied().unwrap_or_default()))).collect();
     roads.sort_by_key(|r| r.0);
-    let data = WorldData { roads: roads.into_iter().map(|r| r.1).collect(), ..doc.data };
+    let mut q = world.query::<(&LevelEntity, &Building, Option<&Transform>)>();
+    let mut built: Vec<_> = q.iter(world).map(|(l, b, t)| (l.id.0, b.to_layout(&t.copied().unwrap_or_default()))).collect();
+    built.sort_by_key(|b| b.0);
+    let data = WorldData { roads: roads.into_iter().map(|r| r.1).collect(), buildings: built.into_iter().map(|b| b.1).collect(), ..doc.data };
     data.validate()?;
     let net = data.net();
     world.insert_resource(PointsSpawned::default());
@@ -470,8 +604,10 @@ pub fn level_app() -> App {
 /// folder of the same name. Prints what it wrote.
 pub fn bake(path: &Path) -> Result<String, String> {
     let t = std::time::Instant::now();
-    let (data, splines) = through_splines(&WorldData::generate(super::SEED));
+    let (mut data, splines) = through_splines(&WorldData::generate(super::SEED));
     let open = super::OpenWorld::from_data(data.clone())?;
+    // The buildings as the streets lay them out now; from here on they are data.
+    data.buildings = open.buildings.buildings.clone();
     let name = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".level.ron")).ok_or("the level file must end in .level.ron")?;
     let mut app = level_app();
     let world = app.world_mut();
@@ -485,10 +621,11 @@ pub fn bake(path: &Path) -> Result<String, String> {
     TerrainData::from_heightfield(&open.heights, [n, open.heights.nz()], None).save(&dir).map_err(|e| format!("{e:?}"))?;
     let points: usize = world.query::<&Spline>().iter(world).map(|s| s.points.len()).sum();
     Ok(format!(
-        "{}: {} roads ({points} control points), {} events, terrain {n}² in {} ({:.1} s)",
+        "{}: {} roads ({points} control points), {} events, {} buildings, terrain {n}² in {} ({:.1} s)",
         path.display(),
         data.roads.len(),
         data.events.len(),
+        data.buildings.len(),
         dir.display(),
         t.elapsed().as_secs_f32()
     ))
@@ -544,8 +681,10 @@ mod tests {
     /// Spawned as a level, saved, loaded into a fresh world: the same data.
     #[test]
     fn level_round_trip() {
-        let (data, splines) = through_splines(&WorldData::generate(super::super::SEED));
+        let (mut data, splines) = through_splines(&WorldData::generate(super::super::SEED));
         let net = data.net();
+        data.buildings = super::super::buildings::layout_with(&net, &data.lots).buildings;
+        assert!(data.buildings.len() > 100, "{} buildings", data.buildings.len());
         let dir = std::env::temp_dir().join(format!("pacenote-level-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("open.level.ron");
@@ -566,6 +705,11 @@ mod tests {
         }
         assert_eq!(back.events, data.events);
         assert_eq!(back.lots, data.lots);
+        assert_eq!(back.buildings.len(), data.buildings.len());
+        for (a, b) in back.buildings.iter().zip(&data.buildings) {
+            assert!(a.centre.distance(b.centre) < 1e-3 && a.axis.distance(b.axis) < 1e-4 && (a.ground - b.ground).abs() < 1e-4, "{a:?} vs {b:?}");
+            assert_eq!((a.half, a.front, a.floors, a.floor_h, a.roof, a.pitch, a.use_, a.wall, a.roof_col, a.bits), (b.half, b.front, b.floors, b.floor_h, b.roof, b.pitch, b.use_, b.wall, b.roof_col, b.bits));
+        }
         assert_eq!((back.seed, back.town_y, back.time), (data.seed, data.town_y, data.time));
         assert!(back.home.pos.distance(data.home.pos) < 1e-3);
     }

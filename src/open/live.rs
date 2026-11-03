@@ -115,7 +115,7 @@ fn changed_boxes(old: &Spline, new: &Spline) -> Vec<(Vec2, Vec2)> {
 }
 
 #[cfg(feature = "dev")]
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn watch(
     mut live: ResMut<Live>,
     time: Res<Time<Real>>,
@@ -124,6 +124,8 @@ fn watch(
     points: Query<(), (With<LevelEntity>, Or<(With<HomePoint>, With<EventStart>, With<GradeNote>)>, Changed<Transform>)>,
     doc: Query<Ref<WorldDoc>>,
     mut removed: RemovedComponents<Spline>,
+    houses: Query<(), (With<LevelEntity>, With<super::level::Building>, Or<(Changed<super::level::Building>, Changed<Transform>)>)>,
+    mut houses_gone: RemovedComponents<super::level::Building>,
 ) {
     if loading.is_some() {
         return;
@@ -170,6 +172,10 @@ fn watch(
         }
     }
     if !points.is_empty() {
+        any = true;
+    }
+    // Buildings: the car's walls and where trees may grow follow them.
+    if !houses.is_empty() || houses_gone.read().next().is_some() {
         any = true;
     }
     if doc.iter().any(|d| d.is_changed() && !d.is_added()) {

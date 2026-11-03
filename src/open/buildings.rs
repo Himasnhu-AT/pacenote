@@ -49,9 +49,24 @@ pub enum Use {
     Barn,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+impl Use {
+    pub fn label(self) -> &'static str {
+        match self {
+            Use::Downtown => "office",
+            Use::Shop => "shop",
+            Use::House => "house",
+            Use::Apartment => "apartments",
+            Use::Tower => "tower",
+            Use::FarmHouse => "farmhouse",
+            Use::Barn => "barn",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
 pub enum Roof {
     /// Flat with a parapet.
+    #[default]
     Flat,
     /// Two slopes; the ridge runs parallel to the front.
     Gable,
@@ -60,7 +75,7 @@ pub enum Roof {
 }
 
 /// One building: an oriented box footprint, storeys and a roof.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
 pub struct Building {
     pub centre: Vec2,
     /// Unit direction (world XZ) of the footprint's local x; local z is `axis.perp()`.
@@ -439,6 +454,30 @@ pub fn layout_with(net: &RoadNet, lots: &[LotData]) -> Layout {
     Layout { seed, town_y: y, blocks, buildings }
 }
 
+/// [`layout_with`], with `baked` buildings (a level's) in place of the generated ones when
+/// there are any: the blocks keep their lots, each building goes to the block whose bounds hold
+/// its centre (farms: the nearest farm block).
+pub fn layout_baked(net: &RoadNet, lots: &[LotData], baked: &[Building]) -> Layout {
+    let mut l = layout_with(net, lots);
+    if baked.is_empty() {
+        return l;
+    }
+    for blk in &mut l.blocks {
+        blk.buildings.clear();
+    }
+    l.buildings = baked.to_vec();
+    for (i, b) in l.buildings.iter().enumerate() {
+        let d = |blk: &Block| {
+            let c = b.centre.clamp(blk.min, blk.max);
+            c.distance_squared(b.centre)
+        };
+        if let Some(blk) = l.blocks.iter_mut().min_by(|x, y| d(x).total_cmp(&d(y))) {
+            blk.buildings.push(i);
+        }
+    }
+    l
+}
+
 /// A farmhouse (and usually a barn behind it) every so often along the country roads, between
 /// the town's plateau and the ring, on ground flat enough, clear of every road.
 fn farms(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
@@ -634,7 +673,7 @@ impl ObstacleGrid {
 
 // ---------------------------------------------------------------- rendering
 
-pub use render::{BuildingMesh, spawn};
+pub use render::{BuildingMesh, LooseBuilding, building_mesh, material, spawn};
 
 mod render {
     use bevy::asset::RenderAssetUsages;
@@ -1255,6 +1294,7 @@ mod render {
     }
 
     /// Builds a block's mesh (local to the block's centre) or `None` if it has nothing.
+    #[cfg(test)]
     pub(super) fn block_mesh(layout: &Layout, k: usize, height: &dyn Fn(f32, f32) -> f32) -> Option<(Vec3, Buf)> {
         let blk = &layout.blocks[k];
         let c = blk.centre();
@@ -1269,14 +1309,13 @@ mod render {
         (!buf.idx.is_empty()).then_some((origin, buf))
     }
 
-    /// Spawns every block's mesh: one entity per town block and farm, all sharing one material,
-    /// casting shadows. Static scenery kept at full detail (the far blocks are a few thousand
-    /// triangles each; Bevy's per-cascade culling keeps their shadows cheap). `height` is the
-    /// rendered terrain's height (`OpenWorld::heights`): sidewalks and lot paving lie on it.
-    /// Returns the entities (for despawning). Nothing in headless runs.
-    pub fn spawn(world: &mut World, layout: &Layout, height: &dyn Fn(f32, f32) -> f32) -> Vec<Entity> {
-        if !crate::art::visual(world) {
-            return Vec::new();
+    /// The shared building material (the facade / roof atlas), made once.
+    #[derive(Resource, Clone)]
+    struct BuildingMaterial(Handle<StandardMaterial>);
+
+    pub fn material(world: &mut World) -> Handle<StandardMaterial> {
+        if let Some(m) = world.get_resource::<BuildingMaterial>() {
+            return m.0.clone();
         }
         let (color, mr) = atlas();
         let (color, mr) = {
@@ -1291,17 +1330,64 @@ mod render {
             reflectance: 0.4,
             ..default()
         });
+        world.insert_resource(BuildingMaterial(mat.clone()));
+        mat
+    }
+
+    /// One building's mesh, its origin at the footprint centre on the floor (`b.ground`). The
+    /// plinth reaches down to the lowest `height` under the footprint.
+    pub fn building_mesh(b: &Building, height: &dyn Fn(f32, f32) -> f32) -> Mesh {
+        let mut b = *b;
+        let low = b.corners().iter().chain(std::iter::once(&b.centre)).map(|p| height(p.x, p.y)).fold(b.ground, f32::min);
+        b.base = low.min(b.ground);
+        let origin = Vec3::new(b.centre.x, b.ground, b.centre.y);
+        let mut buf = Buf { origin, ..default() };
+        add_building(&mut buf, &b);
+        buf.into_mesh()
+    }
+
+    /// A building's mesh spawned on its own (no level entity holds it: a generated world, or
+    /// before the level's building entities exist). Dropped once they do.
+    #[derive(Component)]
+    pub struct LooseBuilding;
+
+    /// Spawns the town: one entity per town block or farm for its lot (sidewalks, paving) and
+    /// one per building, all sharing one material. Static scenery kept at full detail. `height`
+    /// is the rendered terrain's height (`OpenWorld::heights`). Returns the entities (for
+    /// despawning). Nothing in headless runs.
+    pub fn spawn(world: &mut World, layout: &Layout, height: &dyn Fn(f32, f32) -> f32) -> Vec<Entity> {
+        if !crate::art::visual(world) {
+            return Vec::new();
+        }
+        let mat = material(world);
         let mut out = Vec::new();
-        for k in 0..layout.blocks.len() {
-            let Some((origin, buf)) = block_mesh(layout, k, height) else { continue };
-            let mesh = buf.into_mesh();
+        let mut add = |world: &mut World, mesh: Mesh, at: Vec3, name: String, extra: Option<usize>| {
             let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&mesh);
             let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
-            let mut e = world.spawn((Name::new("town block"), BuildingMesh { block: k }, Mesh3d(h), MeshMaterial3d(mat.clone()), Transform::from_translation(origin), Scenery, KeepDetail));
+            let mut e = world.spawn((Name::new(name), Mesh3d(h), MeshMaterial3d(mat.clone()), Transform::from_translation(at), Scenery, KeepDetail));
+            match extra {
+                Some(k) => e.insert(BuildingMesh { block: k }),
+                None => e.insert(LooseBuilding),
+            };
             if let Some(a) = aabb {
                 e.insert((a, bevy::camera::visibility::NoAutoAabb));
             }
             out.push(e.id());
+        };
+        for (k, blk) in layout.blocks.iter().enumerate() {
+            if blk.cell.is_none() {
+                continue;
+            }
+            let c = blk.centre();
+            let origin = Vec3::new(c.x, layout.town_y, c.y);
+            let mut buf = Buf { origin, ..default() };
+            add_lot(&mut buf, blk, height);
+            if !buf.idx.is_empty() {
+                add(world, buf.into_mesh(), origin, "town block".into(), Some(k));
+            }
+        }
+        for (i, b) in layout.buildings.iter().enumerate() {
+            add(world, building_mesh(b, height), Vec3::new(b.centre.x, b.ground, b.centre.y), format!("{} {i}", b.use_.label()), None);
         }
         out
     }

@@ -12396,6 +12396,7 @@
           "engine::level::LevelEntity": (
             id: (33),
           ),
+          "engine::pcg::PcgFollowTerrain": (),
           "engine::pcg::overrides::PcgOverrides": (
             removed: [],
             moved: [],
@@ -12417,6 +12418,7 @@
           "engine::level::LevelEntity": (
             id: (34),
           ),
+          "engine::pcg::PcgFollowTerrain": (),
           "engine::pcg::overrides::PcgOverrides": (
             removed: [],
             moved: [],
