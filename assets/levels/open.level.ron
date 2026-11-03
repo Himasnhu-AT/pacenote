@@ -27722,51 +27722,87 @@
               events: [
                 (
                   id: 100,
-                  name: "Fernhollow rally",
-                  kind: Rally,
-                  road: 3,
-                  from: 8,
-                  to: 1854,
-                ),
-                (
-                  id: 101,
-                  name: "Blackpine rally",
+                  name: "Fernhollow escarpment",
                   kind: Rally,
                   road: 4,
                   from: 8,
-                  to: 2960,
+                  to: 2968,
+                  then: [
+                    (
+                      road: 3,
+                      from: 500,
+                      to: 8,
+                    ),
+                  ],
+                ),
+                (
+                  id: 101,
+                  name: "Blackpine marathon",
+                  kind: Rally,
+                  road: 1,
+                  from: 8,
+                  to: 2611,
+                  then: [
+                    (
+                      road: 3,
+                      from: 0,
+                      to: 1862,
+                    ),
+                    (
+                      road: 2,
+                      from: 2819,
+                      to: 856,
+                    ),
+                  ],
                 ),
                 (
                   id: 102,
-                  name: "East gravel sprint",
+                  name: "Quarry loop",
                   kind: Sprint,
-                  road: 2,
-                  from: 8,
-                  to: 2811,
+                  road: 0,
+                  from: 1069,
+                  to: 1828,
+                  then: [
+                    (
+                      road: 2,
+                      from: 0,
+                      to: 856,
+                    ),
+                    (
+                      road: 6,
+                      from: 975,
+                      to: 8,
+                    ),
+                  ],
                 ),
                 (
                   id: 103,
-                  name: "East gravel sprint",
+                  name: "River crossings",
                   kind: Sprint,
-                  road: 6,
-                  from: 8,
-                  to: 968,
+                  road: 0,
+                  from: 298,
+                  to: 448,
+                  then: [
+                    (
+                      road: 7,
+                      from: 0,
+                      to: 1106,
+                    ),
+                    (
+                      road: 0,
+                      from: 1382,
+                      to: 1532,
+                    ),
+                  ],
                 ),
                 (
                   id: 104,
-                  name: "South gravel sprint",
-                  kind: Sprint,
-                  road: 7,
-                  from: 8,
-                  to: 1098,
-                ),
-                (
-                  id: 105,
                   name: "Hillclimb",
                   kind: Sprint,
                   road: 1,
                   from: 8,
                   to: 2602,
+                  then: [],
                 ),
               ],
               grades: [],
@@ -27795,10 +27831,10 @@
       4294967283: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
-          "bevy_ecs::name::Name": "event start: Fernhollow rally",
+          "bevy_ecs::name::Name": "event start: Fernhollow escarpment",
           "bevy_transform::components::transform::Transform": (
-            translation: (-1294.0728, 416.84753, 1470.7698),
-            rotation: (0.0, -0.7881872, 0.0, 0.6154356),
+            translation: (-290.9619, 92.732475, -1067.7025),
+            rotation: (0.0, 0.99889207, 0.0, 0.04705939),
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
@@ -27812,10 +27848,10 @@
       4294967282: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
-          "bevy_ecs::name::Name": "event start: Blackpine rally",
+          "bevy_ecs::name::Name": "event start: Blackpine marathon",
           "bevy_transform::components::transform::Transform": (
-            translation: (-290.9619, 92.732475, -1067.7025),
-            rotation: (0.0, 0.99889207, 0.0, 0.04705939),
+            translation: (-1794.0212, 99.37756, -1217.2059),
+            rotation: (0.0, 0.85655314, 0.0, 0.5160588),
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
@@ -27829,10 +27865,10 @@
       4294967281: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
-          "bevy_ecs::name::Name": "event start: East gravel sprint",
+          "bevy_ecs::name::Name": "event start: Quarry loop",
           "bevy_transform::components::transform::Transform": (
-            translation: (1791.0208, 90.68436, -1178.1201),
-            rotation: (0.0, -0.99337125, 0.0, 0.11495034),
+            translation: (292.13, 89.53139, -1179.9209),
+            rotation: (0.0, -0.6984096, 0.0, 0.71569824),
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
@@ -27846,10 +27882,10 @@
       4294967280: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
-          "bevy_ecs::name::Name": "event start: East gravel sprint",
+          "bevy_ecs::name::Name": "event start: River crossings",
           "bevy_transform::components::transform::Transform": (
-            translation: (276.27176, 89.72063, -1163.2856),
-            rotation: (0.0, -0.9975229, 0.0, 0.07034289),
+            translation: (-1196.991, 95.62015, -1150.0),
+            rotation: (0.0, -0.70710677, 0.0, 0.70710677),
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
@@ -27863,10 +27899,10 @@
       4294967279: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
-          "bevy_ecs::name::Name": "event start: South gravel sprint",
+          "bevy_ecs::name::Name": "event start: Hillclimb",
           "bevy_transform::components::transform::Transform": (
-            translation: (-897.3351, 95.81387, -1165.9792),
-            rotation: (0.0, 0.052518997, 0.0, 0.9986199),
+            translation: (-1794.0212, 99.37756, -1217.2059),
+            rotation: (0.0, 0.85655314, 0.0, 0.5160588),
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
@@ -27880,23 +27916,6 @@
       4294967278: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
-          "bevy_ecs::name::Name": "event start: Hillclimb",
-          "bevy_transform::components::transform::Transform": (
-            translation: (-1794.0212, 99.37756, -1217.2059),
-            rotation: (0.0, 0.85655314, 0.0, 0.5160588),
-            scale: (1.0, 1.0, 1.0),
-          ),
-          "engine::level::LevelEntity": (
-            id: (17),
-          ),
-          "pacenote::open::placeable::EventStart": (
-            event: 105,
-          ),
-        },
-      ),
-      4294967277: (
-        components: {
-          "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 0",
           "bevy_transform::components::transform::Transform": (
             translation: (-503.04367, 94.386635, -1136.2397),
@@ -27904,7 +27923,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (18),
+            id: (17),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -27920,7 +27939,7 @@
           ),
         },
       ),
-      4294967276: (
+      4294967277: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 1",
@@ -27930,7 +27949,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (19),
+            id: (18),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -27946,7 +27965,7 @@
           ),
         },
       ),
-      4294967275: (
+      4294967276: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 2",
@@ -27956,7 +27975,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (20),
+            id: (19),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -27972,7 +27991,7 @@
           ),
         },
       ),
-      4294967274: (
+      4294967275: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 3",
@@ -27982,7 +28001,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (21),
+            id: (20),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -27998,7 +28017,7 @@
           ),
         },
       ),
-      4294967273: (
+      4294967274: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 4",
@@ -28008,7 +28027,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (22),
+            id: (21),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28024,7 +28043,7 @@
           ),
         },
       ),
-      4294967272: (
+      4294967273: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 5",
@@ -28034,7 +28053,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (23),
+            id: (22),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28050,7 +28069,7 @@
           ),
         },
       ),
-      4294967271: (
+      4294967272: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 6",
@@ -28060,7 +28079,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (24),
+            id: (23),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28076,7 +28095,7 @@
           ),
         },
       ),
-      4294967270: (
+      4294967271: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 7",
@@ -28086,7 +28105,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (25),
+            id: (24),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28102,7 +28121,7 @@
           ),
         },
       ),
-      4294967269: (
+      4294967270: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 8",
@@ -28112,7 +28131,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (26),
+            id: (25),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28128,7 +28147,7 @@
           ),
         },
       ),
-      4294967268: (
+      4294967269: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 9",
@@ -28138,7 +28157,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (27),
+            id: (26),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28154,7 +28173,7 @@
           ),
         },
       ),
-      4294967267: (
+      4294967268: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 10",
@@ -28164,7 +28183,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (28),
+            id: (27),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28180,7 +28199,7 @@
           ),
         },
       ),
-      4294967266: (
+      4294967267: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 11",
@@ -28190,7 +28209,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (29),
+            id: (28),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28206,7 +28225,7 @@
           ),
         },
       ),
-      4294967265: (
+      4294967266: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 12",
@@ -28216,7 +28235,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (30),
+            id: (29),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28232,7 +28251,7 @@
           ),
         },
       ),
-      4294967264: (
+      4294967265: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 13",
@@ -28242,7 +28261,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (31),
+            id: (30),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28258,7 +28277,7 @@
           ),
         },
       ),
-      4294967263: (
+      4294967264: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 14",
@@ -28268,7 +28287,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (32),
+            id: (31),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28284,7 +28303,7 @@
           ),
         },
       ),
-      4294967262: (
+      4294967263: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "shop 15",
@@ -28294,7 +28313,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (33),
+            id: (32),
           ),
           "pacenote::open::level::Building": (
             kind: Shop,
@@ -28310,7 +28329,7 @@
           ),
         },
       ),
-      4294967261: (
+      4294967262: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 16",
@@ -28320,7 +28339,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (34),
+            id: (33),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28336,7 +28355,7 @@
           ),
         },
       ),
-      4294967260: (
+      4294967261: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 17",
@@ -28346,7 +28365,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (35),
+            id: (34),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28362,7 +28381,7 @@
           ),
         },
       ),
-      4294967259: (
+      4294967260: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 18",
@@ -28372,7 +28391,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (36),
+            id: (35),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28388,7 +28407,7 @@
           ),
         },
       ),
-      4294967258: (
+      4294967259: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "shop 19",
@@ -28398,7 +28417,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (37),
+            id: (36),
           ),
           "pacenote::open::level::Building": (
             kind: Shop,
@@ -28414,7 +28433,7 @@
           ),
         },
       ),
-      4294967257: (
+      4294967258: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 20",
@@ -28424,7 +28443,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (38),
+            id: (37),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28440,7 +28459,7 @@
           ),
         },
       ),
-      4294967256: (
+      4294967257: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 21",
@@ -28450,7 +28469,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (39),
+            id: (38),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28466,7 +28485,7 @@
           ),
         },
       ),
-      4294967255: (
+      4294967256: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 22",
@@ -28476,7 +28495,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (40),
+            id: (39),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28492,7 +28511,7 @@
           ),
         },
       ),
-      4294967254: (
+      4294967255: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "shop 23",
@@ -28502,7 +28521,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (41),
+            id: (40),
           ),
           "pacenote::open::level::Building": (
             kind: Shop,
@@ -28518,7 +28537,7 @@
           ),
         },
       ),
-      4294967253: (
+      4294967254: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "shop 24",
@@ -28528,7 +28547,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (42),
+            id: (41),
           ),
           "pacenote::open::level::Building": (
             kind: Shop,
@@ -28544,7 +28563,7 @@
           ),
         },
       ),
-      4294967252: (
+      4294967253: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 25",
@@ -28554,7 +28573,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (43),
+            id: (42),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28570,7 +28589,7 @@
           ),
         },
       ),
-      4294967251: (
+      4294967252: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 26",
@@ -28580,7 +28599,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (44),
+            id: (43),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28596,7 +28615,7 @@
           ),
         },
       ),
-      4294967250: (
+      4294967251: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 27",
@@ -28606,7 +28625,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (45),
+            id: (44),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28622,7 +28641,7 @@
           ),
         },
       ),
-      4294967249: (
+      4294967250: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 28",
@@ -28632,7 +28651,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (46),
+            id: (45),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28648,7 +28667,7 @@
           ),
         },
       ),
-      4294967248: (
+      4294967249: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 29",
@@ -28658,7 +28677,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (47),
+            id: (46),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28674,7 +28693,7 @@
           ),
         },
       ),
-      4294967247: (
+      4294967248: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 30",
@@ -28684,7 +28703,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (48),
+            id: (47),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28700,7 +28719,7 @@
           ),
         },
       ),
-      4294967246: (
+      4294967247: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 31",
@@ -28710,7 +28729,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (49),
+            id: (48),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28726,7 +28745,7 @@
           ),
         },
       ),
-      4294967245: (
+      4294967246: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 32",
@@ -28736,7 +28755,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (50),
+            id: (49),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28752,7 +28771,7 @@
           ),
         },
       ),
-      4294967244: (
+      4294967245: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 33",
@@ -28762,7 +28781,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (51),
+            id: (50),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28778,7 +28797,7 @@
           ),
         },
       ),
-      4294967243: (
+      4294967244: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 34",
@@ -28788,7 +28807,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (52),
+            id: (51),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28804,7 +28823,7 @@
           ),
         },
       ),
-      4294967242: (
+      4294967243: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 35",
@@ -28814,7 +28833,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (53),
+            id: (52),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28830,7 +28849,7 @@
           ),
         },
       ),
-      4294967241: (
+      4294967242: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 36",
@@ -28840,7 +28859,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (54),
+            id: (53),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28856,7 +28875,7 @@
           ),
         },
       ),
-      4294967240: (
+      4294967241: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 37",
@@ -28866,7 +28885,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (55),
+            id: (54),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28882,7 +28901,7 @@
           ),
         },
       ),
-      4294967239: (
+      4294967240: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 38",
@@ -28892,7 +28911,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (56),
+            id: (55),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28908,7 +28927,7 @@
           ),
         },
       ),
-      4294967238: (
+      4294967239: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 39",
@@ -28918,7 +28937,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (57),
+            id: (56),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28934,7 +28953,7 @@
           ),
         },
       ),
-      4294967237: (
+      4294967238: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 40",
@@ -28944,7 +28963,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (58),
+            id: (57),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28960,7 +28979,7 @@
           ),
         },
       ),
-      4294967236: (
+      4294967237: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 41",
@@ -28970,7 +28989,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (59),
+            id: (58),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -28986,7 +29005,7 @@
           ),
         },
       ),
-      4294967235: (
+      4294967236: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 42",
@@ -28996,7 +29015,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (60),
+            id: (59),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29012,7 +29031,7 @@
           ),
         },
       ),
-      4294967234: (
+      4294967235: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 43",
@@ -29022,7 +29041,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (61),
+            id: (60),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29038,7 +29057,7 @@
           ),
         },
       ),
-      4294967233: (
+      4294967234: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 44",
@@ -29048,7 +29067,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (62),
+            id: (61),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29064,7 +29083,7 @@
           ),
         },
       ),
-      4294967232: (
+      4294967233: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 45",
@@ -29074,7 +29093,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (63),
+            id: (62),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29090,7 +29109,7 @@
           ),
         },
       ),
-      4294967231: (
+      4294967232: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 46",
@@ -29100,7 +29119,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (64),
+            id: (63),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29116,7 +29135,7 @@
           ),
         },
       ),
-      4294967230: (
+      4294967231: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 47",
@@ -29126,7 +29145,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (65),
+            id: (64),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29142,7 +29161,7 @@
           ),
         },
       ),
-      4294967229: (
+      4294967230: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 48",
@@ -29152,7 +29171,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (66),
+            id: (65),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29168,7 +29187,7 @@
           ),
         },
       ),
-      4294967228: (
+      4294967229: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 49",
@@ -29178,7 +29197,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (67),
+            id: (66),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29194,7 +29213,7 @@
           ),
         },
       ),
-      4294967227: (
+      4294967228: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 50",
@@ -29204,7 +29223,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (68),
+            id: (67),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29220,7 +29239,7 @@
           ),
         },
       ),
-      4294967226: (
+      4294967227: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 51",
@@ -29230,7 +29249,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (69),
+            id: (68),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29246,7 +29265,7 @@
           ),
         },
       ),
-      4294967225: (
+      4294967226: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 52",
@@ -29256,7 +29275,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (70),
+            id: (69),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29272,7 +29291,7 @@
           ),
         },
       ),
-      4294967224: (
+      4294967225: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 53",
@@ -29282,7 +29301,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (71),
+            id: (70),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29298,7 +29317,7 @@
           ),
         },
       ),
-      4294967223: (
+      4294967224: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 54",
@@ -29308,7 +29327,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (72),
+            id: (71),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29324,7 +29343,7 @@
           ),
         },
       ),
-      4294967222: (
+      4294967223: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 55",
@@ -29334,7 +29353,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (73),
+            id: (72),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29350,7 +29369,7 @@
           ),
         },
       ),
-      4294967221: (
+      4294967222: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 56",
@@ -29360,7 +29379,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (74),
+            id: (73),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29376,7 +29395,7 @@
           ),
         },
       ),
-      4294967220: (
+      4294967221: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 57",
@@ -29386,7 +29405,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (75),
+            id: (74),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29402,7 +29421,7 @@
           ),
         },
       ),
-      4294967219: (
+      4294967220: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 58",
@@ -29412,7 +29431,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (76),
+            id: (75),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29428,7 +29447,7 @@
           ),
         },
       ),
-      4294967218: (
+      4294967219: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 59",
@@ -29438,7 +29457,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (77),
+            id: (76),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29454,7 +29473,7 @@
           ),
         },
       ),
-      4294967217: (
+      4294967218: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 60",
@@ -29464,7 +29483,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (78),
+            id: (77),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29480,7 +29499,7 @@
           ),
         },
       ),
-      4294967216: (
+      4294967217: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 61",
@@ -29490,7 +29509,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (79),
+            id: (78),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29506,7 +29525,7 @@
           ),
         },
       ),
-      4294967215: (
+      4294967216: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 62",
@@ -29516,7 +29535,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (80),
+            id: (79),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29532,7 +29551,7 @@
           ),
         },
       ),
-      4294967214: (
+      4294967215: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 63",
@@ -29542,7 +29561,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (81),
+            id: (80),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29558,7 +29577,7 @@
           ),
         },
       ),
-      4294967213: (
+      4294967214: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 64",
@@ -29568,7 +29587,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (82),
+            id: (81),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29584,7 +29603,7 @@
           ),
         },
       ),
-      4294967212: (
+      4294967213: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 65",
@@ -29594,7 +29613,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (83),
+            id: (82),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29610,7 +29629,7 @@
           ),
         },
       ),
-      4294967211: (
+      4294967212: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 66",
@@ -29620,7 +29639,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (84),
+            id: (83),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29636,7 +29655,7 @@
           ),
         },
       ),
-      4294967210: (
+      4294967211: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 67",
@@ -29646,7 +29665,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (85),
+            id: (84),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29662,7 +29681,7 @@
           ),
         },
       ),
-      4294967209: (
+      4294967210: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 68",
@@ -29672,7 +29691,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (86),
+            id: (85),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29688,7 +29707,7 @@
           ),
         },
       ),
-      4294967208: (
+      4294967209: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 69",
@@ -29698,7 +29717,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (87),
+            id: (86),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29714,7 +29733,7 @@
           ),
         },
       ),
-      4294967207: (
+      4294967208: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "house 70",
@@ -29724,7 +29743,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (88),
+            id: (87),
           ),
           "pacenote::open::level::Building": (
             kind: House,
@@ -29740,7 +29759,7 @@
           ),
         },
       ),
-      4294967206: (
+      4294967207: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 71",
@@ -29750,7 +29769,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (89),
+            id: (88),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -29766,7 +29785,7 @@
           ),
         },
       ),
-      4294967205: (
+      4294967206: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 72",
@@ -29776,7 +29795,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (90),
+            id: (89),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -29792,7 +29811,7 @@
           ),
         },
       ),
-      4294967204: (
+      4294967205: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 73",
@@ -29802,7 +29821,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (91),
+            id: (90),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -29818,7 +29837,7 @@
           ),
         },
       ),
-      4294967203: (
+      4294967204: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 74",
@@ -29828,7 +29847,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (92),
+            id: (91),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -29844,7 +29863,7 @@
           ),
         },
       ),
-      4294967202: (
+      4294967203: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 75",
@@ -29854,7 +29873,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (93),
+            id: (92),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -29870,7 +29889,7 @@
           ),
         },
       ),
-      4294967201: (
+      4294967202: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 76",
@@ -29880,7 +29899,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (94),
+            id: (93),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -29896,7 +29915,7 @@
           ),
         },
       ),
-      4294967200: (
+      4294967201: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 77",
@@ -29906,7 +29925,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (95),
+            id: (94),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -29922,7 +29941,7 @@
           ),
         },
       ),
-      4294967199: (
+      4294967200: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 78",
@@ -29932,7 +29951,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (96),
+            id: (95),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -29948,7 +29967,7 @@
           ),
         },
       ),
-      4294967198: (
+      4294967199: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 79",
@@ -29958,7 +29977,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (97),
+            id: (96),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -29974,7 +29993,7 @@
           ),
         },
       ),
-      4294967197: (
+      4294967198: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 80",
@@ -29984,7 +30003,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (98),
+            id: (97),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30000,7 +30019,7 @@
           ),
         },
       ),
-      4294967196: (
+      4294967197: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 81",
@@ -30010,7 +30029,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (99),
+            id: (98),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30026,7 +30045,7 @@
           ),
         },
       ),
-      4294967195: (
+      4294967196: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 82",
@@ -30036,7 +30055,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (100),
+            id: (99),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30052,7 +30071,7 @@
           ),
         },
       ),
-      4294967194: (
+      4294967195: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 83",
@@ -30062,7 +30081,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (101),
+            id: (100),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30078,7 +30097,7 @@
           ),
         },
       ),
-      4294967193: (
+      4294967194: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 84",
@@ -30088,7 +30107,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (102),
+            id: (101),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30104,7 +30123,7 @@
           ),
         },
       ),
-      4294967192: (
+      4294967193: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 85",
@@ -30114,7 +30133,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (103),
+            id: (102),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30130,7 +30149,7 @@
           ),
         },
       ),
-      4294967191: (
+      4294967192: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 86",
@@ -30140,7 +30159,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (104),
+            id: (103),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30156,7 +30175,7 @@
           ),
         },
       ),
-      4294967190: (
+      4294967191: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 87",
@@ -30166,7 +30185,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (105),
+            id: (104),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30182,7 +30201,7 @@
           ),
         },
       ),
-      4294967189: (
+      4294967190: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 88",
@@ -30192,7 +30211,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (106),
+            id: (105),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30208,7 +30227,7 @@
           ),
         },
       ),
-      4294967188: (
+      4294967189: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 89",
@@ -30218,7 +30237,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (107),
+            id: (106),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30234,7 +30253,7 @@
           ),
         },
       ),
-      4294967187: (
+      4294967188: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 90",
@@ -30244,7 +30263,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (108),
+            id: (107),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30260,7 +30279,7 @@
           ),
         },
       ),
-      4294967186: (
+      4294967187: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 91",
@@ -30270,7 +30289,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (109),
+            id: (108),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30286,7 +30305,7 @@
           ),
         },
       ),
-      4294967185: (
+      4294967186: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 92",
@@ -30296,7 +30315,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (110),
+            id: (109),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30312,7 +30331,7 @@
           ),
         },
       ),
-      4294967184: (
+      4294967185: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 93",
@@ -30322,7 +30341,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (111),
+            id: (110),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30338,7 +30357,7 @@
           ),
         },
       ),
-      4294967183: (
+      4294967184: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 94",
@@ -30348,7 +30367,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (112),
+            id: (111),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30364,7 +30383,7 @@
           ),
         },
       ),
-      4294967182: (
+      4294967183: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 95",
@@ -30374,7 +30393,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (113),
+            id: (112),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30390,7 +30409,7 @@
           ),
         },
       ),
-      4294967181: (
+      4294967182: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 96",
@@ -30400,7 +30419,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (114),
+            id: (113),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30416,7 +30435,7 @@
           ),
         },
       ),
-      4294967180: (
+      4294967181: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 97",
@@ -30426,7 +30445,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (115),
+            id: (114),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30442,7 +30461,7 @@
           ),
         },
       ),
-      4294967179: (
+      4294967180: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 98",
@@ -30452,7 +30471,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (116),
+            id: (115),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30468,7 +30487,7 @@
           ),
         },
       ),
-      4294967178: (
+      4294967179: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 99",
@@ -30478,7 +30497,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (117),
+            id: (116),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30494,7 +30513,7 @@
           ),
         },
       ),
-      4294967177: (
+      4294967178: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 100",
@@ -30504,7 +30523,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (118),
+            id: (117),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30520,7 +30539,7 @@
           ),
         },
       ),
-      4294967176: (
+      4294967177: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 101",
@@ -30530,7 +30549,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (119),
+            id: (118),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30546,7 +30565,7 @@
           ),
         },
       ),
-      4294967175: (
+      4294967176: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 102",
@@ -30556,7 +30575,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (120),
+            id: (119),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30572,7 +30591,7 @@
           ),
         },
       ),
-      4294967174: (
+      4294967175: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 103",
@@ -30582,7 +30601,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (121),
+            id: (120),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30598,7 +30617,7 @@
           ),
         },
       ),
-      4294967173: (
+      4294967174: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 104",
@@ -30608,7 +30627,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (122),
+            id: (121),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30624,7 +30643,7 @@
           ),
         },
       ),
-      4294967172: (
+      4294967173: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 105",
@@ -30634,7 +30653,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (123),
+            id: (122),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30650,7 +30669,7 @@
           ),
         },
       ),
-      4294967171: (
+      4294967172: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 106",
@@ -30660,7 +30679,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (124),
+            id: (123),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30676,7 +30695,7 @@
           ),
         },
       ),
-      4294967170: (
+      4294967171: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 107",
@@ -30686,7 +30705,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (125),
+            id: (124),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30702,7 +30721,7 @@
           ),
         },
       ),
-      4294967169: (
+      4294967170: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "farmhouse 108",
@@ -30712,7 +30731,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (126),
+            id: (125),
           ),
           "pacenote::open::level::Building": (
             kind: FarmHouse,
@@ -30728,7 +30747,7 @@
           ),
         },
       ),
-      4294967168: (
+      4294967169: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "barn 109",
@@ -30738,7 +30757,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (127),
+            id: (126),
           ),
           "pacenote::open::level::Building": (
             kind: Barn,
@@ -30754,7 +30773,7 @@
           ),
         },
       ),
-      4294967167: (
+      4294967168: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "Trees",
@@ -30764,7 +30783,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (128),
+            id: (127),
           ),
           "engine::pcg::PcgFollowTerrain": (),
           "engine::pcg::overrides::PcgOverrides": (
@@ -30776,7 +30795,7 @@
           "pacenote::open::level::Foliage": Trees,
         },
       ),
-      4294967166: (
+      4294967167: (
         components: {
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "Dressing",
@@ -30786,7 +30805,7 @@
             scale: (1.0, 1.0, 1.0),
           ),
           "engine::level::LevelEntity": (
-            id: (129),
+            id: (128),
           ),
           "engine::pcg::PcgFollowTerrain": (),
           "engine::pcg::overrides::PcgOverrides": (

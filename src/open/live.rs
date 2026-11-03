@@ -211,10 +211,16 @@ fn settle(world: &mut World) {
 fn follow_events(old: &RoadNet, new: &mut WorldData) {
     let roads: Vec<_> = new.roads.clone();
     for e in &mut new.events {
-        let (Some(o), Some(r)) = (old.roads.get(e.road as usize), roads.get(e.road as usize)) else { continue };
-        let p = o.road.pts[(e.to as usize).min(o.road.len() - 1)];
-        let d = |q: &super::data::RoadPoint| Vec2::new(q.pos.x - p.x, q.pos.z - p.z).length_squared();
-        e.to = r.points.iter().enumerate().min_by(|a, b| d(a.1).total_cmp(&d(b.1))).map_or(0, |(i, _)| i as u32);
+        let from = e.from;
+        // Every station of the route goes to the nearest one of its road's new course (the start
+        // keeps its own: the `EventStart` marker sets it).
+        e.remap(|road, station| {
+            let (Some(o), Some(r)) = (old.roads.get(road as usize), roads.get(road as usize)) else { return station };
+            let p = o.road.pts[(station as usize).min(o.road.len() - 1)];
+            let d = |q: &super::data::RoadPoint| Vec2::new(q.pos.x - p.x, q.pos.z - p.z).length_squared();
+            r.points.iter().enumerate().min_by(|a, b| d(a.1).total_cmp(&d(b.1))).map_or(station, |(i, _)| i as u32)
+        });
+        e.from = from;
     }
 }
 

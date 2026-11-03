@@ -84,10 +84,10 @@ Ticked as each step lands on main (commit in brackets).
 - [x] 4.7 Dusty tarmac for 40 m after a gravel junction
 
 ### Phase 5: events as chains
-- [ ] 5.1 Event = ordered road pieces across junctions (data, level file, editor)
-- [ ] 5.2 4-15 km stages with mixed surfaces, flying finish onto a liaison road
-- [ ] 5.3 Pace notes, ghosts and records over the chained route
-- [ ] 5.4 Tape and marshal barriers across unused junction branches during an event
+- [x] 5.1 Event = ordered road pieces across junctions (data, level file, editor)
+- [x] 5.2 4-15 km stages with mixed surfaces, flying finish onto a liaison road
+- [x] 5.3 Pace notes, ghosts and records over the chained route
+- [x] 5.4 Tape and marshal barriers across unused junction branches during an event
 
 ### Phase 6: ecology and road dressing
 - [ ] 6.1 Biomes by elevation, slope and moisture (valley farmland/hedges/stone walls, plantations, alpine rock/heather)
@@ -126,3 +126,12 @@ Ticked as each step lands on main (commit in brackets).
   undulate (25-35 m, up to 0.2 m). New surfaces `Loose` (marbles: crown, outside of bends,
   beyond the tracks; 85 % of gravel's grip), `Ditch` (drag: a car coasting from 40 km/h with two
   wheels in keeps 22 km/h after 2 s vs 26 on the road) and `Dusty` (82 % of tarmac).
+- Phase 5: done. An event's route is a chain of pieces (`EventData` keeps its first piece in
+  `road`/`from`/`to` and the rest in `then: Vec<Leg>`; a piece runs backwards when `from > to`;
+  old level files read as one piece). Pieces must meet within 3 m; the route rounds the turn at
+  each joint, turns banking round on a piece driven backwards, and `route_s` finds a station on
+  any piece (grade notes). Five stages: Fernhollow escarpment (rally, 6.9 km, forest), Blackpine
+  marathon (rally, 12.8 km: tarmac hillclimb, plateau gravel, basin descent), Quarry loop
+  (5.2 km, tarmac and gravel), River crossings (2.8 km, two river crossings), Hillclimb
+  (5.2 km tarmac). While one runs, red and white tape closes every junction branch the route
+  doesn't take (`events::closed_arms`); it goes when you leave. Visual only (no collision).

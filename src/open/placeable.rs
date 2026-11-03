@@ -133,7 +133,9 @@ pub fn gather(world: &mut World, data: &WorldData, net: &RoadNet) -> WorldData {
         let Some(e) = out.events.iter_mut().find(|e| e.id == s.event) else { continue };
         if let Some((_, i)) = station(t.translation, Some(e.road as usize)) {
             let i = i as u32;
-            if e.kind == super::events::EventKind::Lap || i + MIN_EVENT_STATIONS <= e.to {
+            // (Not onto or past the end of its first piece, whichever way that runs.)
+            let ok = if e.from <= e.to { i + MIN_EVENT_STATIONS <= e.to } else { i >= e.to + MIN_EVENT_STATIONS };
+            if e.kind == super::events::EventKind::Lap || ok {
                 e.from = i;
             } else {
                 warn!("event {} \"{}\": start moved to or past its finish; kept at station {}", e.id, e.name, e.from);

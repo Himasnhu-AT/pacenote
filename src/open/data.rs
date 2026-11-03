@@ -164,10 +164,20 @@ impl WorldData {
         let len = |road: u32| self.roads.get(road as usize).map(|r| r.points.len());
         for e in &self.events {
             let Some(n) = len(e.road) else { return Err(format!("event {}: no road {}", e.id, e.road)) };
-            let ok = if e.kind == events::EventKind::Lap { self.roads[e.road as usize].closed && (e.from as usize) < n } else { e.from < e.to && (e.to as usize) < n };
-            if !ok {
-                return Err(format!("event {}: stations {}..={} on road {} ({n} points)", e.id, e.from, e.to, e.road));
+            if e.kind == events::EventKind::Lap {
+                if !(self.roads[e.road as usize].closed && (e.from as usize) < n) {
+                    return Err(format!("event {}: a lap from station {} on road {} ({n} points)", e.id, e.from, e.road));
+                }
+                continue;
             }
+            if e.then.len() > 64 {
+                return Err(format!("event {}: {} pieces", e.id, e.then.len()));
+            }
+            let pos = |r: u32, i: u32| {
+                let p = self.roads[r as usize].points[i as usize].pos;
+                Vec2::new(p.x, p.z)
+            };
+            events::check_legs(len, pos, &e.legs()).map_err(|m| format!("event {}: {m}", e.id))?;
         }
         if self.events.iter().enumerate().any(|(i, e)| self.events[..i].iter().any(|o| o.id == e.id)) {
             return Err("two events share an id".into());
@@ -377,6 +387,8 @@ mod tests {
                 d.events[0].road = open;
             })),
             ("duplicate event id", Box::new(|d| d.events[1].id = d.events[0].id)),
+            ("pieces that don't meet", Box::new(|d| d.events[0].then.push(events::Leg { road: 0, from: 10, to: 40 }))),
+            ("a piece off its road", Box::new(|d| d.events[0].then.push(events::Leg { road: 3, from: 10, to: 100_000 }))),
             ("grade 9", Box::new(|d| d.grades.push(GradeOverride { road: 0, station: 1, grade: 9 }))),
             ("grade off the road", Box::new(|d| d.grades.push(GradeOverride { road: 0, station: 99_999, grade: 2 }))),
             ("speed limit NaN", Box::new(|d| d.roads[0].speed_kmh = Some(f32::NAN))),

@@ -225,11 +225,13 @@ x = −2,000 m                                             x = +2,000 m
 
 ### 4.6 Events, home and traffic on the map
 
-- **Events (6)**, each a stretch of one road (chains across junctions come in phase 5): a
-  **rally** on the mountain pass and on the forestry road, a **sprint** on each gravel road,
-  and the **hillclimb**. A translucent coloured marker at each start; stop within 9 m for 0.6 s
-  to start. In the level, an event's start is an `EventStart` marker; name, kind and finish are
-  in the `WorldDoc`. Pace-note grades can be set by hand with `GradeNote` markers.
+- **Events (5)**, each a **chain of road pieces across junctions** (`EventData::then`):
+  **Fernhollow escarpment** (rally, 6.9 km of forest track from the village to the plateau),
+  **Blackpine marathon** (rally, 12.8 km: tarmac hillclimb, gravel over the plateau, down the
+  basin road), **Quarry loop** (5.2 km, tarmac and gravel round the basin), **River crossings**
+  (2.8 km, over the river twice) and the **Hillclimb** (5.2 km tarmac). Each finishes onto a
+  road that leads on. A translucent coloured marker at each start; stop within 9 m for 0.6 s to
+  start. While one runs, **red and white tape** closes every junction branch it doesn't take.
 - Starting sets the world's active route (`StageWorld::road`) and computes its corners and
   crests, so the stage machinery runs it: countdown, clock, pace notes (hairpin / square / 2-6,
   tightens, opens, over crest, crest into, narrows, off camber), records and ghosts keyed by

@@ -360,10 +360,9 @@ pub fn through_splines(data: &WorldData) -> (WorldData, Vec<(Spline, RoadSpline)
     let splines: Vec<(Spline, RoadSpline)> = data.roads.iter().map(road_spline).collect();
     out.roads = splines.iter().map(|(s, info)| spline_road(s, info, &Transform::IDENTITY)).collect();
     let at = |road: u32, station: u32| data.roads[road as usize].points[(station as usize).min(data.roads[road as usize].points.len() - 1)].pos;
-    for (e, old) in out.events.iter_mut().zip(&data.events) {
-        let new = &out.roads[old.road as usize];
-        e.from = nearest_station(new, at(old.road, old.from));
-        e.to = nearest_station(new, at(old.road, old.to));
+    let new_roads = out.roads.clone();
+    for e in out.events.iter_mut() {
+        e.remap(|road, station| nearest_station(&new_roads[road as usize], at(road, station)));
     }
     for (g, old) in out.grades.iter_mut().zip(&data.grades) {
         g.station = nearest_station(&out.roads[old.road as usize], at(old.road, old.station));
@@ -729,6 +728,7 @@ mod tests {
             if p.to_string_lossy().ends_with(".level.ron") {
                 let l = load(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
                 assert!(!l.data.roads.is_empty(), "{}", p.display());
+                assert!(!l.data.events.is_empty(), "{}: no events", p.display());
                 n += 1;
             }
         }
