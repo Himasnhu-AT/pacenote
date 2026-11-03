@@ -299,7 +299,7 @@ pub fn refresh(world: &mut World, boxes: &[(Vec2, Vec2)], town: bool) -> Result<
         world.entity_mut(e).despawn();
     }
     for e in spawned(world, |w| crate::art::ground::spawn_road(w, &s)) {
-        world.entity_mut(e).insert(LiveRoadMesh);
+        world.entity_mut(e).insert((LiveRoadMesh, engine::level::GeneratedBy("pacenote::roads")));
     }
     // Buildings.
     if town {

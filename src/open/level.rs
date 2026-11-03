@@ -224,7 +224,7 @@ impl Plugin for LevelTypesPlugin {
             .register_type::<WorldDoc>()
             .register_type::<Foliage>()
             .register_type::<Building>()
-            .register_placeable::<Building>("Building", "building", "Pacenote")
+            .register_placeable::<Building>("Building", "building", "Pacenote / Buildings")
             .add_systems(PreStartup, pick_source)
             .add_systems(PostUpdate, sync_buildings.before(bevy::transform::TransformSystems::Propagate))
             .add_systems(Update, adopt_volumes);

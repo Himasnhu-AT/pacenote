@@ -1366,8 +1366,8 @@ mod render {
             let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
             let mut e = world.spawn((Name::new(name), Mesh3d(h), MeshMaterial3d(mat.clone()), Transform::from_translation(at), Scenery, KeepDetail));
             match extra {
-                Some(k) => e.insert(BuildingMesh { block: k }),
-                None => e.insert(LooseBuilding),
+                Some(k) => e.insert((BuildingMesh { block: k }, engine::level::GeneratedBy("pacenote::town (sidewalks, paving)"))),
+                None => e.insert((LooseBuilding, engine::level::GeneratedBy("pacenote::buildings"))),
             };
             if let Some(a) = aabb {
                 e.insert((a, bevy::camera::visibility::NoAutoAabb));

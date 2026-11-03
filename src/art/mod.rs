@@ -101,7 +101,7 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     world.remove_resource::<terrain::PnTerrainHandle>();
     world.insert_resource(terrain::TerrainPlan(ground::layers(s.def.biome, wet(&s.def))));
     for e in crate::open::live::spawned(world, |w| ground::spawn_road(w, s)) {
-        world.entity_mut(e).insert(crate::open::live::LiveRoadMesh);
+        world.entity_mut(e).insert((crate::open::live::LiveRoadMesh, engine::level::GeneratedBy("pacenote::roads")));
     }
     let cat = dressing::catalog(world, s.def.biome, wet(&s.def));
     world.insert_resource(cat);

@@ -53,9 +53,9 @@ impl Plugin for PlaceablePlugin {
         app.register_type::<HomePoint>()
             .register_type::<EventStart>()
             .register_type::<GradeNote>()
-            .register_placeable::<HomePoint>("Home", "home", "Pacenote")
-            .register_placeable::<EventStart>("Event start", "flag", "Pacenote")
-            .register_placeable::<GradeNote>("Pace-note grade", "note", "Pacenote");
+            .register_placeable::<HomePoint>("Home", "home", "Pacenote / Player")
+            .register_placeable::<EventStart>("Event start", "flag", "Pacenote / Events")
+            .register_placeable::<GradeNote>("Pace-note grade", "note", "Pacenote / Events");
     }
 }
 

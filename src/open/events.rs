@@ -268,6 +268,7 @@ fn setup(world: &mut World) {
             world.spawn((
                 Name::new(format!("event marker: {}", e.name)),
                 Marker,
+                engine::level::GeneratedBy("pacenote::events"),
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat),
                 Transform::from_translation(p + Vec3::Y * 3.5),

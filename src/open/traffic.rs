@@ -1323,7 +1323,7 @@ fn draw(
         }
         let paint = art.paint[c.color as usize % art.paint.len()].clone();
         commands
-            .spawn((Name::new("traffic car"), TrafficCar { id: c.id, shadows: false }, pose(c), Visibility::default(), engine::render_budget::Actor, DespawnOnExit(engine::flow::AppState::InGame)))
+            .spawn((Name::new("traffic car"), engine::level::GeneratedBy("pacenote::traffic"), TrafficCar { id: c.id, shadows: false }, pose(c), Visibility::default(), engine::render_budget::Actor, DespawnOnExit(engine::flow::AppState::InGame)))
             .with_children(|p| {
                 p.spawn((Mesh3d(art.body.clone()), MeshMaterial3d(paint), bevy::light::NotShadowCaster));
                 p.spawn((Mesh3d(art.glass.clone()), MeshMaterial3d(art.glass_mat.clone()), bevy::light::NotShadowCaster));
