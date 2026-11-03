@@ -43,6 +43,61 @@ Each phase is playable, tested and merged to main on its own.
 6. **Ecology and road dressing**: biome rules from elevation/slope/moisture, clear-cuts,
    alpine zone, chevrons, marshal and finish boards, culverts and rocks in ditches.
 
+## Checklist
+
+Ticked as each step lands on main (commit in brackets).
+
+### Phase 1: pace-note grades and analyzer
+- [ ] 1.1 Radius table: hairpin 7-12, 1 13-22, 2 23-35, 3 36-55, 4 56-90, 5 91-150, 6 151-220 m
+- [ ] 1.2 Tightens / opens within one turn
+- [ ] 1.3 Crest + corner ("over crest", "crest into")
+- [ ] 1.4 Narrows (> 1 m within 40 m)
+- [ ] 1.5 Off-camber from bank against the turn
+- [ ] 1.6 Don't cut (per-station hazard on `Road`, set by phase 6)
+- [ ] 1.7 Co-driver phrases; tests on synthetic roads
+
+### Phase 2: wall collision
+- [ ] 2.1 Line-segment wall with top height in the car sim
+- [ ] 2.2 Normal impulse + tangential friction (scrape, no snag), damage, segment ends, passing over
+- [ ] 2.3 Building walls become segments (generated and level buildings, live edits)
+- [ ] 2.4 Tests: 110 km/h 4° brush keeps speed, 90° hit stops, end = post, above = passes
+
+### Phase 3: terrain and road network
+- [ ] 3.1 Terrain: zones (valley 80-120 m, basin 140-240, escarpment 180-380, plateau 380-480), river valley, domain-warped ridges
+- [ ] 3.2 Droplet hydraulic erosion (bake time, deterministic) + moisture map
+- [ ] 3.3 Points of interest: village, service park, logging camp, quarry, radio tower, river crossings
+- [ ] 3.4 Anisotropic A* (10 m grid, headings; grade 4% target / 14% max, cross-slope, turning) with switchbacks
+- [ ] 3.5 Path to centreline: smoothing that keeps 7-12 m hairpins; road heights from the land with grade limit, crests kept
+- [ ] 3.6 Road kinds and widths: village lane, B-road 6-7 m, fast gravel 4.2-5 m, forest 3.0-3.8 m; no dead ends (turnaround loops)
+- [ ] 3.7 Network: B-road along the river, tarmac hillclimb, gravel basin loop, forestry escarpment, mountain pass, logging loops
+- [ ] 3.8 Valley village (80-120 buildings along the roads) and service park yard
+- [ ] 3.9 Traffic on the new kinds (B-road and village only), spawn in the service park
+- [ ] 3.10 Re-bake the level, editor live-edit still works (base terrain kept for reshaping), docs
+
+### Phase 4: cross-section and grip
+- [ ] 4.1 Crown (+6-10 cm) in the road profile, mesh and car ground
+- [ ] 4.2 Banking mix: 60% +2-4°, 25% flat, 15% off-camber -2-5° (flagged)
+- [ ] 4.3 Cut-side V ditch (0.25-0.45 m deep, 0.8-1.2 m wide), exact in the car's ground, drawn in the road mesh
+- [ ] 4.4 Fill side: 0.5 m shoulder, then a 1.5-4 m steep bank where the land falls > 20%
+- [ ] 4.5 Micro-undulation (12-35 m, ±0.15-0.45 m) on gravel and forest
+- [ ] 4.6 Lateral grip: wheel tracks (2 cm ruts), crown/outside marbles 82-88%, ditch drag
+- [ ] 4.7 Dusty tarmac for 40 m after a gravel junction
+
+### Phase 5: events as chains
+- [ ] 5.1 Event = ordered road pieces across junctions (data, level file, editor)
+- [ ] 5.2 4-15 km stages with mixed surfaces, flying finish onto a liaison road
+- [ ] 5.3 Pace notes, ghosts and records over the chained route
+- [ ] 5.4 Tape and marshal barriers across unused junction branches during an event
+
+### Phase 6: ecology and road dressing
+- [ ] 6.1 Biomes by elevation, slope and moisture (valley farmland/hedges/stone walls, plantations, alpine rock/heather)
+- [ ] 6.2 Clear-cuts 150-300 m: stumps (0.3 m solids), timber piles, sightlines
+- [ ] 6.3 Snow poles on the alpine edge
+- [ ] 6.4 Chevrons on deceptive corners, marshal posts, 100 m finish boards
+- [ ] 6.5 Culverts / rocks in inside ditches, setting don't-cut
+- [ ] 6.6 Brake and scuff marks before grade 1-3 corners
+- [ ] 6.7 Bridges with stone parapets (wall segments) at river crossings
+
 ## Status
 
 - Phase 1: in progress.
