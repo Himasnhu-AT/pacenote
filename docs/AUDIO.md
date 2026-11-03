@@ -155,10 +155,10 @@ compressor; impacts are caught.
 
 **Co-driver** (`voice.rs`, `codriver/speech.rs`). The co-driver speaks from a phrase bank, not
 a text-to-speech engine, so it sounds the same on macOS and Windows:
-- 130 clips in `assets/sounds/voice/` (mono 24 kHz Ogg Vorbis, ~1 MB; `bank.txt` lists what
-  each says): numbers 0-59 (times, splits; 2-6 double as the grades), distances 60-190 by 10
-  and 200-1000 by 50 ("one fifty", "two hundred"), the note words (left, right, hairpin, long,
-  over crest, narrows, careful, into, flying finish, flat out, ready, …), times (split, minute,
+- 136 clips in `assets/sounds/voice/` (mono 24 kHz Ogg Vorbis, ~1 MB; `bank.txt` lists what
+  each says): numbers 0-59 (times, splits; 1-6 double as the grades in "tightens one"), distances 60-190 by 10
+  and 200-1000 by 50 ("one fifty", "two hundred"), the note words (left, right, hairpin, square, tightens,
+  opens, long, over crest, crest into, don't cut, narrows, off camber, careful, into, flying finish, flat out, ready, …), times (split, minute,
   point, seconds, stop, stage time), damage ("Big hit!", "the engine", "is badly damaged",
   "nurse it home", "it's pulling left", …) and recovery ("We're on the roof.", "Press R to get
   back on the road.", …).

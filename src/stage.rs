@@ -7,7 +7,8 @@
 //! - **Terrain**: base hills for the biome, then shaped to the road: flat across the road
 //!   (with banking), a flat shoulder each side, then gentle fills and banks blended back into
 //!   the hills. The road follows the lower ground, so it mostly runs in a shallow cutting.
-//! - **Corners**: runs of curvature graded 1 (hairpin) … 6 (flat-out kink), with crests.
+//! - **Corners**: runs of curvature graded hairpin, 1 (square) … 6 (flat-out kink) by radius,
+//!   with crest, tightens / opens, narrows, off-camber and don't-cut calls.
 
 use bevy::math::{Vec2, Vec3};
 use pcg_core::{mix64, unit};
@@ -240,6 +241,10 @@ pub struct Road {
     /// Crossfall: height change per metre to the left (banking into corners).
     pub bank: Vec<f32>,
     pub surface: Vec<Surface>,
+    /// A hazard on the inside edge at this station (a ditch culvert, a rock): cutting the
+    /// corner here breaks the car, so its pace note gets "don't cut". All false until the
+    /// road dressing sets it.
+    pub dont_cut: Vec<bool>,
     grid: SegGrid,
 }
 
@@ -276,13 +281,15 @@ impl Road {
                 }
                 let (a, b) = (pts2[i] - pts2[i - 1], pts2[i + 1] - pts2[i]);
                 let len = 0.5 * (a.length() + b.length());
-                if len < 1e-4 { 0.0 } else { libm::atan2f(a.perp_dot(b), a.dot(b)) / len }
+                // + = left. In XZ seen from above (+Y) a left turn goes from +X towards -Z, a
+                // clockwise turn in (x, z), so `b` is clockwise of `a`: b × a > 0.
+                if len < 1e-4 { 0.0 } else { libm::atan2f(b.perp_dot(a), a.dot(b)) / len }
             })
             .collect();
         let curv = smooth(&raw, 3);
         let bank: Vec<f32> = curv.iter().map(|k| (-k * 9.0).clamp(-0.07, 0.07)).collect();
         let grid = SegGrid::build(&pts, 32.0);
-        Road { pts, dir, curv, width, bank, surface, grid }
+        Road { dont_cut: vec![false; pts.len()], pts, dir, curv, width, bank, surface, grid }
     }
 
     pub fn len(&self) -> usize {
@@ -566,7 +573,7 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
     // Banked into the corner: a left-hander is lower on the left (lateral +).
     let bank: Vec<f32> = curv.iter().map(|k| (-k * 9.0).clamp(-0.07, 0.07)).collect();
     let grid = SegGrid::build(&pts, 32.0);
-    Road { pts, dir, curv, width, bank, surface, grid }
+    Road { dont_cut: vec![false; pts.len()], pts, dir, curv, width, bank, surface, grid }
 }
 
 /// Steps along a feature from `pos`: curvature eases towards `target_k` then back to zero.
@@ -701,37 +708,115 @@ pub fn surface_at(x: f32, z: f32, road: &Road) -> Surface {
 
 // ---------------------------------------------------------------- corners
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Turn {
+    #[default]
     Left,
     Right,
 }
 
+/// The grade of a hairpin (or acute corner): tighter than a 1 ("square").
+pub const HAIRPIN: u8 = 0;
+
 /// One pace-note entry.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// The fields after `narrows` came with the sim-rally grades (docs/RALLY_MAP.md phase 1) and
+/// default when absent, so older serialised corners still read.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Corner {
     /// Metres from the start where it begins / ends.
     pub start: f32,
     pub end: f32,
     pub turn: Turn,
-    /// 1 = hairpin … 6 = flat-out kink.
+    /// By the radius at the tightest point ([`grade_for`]): [`HAIRPIN`] (0), 1 = square …
+    /// 6 = flat-out kink.
     pub grade: u8,
     /// Total direction change (degrees).
     pub angle: f32,
-    /// The road goes over a crest in it (or just before).
+    /// A sharp crest (vertical curvature under [`CREST_KV`]) in the corner or up to
+    /// [`CREST_REACH`] m before it.
     pub crest: bool,
-    /// Narrower than usual.
+    /// The width drops by more than [`NARROWS_DROP`] m within [`NARROWS_OVER`] m.
     pub narrows: bool,
+    /// The crest is before the corner: "crest into 2 right" (else "2 right over crest").
+    #[serde(default)]
+    pub crest_into: bool,
+    /// It tightens: the grade of the steady arc before the tightest part ("4 left tightens 1":
+    /// `tightens_from` 4, `grade` 1).
+    #[serde(default)]
+    pub tightens_from: Option<u8>,
+    /// It opens: the grade of the steady arc after the tightest part ("2 right opens 4").
+    #[serde(default)]
+    pub opens_to: Option<u8>,
+    /// Banked towards the outside at the tightest part (by more than [`OFF_CAMBER`]).
+    #[serde(default)]
+    pub off_camber: bool,
+    /// A hazard on the inside ([`Road::dont_cut`]) somewhere along it.
+    #[serde(default)]
+    pub dont_cut: bool,
 }
 
-/// Corners along the road, graded.
+impl Corner {
+    pub fn hairpin(&self) -> bool {
+        self.grade == HAIRPIN
+    }
+}
+
+/// A grade as the guide's screens write it: "H" for a hairpin, else its number.
+pub fn grade_label(grade: u8) -> &'static str {
+    ["H", "1", "2", "3", "4", "5", "6"][grade.min(6) as usize]
+}
+
+/// The grade of a corner `radius` m at its tightest point that turns `angle` degrees:
+/// hairpin under 13 m (or over 150° under 23 m), 1 (square) 13–22 m, 2 23–35, 3 36–55,
+/// 4 56–90, 5 91–150, 6 above (a flat kink past 220 m).
+pub fn grade_for(radius: f32, angle: f32) -> u8 {
+    if radius < 13.0 || (angle > 150.0 && radius < 23.0) {
+        return HAIRPIN;
+    }
+    match radius {
+        r if r < 23.0 => 1,
+        r if r < 36.0 => 2,
+        r if r < 56.0 => 3,
+        r if r < 91.0 => 4,
+        r if r < 151.0 => 5,
+        _ => 6,
+    }
+}
+
+/// Vertical curvature (1/m) under which a crest is called with a corner (R ≈ 67 m).
+pub const CREST_KV: f32 = -0.015;
+/// How far before a corner (m) a crest is called with it ("crest into …").
+pub const CREST_REACH: f32 = 25.0;
+/// A width drop (m) within [`NARROWS_OVER`] m that is called "narrows".
+pub const NARROWS_DROP: f32 = 1.0;
+pub const NARROWS_OVER: f32 = 40.0;
+/// Crossfall towards the outside (height per metre) past which a corner is "off camber".
+pub const OFF_CAMBER: f32 = 0.025;
+/// Curvature over which a corner starts / continues (1/m).
+const CORNER_IN: f32 = 1.0 / 400.0;
+const CORNER_ON: f32 = 1.0 / 600.0;
+/// Least turn (degrees) worth a call.
+const MIN_ANGLE: f32 = 8.0;
+/// The tightest part: stations within this share of the peak curvature.
+const TIGHT_SHARE: f32 = 1.0 / 1.4;
+/// Tightens / opens: a steady arc this many times the tightest radius (or more) …
+const COMPOUND_RATIO: f32 = 1.8;
+/// … over at least this many stations (20 m), its curvature within [`STEADY`] (max / min).
+const STEADY_N: usize = 10;
+const STEADY: f32 = 1.25;
+/// Arms (stations) of the vertical curvature estimate (± 10 m).
+const KV_ARM: usize = 5;
+
+/// Corners along the road, graded, with their compound calls (crest, tightens / opens,
+/// narrows, off camber, don't cut).
 pub fn corners(road: &Road) -> Vec<Corner> {
     let mut out = Vec::new();
     let mut i = 0;
     let n = road.len();
     while i < n {
         let k = road.curv[i];
-        if k.abs() < 1.0 / 400.0 {
+        if k.abs() < CORNER_IN {
             i += 1;
             continue;
         }
@@ -739,42 +824,78 @@ pub fn corners(road: &Road) -> Vec<Corner> {
         let start = i;
         let mut peak = 0.0f32;
         let mut angle = 0.0;
-        while i < n && road.curv[i].signum() == sign && road.curv[i].abs() >= 1.0 / 600.0 {
+        while i < n && road.curv[i].signum() == sign && road.curv[i].abs() >= CORNER_ON {
             peak = peak.max(road.curv[i].abs());
             angle += road.curv[i].abs() * STEP;
             i += 1;
         }
         let angle = angle.to_degrees();
-        if angle < 8.0 {
+        if angle < MIN_ANGLE {
             continue;
         }
-        let radius = 1.0 / peak.max(1e-4);
-        let mut grade = match radius {
-            r if r < 22.0 => 1,
-            r if r < 40.0 => 2,
-            r if r < 65.0 => 3,
-            r if r < 100.0 => 4,
-            r if r < 160.0 => 5,
-            _ => 6,
-        };
-        if angle > 150.0 && grade <= 2 {
-            grade = 1;
-        }
-        let (s0, s1) = (start as f32 * STEP, i as f32 * STEP);
-        let crest = crest_between(road, start.saturating_sub(15), i.min(n - 1));
-        let narrows = road.width[start..i.min(n)].iter().any(|w| *w < road.width[0] - 0.8);
-        out.push(Corner { start: s0, end: s1, turn: if sign > 0.0 { Turn::Left } else { Turn::Right }, grade, angle, crest, narrows });
+        let end = i; // exclusive
+        let grade = grade_for(1.0 / peak.max(1e-4), angle);
+        let tight = |k: &f32| k.abs() >= peak * TIGHT_SHARE;
+        let first_tight = start + road.curv[start..end].iter().position(tight).unwrap_or(0);
+        let last_tight = start + road.curv[start..end].iter().rposition(tight).unwrap_or(end - start - 1);
+        let steady_grade = |a: usize, b: usize| steady_arc(&road.curv[a..b], peak).map(|k| grade_for(1.0 / k, 0.0)).filter(|g| *g > grade);
+        // The sharpest crest from CREST_REACH before the corner to its end.
+        let reach = (CREST_REACH / STEP) as usize;
+        let crest_at = (start.saturating_sub(reach)..end)
+            .filter_map(|j| vertical_curvature(road, j).map(|kv| (j, kv)))
+            .filter(|(_, kv)| *kv < CREST_KV)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(j, _)| j);
+        // Off camber: the tightest part leans out. Bank is height per metre to the left and a
+        // left-hander's outside is on the right, so it leans out when the left is higher.
+        let lean = (first_tight..=last_tight).map(|j| road.bank.get(j).copied().unwrap_or(0.0) * sign).sum::<f32>() / (last_tight + 1 - first_tight) as f32;
+        out.push(Corner {
+            start: start as f32 * STEP,
+            end: end as f32 * STEP,
+            turn: if sign > 0.0 { Turn::Left } else { Turn::Right },
+            grade,
+            angle,
+            crest: crest_at.is_some(),
+            narrows: narrows_in(road, start.saturating_sub((NARROWS_OVER / STEP) as usize / 2), end),
+            crest_into: crest_at.is_some_and(|j| j < start),
+            tightens_from: steady_grade(start, first_tight),
+            opens_to: steady_grade(last_tight + 1, end),
+            off_camber: lean > OFF_CAMBER,
+            dont_cut: (start..end).any(|j| road.dont_cut.get(j).copied().unwrap_or(false)),
+        });
     }
     out
 }
 
-/// A crest: the road rises then falls sharply (vertical curvature) somewhere in `a..b`.
-fn crest_between(road: &Road, a: usize, b: usize) -> bool {
-    (a.max(5)..b.min(road.len().saturating_sub(5))).any(|i| {
-        let g0 = (road.pts[i].y - road.pts[i - 5].y) / (5.0 * STEP);
-        let g1 = (road.pts[i + 5].y - road.pts[i].y) / (5.0 * STEP);
-        g0 - g1 > 0.06
-    })
+/// The tightest steady arc in `curv` (part of one corner whose tightest curvature is `peak`):
+/// [`STEADY_N`] stations whose curvature stays within [`STEADY`], no tighter than `peak` /
+/// [`COMPOUND_RATIO`] and tight enough to grade (under 220 m). Its mean |curvature|.
+fn steady_arc(curv: &[f32], peak: f32) -> Option<f32> {
+    curv.windows(STEADY_N)
+        .filter_map(|w| {
+            let (lo, hi) = w.iter().fold((f32::MAX, 0.0f32), |(lo, hi), k| (lo.min(k.abs()), hi.max(k.abs())));
+            (lo >= 1.0 / 220.0 && hi * COMPOUND_RATIO <= peak && hi <= lo * STEADY).then(|| w.iter().map(|k| k.abs()).sum::<f32>() / w.len() as f32)
+        })
+        .max_by(|a, b| a.total_cmp(b))
+}
+
+/// Vertical curvature (1/m, negative over a crest) at station `i`, from the grades
+/// [`KV_ARM`] stations either side.
+fn vertical_curvature(road: &Road, i: usize) -> Option<f32> {
+    if i < KV_ARM || i + KV_ARM >= road.len() {
+        return None;
+    }
+    let arm = KV_ARM as f32 * STEP;
+    let g0 = (road.pts[i].y - road.pts[i - KV_ARM].y) / arm;
+    let g1 = (road.pts[i + KV_ARM].y - road.pts[i].y) / arm;
+    Some((g1 - g0) / arm)
+}
+
+/// The width drops by more than [`NARROWS_DROP`] within [`NARROWS_OVER`] m somewhere in
+/// stations `a..b`.
+fn narrows_in(road: &Road, a: usize, b: usize) -> bool {
+    let over = (NARROWS_OVER / STEP) as usize;
+    (a..b.min(road.len())).any(|j| road.width[j.saturating_sub(over)..j].iter().any(|w| w - road.width[j] > NARROWS_DROP))
 }
 
 /// Crests on straights too (the guide calls them).
@@ -901,8 +1022,196 @@ mod tests {
         let road = generate_road(def);
         let c = corners(&road);
         assert!(c.len() > 10, "{} corners", c.len());
-        assert!(c.iter().all(|c| (1..=6).contains(&c.grade) && c.end > c.start));
+        assert!(c.iter().all(|c| (HAIRPIN..=6).contains(&c.grade) && c.end > c.start));
         assert!(c.iter().any(|c| c.grade <= 3));
+    }
+
+    // ------------------------------------------------ the analyzer on synthetic roads
+
+    /// A road from a curvature schedule (1/m per station, + = left), flat unless `y` says so:
+    /// the heading turns towards the driver's left (up × direction) for + curvature.
+    fn synth(ks: &[f32], y: impl Fn(usize) -> f32, width: impl Fn(usize) -> f32) -> Road {
+        let mut p = Vec2::ZERO;
+        let mut h = 0.0f32;
+        let mut pts = vec![p];
+        for k in ks {
+            // Integrate on the half step so the station's curvature is the arc's.
+            h -= k * STEP * 0.5;
+            p += Vec2::new(h.cos(), h.sin()) * STEP;
+            h -= k * STEP * 0.5;
+            pts.push(p);
+        }
+        let n = pts.len();
+        Road::from_centreline(&pts, &(0..n).map(&y).collect::<Vec<_>>(), (0..n).map(&width).collect(), vec![Surface::Gravel; n])
+    }
+
+    /// `lead` m straight, `arc` m at `radius` (+ = left), `tail` m straight (in stations of STEP).
+    fn arc(lead: f32, radius: f32, arc: f32, tail: f32) -> Vec<f32> {
+        let st = |m: f32| (m / STEP).round() as usize;
+        let mut ks = vec![0.0; st(lead)];
+        ks.extend(std::iter::repeat_n(1.0 / radius, st(arc)));
+        ks.extend(std::iter::repeat_n(0.0, st(tail)));
+        ks
+    }
+
+    fn only(road: &Road) -> Corner {
+        let c = corners(road);
+        assert_eq!(c.len(), 1, "{c:#?}");
+        c[0].clone()
+    }
+
+    #[test]
+    fn from_centreline_left_is_left() {
+        // A left-hander built the way the driver sees it reads Turn::Left, positive curvature,
+        // and is banked into the corner (the left side lower).
+        let r = synth(&arc(40.0, 30.0, 40.0, 40.0), |_| 0.0, |_| 6.0);
+        let i = r.station(60.0);
+        assert!(r.curv[i] > 0.0, "curvature {}", r.curv[i]);
+        assert!(r.bank[i] < 0.0, "bank {}", r.bank[i]);
+        let c = only(&r);
+        assert_eq!(c.turn, Turn::Left);
+        assert!(!c.off_camber);
+        let d0 = r.dir[r.station(c.start)];
+        let d1 = r.dir[r.station(c.end)];
+        assert!(Vec2::new(d0.y, -d0.x).dot(d1) > 0.0, "turned the other way");
+    }
+
+    #[test]
+    fn arcs_grade_by_radius_at_each_boundary() {
+        // Just inside each band (a chord-sampled arc reads a hair tighter than its radius).
+        for (radius, grade) in [
+            (9.0, HAIRPIN),
+            (12.5, HAIRPIN),
+            (13.5, 1),
+            (22.5, 1),
+            (23.5, 2),
+            (35.5, 2),
+            (36.5, 3),
+            (55.5, 3),
+            (56.5, 4),
+            (90.5, 4),
+            (91.5, 5),
+            (150.5, 5),
+            (151.5, 6),
+            (219.0, 6),
+        ] {
+            // 100° of turn: below the acute-hairpin angle, and long enough that the curvature
+            // smoothing (± 3 stations) leaves the middle of the arc at its true radius.
+            let len = radius * 100f32.to_radians();
+            let r = synth(&arc(40.0, radius, len, 60.0), |_| 0.0, |_| 6.0);
+            let c = only(&r);
+            assert_eq!(c.grade, grade, "radius {radius}: {c:?}");
+            assert!(c.tightens_from.is_none() && c.opens_to.is_none(), "radius {radius}: {c:?}");
+            // And as a right-hander.
+            let ks: Vec<f32> = arc(40.0, radius, len, 60.0).iter().map(|k| -k).collect();
+            let c = only(&synth(&ks, |_| 0.0, |_| 6.0));
+            assert_eq!((c.grade, c.turn), (grade, Turn::Right), "radius {radius} right");
+        }
+        // Acute: over 150° under 23 m is a hairpin; a tiny turn on a big radius is no corner.
+        let r = synth(&arc(40.0, 20.0, 20.0 * 160f32.to_radians(), 60.0), |_| 0.0, |_| 6.0);
+        assert_eq!(only(&r).grade, HAIRPIN);
+        let r = synth(&arc(40.0, 300.0, 300.0 * 5f32.to_radians(), 60.0), |_| 0.0, |_| 6.0);
+        assert!(corners(&r).is_empty());
+        assert_eq!(grade_for(250.0, 20.0), 6);
+    }
+
+    #[test]
+    fn a_spiral_tightens_and_opens() {
+        // 50 m for 40 m, easing to 18 m: "3 left tightens 1".
+        let mut ks = vec![0.0; 20];
+        ks.extend(std::iter::repeat_n(1.0 / 50.0, 20));
+        ks.extend((0..5).map(|j| 1.0 / 50.0 + (1.0 / 18.0 - 1.0 / 50.0) * (j as f32 + 1.0) / 5.0));
+        ks.extend(std::iter::repeat_n(1.0 / 18.0, 6));
+        let tail = ks.len();
+        ks.extend(std::iter::repeat_n(0.0, 30));
+        let c = only(&synth(&ks, |_| 0.0, |_| 6.0));
+        assert_eq!((c.grade, c.tightens_from, c.opens_to), (1, Some(3), None), "{c:?}");
+        // Reversed: "1 left opens 3".
+        let mut rev: Vec<f32> = ks[..tail].iter().rev().copied().collect();
+        rev.extend(std::iter::repeat_n(0.0, 30));
+        let c = only(&synth(&rev, |_| 0.0, |_| 6.0));
+        assert_eq!((c.grade, c.tightens_from, c.opens_to), (1, None, Some(3)), "{c:?}");
+        // A plain arc with a short clothoid entry does not tighten.
+        let mut ks = vec![0.0; 20];
+        ks.extend((0..15).map(|j| (j as f32 + 1.0) / 15.0 / 15.0));
+        ks.extend(std::iter::repeat_n(1.0 / 15.0, 10));
+        ks.extend(std::iter::repeat_n(0.0, 30));
+        let c = only(&synth(&ks, |_| 0.0, |_| 6.0));
+        assert_eq!((c.tightens_from, c.opens_to), (None, None), "{c:?}");
+    }
+
+    #[test]
+    fn a_width_drop_narrows() {
+        let ks = arc(60.0, 40.0, 40.0, 60.0);
+        // 6 m to 4.6 m over 20 m just before the corner.
+        let r = synth(&ks, |_| 0.0, |i| if i < 20 { 6.0 } else if i < 30 { 6.0 - 1.4 * (i - 20) as f32 / 10.0 } else { 4.6 });
+        assert!(only(&r).narrows);
+        // A gentle 0.8 m drop is not called.
+        let r = synth(&ks, |_| 0.0, |i| if i < 25 { 6.0 } else { 5.2 });
+        assert!(!only(&r).narrows);
+        let r = synth(&ks, |_| 0.0, |_| 6.0);
+        assert!(!only(&r).narrows);
+    }
+
+    #[test]
+    fn leaning_out_is_off_camber() {
+        // A left-hander whose left (inside) is higher leans out; banked into it, it doesn't.
+        let ks = arc(40.0, 40.0, 40.0, 40.0);
+        let mut r = synth(&ks, |_| 0.0, |_| 6.0);
+        r.bank = vec![0.04; r.len()];
+        assert!(only(&r).off_camber);
+        r.bank = vec![-0.04; r.len()];
+        assert!(!only(&r).off_camber);
+        r.bank = vec![0.01; r.len()];
+        assert!(!only(&r).off_camber, "a slight lean is not called");
+        // A right-hander leans out when its left is lower.
+        let ks: Vec<f32> = ks.iter().map(|k| -k).collect();
+        let mut r = synth(&ks, |_| 0.0, |_| 6.0);
+        r.bank = vec![-0.04; r.len()];
+        assert!(only(&r).off_camber);
+    }
+
+    #[test]
+    fn crests_over_and_into() {
+        // A crest (vertical radius 40 m for 30 m, then the tangent grades) at station `at`;
+        // the corner runs over stations 30..50.
+        let hump = |at: f32| {
+            move |i: usize| {
+                let x = ((i as f32 - at) * STEP).abs();
+                let (r, half) = (40.0, 15.0);
+                if x <= half { -x * x / (2.0 * r) } else { -half * half / (2.0 * r) - (x - half) * half / r }
+            }
+        };
+        let ks = arc(60.0, 40.0, 40.0, 60.0);
+        let c = only(&synth(&ks, hump(40.0), |_| 6.0));
+        assert!(c.crest && !c.crest_into, "inside the corner: over crest {c:?}");
+        let c = only(&synth(&ks, hump(22.0), |_| 6.0));
+        assert!(c.crest && c.crest_into, "16 m before it: crest into {c:?}");
+        let c = only(&synth(&ks, hump(5.0), |_| 6.0));
+        assert!(!c.crest, "50 m before it is its own note {c:?}");
+        let c = only(&synth(&ks, |i| i as f32 * 0.1, |_| 6.0));
+        assert!(!c.crest, "a steady climb is no crest");
+    }
+
+    #[test]
+    fn hazards_inside_mean_dont_cut() {
+        let mut r = synth(&arc(40.0, 40.0, 40.0, 40.0), |_| 0.0, |_| 6.0);
+        assert!(!only(&r).dont_cut);
+        let i = r.station(50.0);
+        r.dont_cut[i] = true;
+        assert!(only(&r).dont_cut);
+        r.dont_cut = vec![false; r.len()];
+        let i = r.station(10.0);
+        r.dont_cut[i] = true;
+        assert!(!only(&r).dont_cut, "a hazard on the straight before is not the corner's");
+    }
+
+    #[test]
+    fn corners_read_without_the_new_fields() {
+        // Corners serialised before the compound calls existed still deserialise.
+        let old = r#"{"start":1.0,"end":2.0,"turn":"Left","grade":3,"angle":40.0,"crest":true,"narrows":false}"#;
+        let c: Corner = serde_json::from_str(old).unwrap();
+        assert_eq!((c.grade, c.crest, c.crest_into, c.tightens_from, c.dont_cut), (3, true, false, None, false));
     }
 }
 

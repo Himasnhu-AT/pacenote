@@ -282,8 +282,10 @@ line. Recovers and repairs are recorded in ghosts so replays match. Damage shows
 
 ### 5.3 Pace notes and the AI voice (`src/codriver/`)
 
-- Corners are extracted from road curvature and graded 1 (hairpin) … 6 (flat-out kink), with
-  "long", "over crest", "narrows", "careful". A planner reads notes ~4.5 s ahead (70–280 m),
+- Corners are extracted from road curvature and graded by the radius at the tightest point:
+  hairpin (< 13 m), 1 "square" (13–22) … 6 (151–220, a flat kink beyond), with "tightens" /
+  "opens", "crest into" / "over crest", "long", "don't cut", "narrows", "off camber", "careful"
+  (`stage::corners`, docs/RALLY_MAP.md phase 1). A planner reads notes ~4.5 s ahead (70–280 m),
   chaining close corners with "into". Damage lines and recovery hints.
 - Spoken with the **OS text-to-speech** (`say` on macOS, PowerShell on Windows, espeak or
   spd-say on Linux), not through the game's audio mixer. Silent in free roam.

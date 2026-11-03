@@ -48,19 +48,19 @@ Each phase is playable, tested and merged to main on its own.
 Ticked as each step lands on main (commit in brackets).
 
 ### Phase 1: pace-note grades and analyzer
-- [ ] 1.1 Radius table: hairpin 7-12, 1 13-22, 2 23-35, 3 36-55, 4 56-90, 5 91-150, 6 151-220 m
-- [ ] 1.2 Tightens / opens within one turn
-- [ ] 1.3 Crest + corner ("over crest", "crest into")
-- [ ] 1.4 Narrows (> 1 m within 40 m)
-- [ ] 1.5 Off-camber from bank against the turn
-- [ ] 1.6 Don't cut (per-station hazard on `Road`, set by phase 6)
-- [ ] 1.7 Co-driver phrases; tests on synthetic roads
+- [x] 1.1 Radius table: hairpin 7-12, 1 13-22, 2 23-35, 3 36-55, 4 56-90, 5 91-150, 6 151-220 m
+- [x] 1.2 Tightens / opens within one turn
+- [x] 1.3 Crest + corner ("over crest", "crest into")
+- [x] 1.4 Narrows (> 1 m within 40 m)
+- [x] 1.5 Off-camber from bank against the turn
+- [x] 1.6 Don't cut (per-station hazard on `Road`, set by phase 6)
+- [x] 1.7 Co-driver phrases; tests on synthetic roads
 
 ### Phase 2: wall collision
-- [ ] 2.1 Line-segment wall with top height in the car sim
-- [ ] 2.2 Normal impulse + tangential friction (scrape, no snag), damage, segment ends, passing over
-- [ ] 2.3 Building walls become segments (generated and level buildings, live edits)
-- [ ] 2.4 Tests: 110 km/h 4° brush keeps speed, 90° hit stops, end = post, above = passes
+- [x] 2.1 Line-segment wall with top height in the car sim
+- [x] 2.2 Normal impulse + tangential friction (scrape, no snag), damage, segment ends, passing over
+- [x] 2.3 Building walls become segments (generated and level buildings, live edits)
+- [x] 2.4 Tests: 110 km/h 4° brush keeps speed, 90° hit stops, end = post, above = passes
 
 ### Phase 3: terrain and road network
 - [ ] 3.1 Terrain: zones (valley 80-120 m, basin 140-240, escarpment 180-380, plateau 380-480), river valley, domain-warped ridges
@@ -100,6 +100,14 @@ Ticked as each step lands on main (commit in brackets).
 
 ## Status
 
-- Phase 1: in progress.
-- Phase 2: in progress.
+- Phase 1: done. `stage::grade_for` holds the radius table; the hairpin is grade 0
+  (`stage::HAIRPIN`), so world data went to version 2 and a version 1 grade override of 1 is
+  migrated to 0. `Corner` gained `crest_into`, `tightens_from`, `opens_to`, `off_camber` and
+  `dont_cut`. Calls read like "hairpin left", "square right", "three left tightens one",
+  "crest into two right" and "four right over crest, don't cut". The six new words were
+  rendered with `cook_voice.py --only`. `Road::dont_cut` (per station: a hazard on the inside
+  edge) is all false until phase 6 sets it from culverts and rocks; event routes carry it over.
+  Fixed on the way: `Road::from_centreline` had its curvature sign backwards (+ was right), so
+  open-world calls were mirrored and its default banking leaned out of corners.
+- Phase 2: done for buildings. `vehicle::Wall` segments (`Ground::walls`, `open::walls::WallGrid`); facades are one wall per side, rows of shops joined. A 4° brush at 110 km/h keeps 97 % of its speed. Parapets and barriers still to add.
 - Phase 3: in progress.

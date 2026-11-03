@@ -10,7 +10,7 @@ use engine::world::{Heightfield, WorldDesc};
 use pcg_core::{Area, Graph, Inputs, Op, Rect, SpawnDef, SpawnKind, Tier};
 
 use crate::stage::{self, Biome, Corner, Road, StageDef, Surface};
-use crate::vehicle::{Give, Ground, Obstacle};
+use crate::vehicle::{Give, Ground, Obstacle, Wall};
 
 /// A roadside thing the car can knock down or drive through (drawn by `crate::props`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -164,15 +164,19 @@ impl Ground for StageWorld {
             }
         }
         if let Some(o) = &self.open {
-            // Buildings always; traffic only in free roam (events run without it, so ghosts
-            // replay exactly).
-            o.walls.query(p, r, out);
+            // Traffic only in free roam (events run without it, so ghosts replay exactly).
             if let Some(f) = &self.forest {
                 f.obstacles(p, r, out);
             }
             if self.event.is_none() && o.traffic_solid.load(std::sync::atomic::Ordering::Relaxed) {
                 o.traffic.obstacles(p, r, out);
             }
+        }
+    }
+    fn walls(&self, p: Vec2, r: f32, out: &mut Vec<Wall>) {
+        out.clear();
+        if let Some(o) = &self.open {
+            o.walls.query(p, r, out);
         }
     }
 }

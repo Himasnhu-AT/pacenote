@@ -115,42 +115,79 @@ impl Planner {
         }
     }
 
+    /// One note as said: "crest into", side and grade in the chosen order ("hairpin left",
+    /// "left square", "four left tightens one", "two right opens four"), "long", "over crest",
+    /// then the warnings ("don't cut", "narrows", "off camber", "careful").
     fn phrase(&self, out: &mut String, n: &Note) {
-        match n.corner {
-            Some(k) => {
-                let c = &self.corners[k];
-                let side = if c.turn == Turn::Left { "left" } else { "right" };
-                if self.grade_first {
-                    out.push_str(grade_word(c.grade));
-                    out.push(' ');
-                    out.push_str(side);
-                } else {
-                    out.push_str(side);
-                    out.push(' ');
-                    out.push_str(grade_word(c.grade));
-                }
-                if c.end - c.start > 70.0 {
-                    out.push_str(" long");
-                }
-                if c.crest {
-                    out.push_str(" over crest");
-                }
-                if c.narrows {
-                    out.push_str(", narrows");
-                }
-                if c.grade <= 2 {
-                    out.push_str(", careful");
-                }
-            }
-            None => out.push_str("over crest"),
+        let Some(k) = n.corner else {
+            out.push_str("over crest");
+            return;
+        };
+        let c = &self.corners[k];
+        if c.crest && c.crest_into {
+            out.push_str("crest into ");
+        }
+        let side = if c.turn == Turn::Left { "left" } else { "right" };
+        // A tightening corner is called by its entry grade, then what it tightens to; in a
+        // compound call 1 is "one" ("four left tightens one", "one right opens three").
+        let called = match c.tightens_from {
+            Some(g) => number_word(g),
+            None if c.opens_to.is_some() => number_word(c.grade),
+            None => grade_word(c.grade),
+        };
+        if self.grade_first {
+            out.push_str(called);
+            out.push(' ');
+            out.push_str(side);
+        } else {
+            out.push_str(side);
+            out.push(' ');
+            out.push_str(called);
+        }
+        if c.tightens_from.is_some() {
+            out.push_str(" tightens ");
+            out.push_str(number_word(c.grade));
+        }
+        if let Some(g) = c.opens_to {
+            out.push_str(" opens ");
+            out.push_str(number_word(g));
+        }
+        if c.end - c.start > 70.0 {
+            out.push_str(" long");
+        }
+        if c.crest && !c.crest_into {
+            out.push_str(" over crest");
+        }
+        if c.dont_cut {
+            out.push_str(", don't cut");
+        }
+        if c.narrows {
+            out.push_str(", narrows");
+        }
+        if c.off_camber {
+            out.push_str(", off camber");
+        }
+        // A hairpin or square with something else going on.
+        if c.grade <= 1 && (c.crest || c.narrows || c.off_camber) {
+            out.push_str(", careful");
         }
     }
 }
 
-/// Grade 1 (hairpin) … 6 (flat-out kink), as spoken.
+/// A grade called on its own: hairpin (0), square (1), two … six (flat-out kink).
 pub fn grade_word(g: u8) -> &'static str {
     match g {
-        0 | 1 => "hairpin",
+        0 => "hairpin",
+        1 => "square",
+        _ => number_word(g),
+    }
+}
+
+/// A grade inside a compound call: as [`grade_word`], but 1 is "one".
+pub fn number_word(g: u8) -> &'static str {
+    match g {
+        0 => "hairpin",
+        1 => "one",
         2 => "two",
         3 => "three",
         4 => "four",
@@ -239,8 +276,33 @@ mod tests {
     }
     use crate::vehicle::Damage;
 
+    /// What one corner is called, in either order.
+    fn said(c: Corner, grade_first: bool) -> String {
+        let mut p = Planner::new(&[c], &[], 1000.0);
+        p.grade_first = grade_first;
+        let mut out = Vec::new();
+        p.update(300.0, 20.0, &mut out);
+        out[0].text.clone()
+    }
+
+    #[test]
+    fn compound_calls_read_naturally() {
+        let c = |turn, grade| Corner { start: 300.0, end: 340.0, turn, grade, angle: 60.0, ..Corner::default() };
+        assert_eq!(said(c(Turn::Left, 0), true), "hairpin left");
+        assert_eq!(said(c(Turn::Left, 0), false), "left hairpin");
+        assert_eq!(said(c(Turn::Right, 1), true), "square right");
+        assert_eq!(said(Corner { tightens_from: Some(3), ..c(Turn::Left, 1) }, true), "three left tightens one");
+        assert_eq!(said(Corner { tightens_from: Some(3), ..c(Turn::Left, 1) }, false), "left three tightens one");
+        assert_eq!(said(Corner { opens_to: Some(4), ..c(Turn::Right, 2) }, true), "two right opens four");
+        assert_eq!(said(Corner { tightens_from: Some(4), opens_to: Some(5), ..c(Turn::Left, 0) }, true), "four left tightens hairpin opens five");
+        assert_eq!(said(Corner { crest: true, crest_into: true, ..c(Turn::Right, 2) }, true), "crest into two right");
+        assert_eq!(said(Corner { crest: true, dont_cut: true, ..c(Turn::Right, 4) }, true), "four right over crest, don't cut");
+        assert_eq!(said(Corner { narrows: true, off_camber: true, ..c(Turn::Left, 3) }, true), "three left, narrows, off camber");
+        assert_eq!(said(Corner { crest: true, ..c(Turn::Left, 1) }, true), "square left over crest, careful");
+    }
+
     fn corner(start: f32, end: f32, turn: Turn, grade: u8) -> Corner {
-        Corner { start, end, turn, grade, angle: 60.0, crest: false, narrows: false }
+        Corner { start, end, turn, grade, angle: 60.0, ..Corner::default() }
     }
 
     #[test]
@@ -253,7 +315,8 @@ mod tests {
         // At 20 m/s the lead is 90 m.
         p.update(215.0, 20.0, &mut out);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].text, "90 left four, into right two, careful");
+        // (A plain 2 is no longer "careful": that is for a hairpin or square with a hazard.)
+        assert_eq!(out[0].text, "90 left four, into right two");
         out.clear();
         p.update(220.0, 20.0, &mut out);
         assert!(out.is_empty(), "called twice: {out:?}");

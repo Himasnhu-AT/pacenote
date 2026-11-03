@@ -19,6 +19,9 @@
 //!   bounces off), saplings, posts and signs snap when hit hard enough (the car shoves them
 //!   away, losing only the momentum it gives them, and they stay down for the run:
 //!   [`Car::broken`]), and shrubs are brush the car drives through with a little drag.
+//!   Straight walls (facades, later parapets and barriers) are segments ([`Wall`]) from
+//!   [`Ground::walls`]: pushed out along the wall's normal with friction, so a car brushing
+//!   one scrapes along it.
 //! - Damage ([`Damage`]): hits above walking pace against solid things (trunks, boulders, the
 //!   ground in a roll or a heavy landing) damage the engine (power), the steering (less lock,
 //!   slower, a pull to one side) and the suspension (less grip, wallowing), by where the car
@@ -38,6 +41,12 @@ pub trait Ground {
     fn surface(&self, x: f32, z: f32) -> Surface;
     /// Obstacles near `p` (within `r`), into `out` (cleared first).
     fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>);
+    /// Walls near `p` (their surface within `r`), into `out` (cleared first). Most grounds
+    /// have none.
+    fn walls(&self, p: Vec2, r: f32, out: &mut Vec<Wall>) {
+        let _ = (p, r);
+        out.clear();
+    }
 }
 
 /// A vertical cylinder the car can run into.
@@ -55,6 +64,151 @@ impl Obstacle {
     pub fn solid(pos: Vec2, radius: f32, top: f32) -> Obstacle {
         Obstacle { pos, radius, top, give: Give::Solid }
     }
+}
+
+/// A straight solid wall (building facade, parapet, barrier): the segment `a`–`b` in world
+/// xz grown by `radius` (a capsule), up to `top` (world y).
+///
+/// One segment rather than a row of cylinders: a row leaves a scallop, and a car brushing it
+/// at a shallow angle catches the next cylinder's leading face, takes a hit along its length
+/// and spins in. Against a segment the push is along the wall's normal, so the car scrapes
+/// along it ([`WALL_MU`]). Its ends are round, like a post; `a == b` is a post.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Wall {
+    pub a: Vec2,
+    pub b: Vec2,
+    pub radius: f32,
+    pub top: f32,
+}
+
+impl Wall {
+    pub fn new(a: Vec2, b: Vec2, radius: f32, top: f32) -> Wall {
+        Wall { a, b, radius, top }
+    }
+
+    /// The point of the centre line nearest `p`.
+    pub fn nearest(&self, p: Vec2) -> Vec2 {
+        nearest_on(self.a, self.b, p)
+    }
+
+    /// Distance from `p` to the wall's surface (negative inside).
+    pub fn distance(&self, p: Vec2) -> f32 {
+        self.nearest(p).distance(p) - self.radius
+    }
+}
+
+/// Friction between the body and a wall: a scrape costs speed, not a snag.
+pub const WALL_MU: f32 = 0.4;
+/// How much of the closing speed a wall gives back.
+const WALL_BOUNCE: f32 = 0.1;
+
+/// The point of segment `a`–`b` nearest `p`.
+fn nearest_on(a: Vec2, b: Vec2, p: Vec2) -> Vec2 {
+    let d = b - a;
+    let l2 = d.length_squared();
+    if l2 < 1e-12 {
+        return a;
+    }
+    a + d * ((p - a).dot(d) / l2).clamp(0.0, 1.0)
+}
+
+/// Does segment `a`–`b` cross the box `|x| <= half.x, |y| <= half.y`? (Clipped to each slab.)
+fn crosses_box(a: Vec2, b: Vec2, half: Vec2) -> bool {
+    let d = b - a;
+    let (mut t0, mut t1) = (0.0f32, 1.0f32);
+    for (p, v, h) in [(a.x, d.x, half.x), (a.y, d.y, half.y)] {
+        if v.abs() < 1e-9 {
+            if p.abs() > h {
+                return false;
+            }
+            continue;
+        }
+        let (u, w) = ((-h - p) / v, (h - p) / v);
+        t0 = t0.max(u.min(w));
+        t1 = t1.min(u.max(w));
+        if t0 > t1 {
+            return false;
+        }
+    }
+    true
+}
+
+/// The body footprint (the box `half` about the origin, body frame xz) against a wall whose
+/// centre line is `a`–`b` in that frame: (contact point on the box, direction to push the car,
+/// depth), or `None` if they don't touch.
+///
+/// Apart, the nearest pair of points (one is always a box corner or a wall end, both are
+/// convex) gives both the normal and the depth: along a wall's length that is its normal, at
+/// an end the direction from the end, as for a post. If the centre line already crosses the
+/// box (a deep hit), the car goes out across the least overlap of the wall's normal and the
+/// box's two axes, back to its own side.
+fn box_vs_wall(half: Vec2, a: Vec2, b: Vec2, r: f32) -> Option<(Vec2, Vec2, f32)> {
+    let corners = [Vec2::new(-half.x, -half.y), Vec2::new(half.x, -half.y), Vec2::new(half.x, half.y), Vec2::new(-half.x, half.y)];
+    if !crosses_box(a, b, half) {
+        // (box point, wall point), nearest first; fixed order on ties.
+        let mut best = (f32::MAX, Vec2::ZERO, Vec2::ZERO);
+        for e in [a, b] {
+            let q = e.clamp(-half, half);
+            let d = e.distance_squared(q);
+            if d < best.0 {
+                best = (d, q, e);
+            }
+        }
+        for c in corners {
+            let s = nearest_on(a, b, c);
+            let d = s.distance_squared(c);
+            if d < best.0 {
+                best = (d, c, s);
+            }
+        }
+        let dist = best.0.sqrt();
+        if dist >= r {
+            return None;
+        }
+        if dist > 1e-4 {
+            let (q, push, depth) = (best.1, (best.1 - best.2) / dist, r - dist);
+            // A side or the nose flat against the wall touches with two corners: one contact
+            // between them (by depth), not a hit on each corner that twists the car.
+            let (mut sum, mut weight) = (q * depth, depth);
+            for c in corners {
+                let s = nearest_on(a, b, c);
+                let d = s.distance(c);
+                if c != q && d < r && d > 1e-4 && ((c - s) / d).dot(push) > 0.98 {
+                    sum += c * (r - d);
+                    weight += r - d;
+                }
+            }
+            return Some((sum / weight, push, depth));
+        }
+    }
+    // Overlapping: separating axes, each pointing from the wall toward the box's centre.
+    let mid = (a + b) * 0.5;
+    let d = b - a;
+    let mut axes = [Vec2::X, Vec2::Y, Vec2::ZERO];
+    if d.length_squared() > 1e-8 {
+        axes[2] = Vec2::new(-d.y, d.x) / d.length();
+    }
+    let mut best: Option<(f32, Vec2)> = None;
+    for u in axes {
+        if u == Vec2::ZERO {
+            continue;
+        }
+        let u = if mid.dot(u) > 0.0 { -u } else { u };
+        // The wall's far side along `u`, against the box's near side.
+        let depth = a.dot(u).max(b.dot(u)) + r + half.x * u.x.abs() + half.y * u.y.abs();
+        if best.is_none_or(|(bd, _)| depth < bd) {
+            best = Some((depth, u));
+        }
+    }
+    let (depth, u) = best?;
+    // The box corner deepest into the wall.
+    let mut q = corners[0];
+    for c in corners {
+        if c.dot(u) < q.dot(u) {
+            q = c;
+        }
+    }
+    Some((q, u, depth))
 }
 
 /// How an obstacle reacts to the car.
@@ -458,8 +612,9 @@ impl Car {
 /// bump-stop damping, engine braking either way, hill hold that holds, implicit wheel spin;
 /// 6 = no damage, breakable saplings / posts / signs, shrubs that drag; 7 = damage again (from
 /// solid hits only), body parts that come off; 8 = Bevy 0.20 / glam 0.33 (same code, the float
-/// math's last bits moved).
-pub const REVISION: u64 = 8;
+/// math's last bits moved); 9 = building walls are segments, not rows of cylinders (stages
+/// drive the same; the open world's walls don't).
+pub const REVISION: u64 = 9;
 
 /// Fastest the body may spin (rad/s); normal crashes stay under ~15.
 const MAX_SPIN: f32 = 25.0;
@@ -476,8 +631,10 @@ pub fn step(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, dt: 
     let h = dt / SUBSTEPS as f32;
     let mut obstacles = Vec::new();
     ground.obstacles(Vec2::new(car.pos.x, car.pos.z), 6.0, &mut obstacles);
+    let mut walls = Vec::new();
+    ground.walls(Vec2::new(car.pos.x, car.pos.z), 6.0, &mut walls);
     for _ in 0..SUBSTEPS {
-        substep(car, spec, input, ground, &obstacles, h);
+        substep(car, spec, input, ground, &obstacles, &walls, h);
     }
     // Should the state ever go non-finite, keep the last good pose, stopped.
     let finite = car.pos.is_finite() && car.vel.is_finite() && car.ang.is_finite() && car.rot.is_finite() && car.steer.is_finite() && car.wheels.iter().all(|w| w.spin.is_finite());
@@ -610,7 +767,18 @@ fn grip_over_slip(s: f32, tail: f32) -> f32 {
     }
 }
 
-fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obstacles: &[Obstacle], h: f32) {
+/// A body contact to resolve with an impulse: world point and push direction, depth, how the
+/// thing gives, friction and bounce.
+struct Hit {
+    p: Vec3,
+    n: Vec3,
+    depth: f32,
+    give: Give,
+    mu: f32,
+    bounce: f32,
+}
+
+fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obstacles: &[Obstacle], walls: &[Wall], h: f32) {
     let g = Vec3::new(0.0, -9.81, 0.0);
     let mut force = g * spec.mass;
     let mut torque = Vec3::ZERO;
@@ -890,7 +1058,7 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
 
     // Chassis contact with the ground (rolled, bottomed out) and obstacles.
     let half = spec.size * 0.5;
-    let mut hits: Vec<(Vec3, Vec3, f32, Give)> = Vec::new();
+    let mut hits: Vec<Hit> = Vec::new();
     // The hardest new body-on-ground touch this substep: (closing speed, local point).
     let mut touch: Option<(f32, Vec3)> = None;
     let mut body_contact = false;
@@ -964,7 +1132,24 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
             at(p, -vh * (spec.mass * drag * cover), &mut force, &mut torque, car.pos);
             continue;
         }
-        hits.push((p, n, depth, o.give));
+        hits.push(Hit { p, n, depth, give: o.give, mu: 0.5, bounce: 0.2 });
+    }
+    // Walls: the footprint against the segment, in the body's frame like the cylinders.
+    let cy = car.pos.y + (car.rot * spec.body_centre).y;
+    let inv = car.rot.inverse();
+    let to_local = |c: Vec2| {
+        let l = inv * (Vec3::new(c.x, cy, c.y) - car.pos) - spec.body_centre;
+        Vec2::new(l.x, l.z)
+    };
+    for w in walls {
+        if bottom > w.top {
+            continue;
+        }
+        let Some((q, push, depth)) = box_vs_wall(Vec2::new(half.x, half.z), to_local(w.a), to_local(w.b), w.radius) else { continue };
+        let p = car.pos + car.rot * (spec.body_centre + Vec3::new(q.x, 0.0, q.y));
+        let n = car.rot * Vec3::new(push.x, 0.0, push.y);
+        let n = Vec3::new(n.x, 0.0, n.z).normalize_or_zero();
+        hits.push(Hit { p, n, depth, give: Give::Solid, mu: WALL_MU, bounce: WALL_BOUNCE });
     }
 
     // Integrate.
@@ -1006,8 +1191,8 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
     // Obstacles: impulses (a penalty spring can't stop a tonne at speed on a 0.4 m trunk).
     // Deepest contact first; each cancels the closing speed (a little bounce, some friction)
     // and pushes the car out.
-    hits.sort_by(|a, b| b.2.total_cmp(&a.2));
-    for (p, n, depth, give) in hits.into_iter().take(3) {
+    hits.sort_by(|a, b| b.depth.total_cmp(&a.depth));
+    for Hit { p, n, depth, give, mu, bounce } in hits.into_iter().take(3) {
         let r = p - car.pos;
         let vp = car.vel + car.ang.cross(r);
         let vn = vp.dot(n);
@@ -1032,9 +1217,10 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
                 let local = car.rot.inverse() * r;
                 take_hit(car, spec, Damage::severity(-vn), local, zone_of(local, half));
             }
-            let j = -(1.0 + 0.2) * vn / k;
+            // The closing speed (and a little bounce) along the normal; Coulomb friction across.
+            let j = -(1.0 + bounce) * vn / k;
             let vt = vp - n * vn;
-            let jt = (vt.length() / k).min(j * 0.5);
+            let jt = (vt.length() / k).min(j * mu);
             let imp = n * j - vt.normalize_or_zero() * jt;
             car.vel += imp / spec.mass;
             car.ang += iw_inv * r.cross(imp);
@@ -1237,8 +1423,12 @@ mod tests {
     }
 
     fn drive_at_in(kmh: f32, obstacle: Obstacle, damage: DamageMode) -> (Car, f32) {
+        drive_into(kmh, &One(obstacle), damage)
+    }
+
+    /// [`drive_at`] on any ground.
+    fn drive_into(kmh: f32, g: &impl Ground, damage: DamageMode) -> (Car, f32) {
         let spec = Spec { damage, ..Spec::default() };
-        let g = One(obstacle);
         let mut car = Car::new(Vec3::new(0.0, 0.6, 0.0), 0.0);
         run(&mut car, &spec, Input { handbrake: true, ..default() }, &Flat(0.0, Surface::Tarmac), 1.0);
         car.vel = car.forward() * kmh / 3.6;
@@ -1253,7 +1443,7 @@ mod tests {
             if car.pos.z < 17.0 {
                 before = car.speed();
             }
-            step(&mut car, &spec, input, &g, 1.0 / 60.0);
+            step(&mut car, &spec, input, g, 1.0 / 60.0);
         }
         (car, before)
     }
@@ -1400,6 +1590,128 @@ mod tests {
                 println!("{kmh:5.0} km/h {name:13} lost {:5.2} km/h broken {}", (free - car.speed()) * 3.6, !car.broken.is_empty());
             }
         }
+    }
+
+    /// Flat tarmac with one wall.
+    struct OneWall(Wall);
+    impl Ground for OneWall {
+        fn height(&self, _: f32, _: f32) -> f32 {
+            0.0
+        }
+        fn normal(&self, _: f32, _: f32) -> Vec3 {
+            Vec3::Y
+        }
+        fn surface(&self, _: f32, _: f32) -> Surface {
+            Surface::Tarmac
+        }
+        fn obstacles(&self, _: Vec2, _: f32, out: &mut Vec<Obstacle>) {
+            out.clear();
+        }
+        fn walls(&self, _: Vec2, _: f32, out: &mut Vec<Wall>) {
+            out.clear();
+            out.push(self.0);
+        }
+    }
+
+    /// Coasting at 110 km/h, 4° toward `wall`, until 1.5 s after the first touch (or for
+    /// `frames`): (the car, the largest yaw rate after the touch, frames run).
+    fn brush_wall(wall: Wall, frames: Option<usize>) -> (Car, f32, usize) {
+        let spec = Spec::default();
+        let g = OneWall(wall);
+        // Heading 0 faces +Z; pick the sign that drifts toward +X.
+        let a = 4f32.to_radians();
+        let heading = if Car::new(Vec3::ZERO, a).forward().x > 0.0 { a } else { -a };
+        let mut car = Car::new(Vec3::new(0.0, 0.6, 0.0), heading);
+        run(&mut car, &spec, Input { handbrake: true, ..default() }, &Flat(0.0, Surface::Tarmac), 1.0);
+        let v = 110.0 / 3.6;
+        car.vel = car.forward() * v;
+        for w in &mut car.wheels {
+            w.spin = v / spec.wheel_radius;
+        }
+        let (mut touched, mut yaw, mut ran) = (None, 0.0f32, 0);
+        for i in 0..600 {
+            if frames.is_some_and(|f| i >= f) || touched.is_some_and(|t| i >= t + 90) {
+                break;
+            }
+            ran = i + 1;
+            step(&mut car, &spec, Input::default(), &g, 1.0 / 60.0);
+            // Touched: the drift toward the wall is mostly gone (a scrape this light may not
+            // count as an impact).
+            if touched.is_none() && car.vel.x < 0.5 * v * libm::sinf(a) {
+                touched = Some(i);
+            }
+            if touched.is_some() {
+                yaw = yaw.max(car.ang.y.abs());
+            }
+        }
+        (car, yaw, ran)
+    }
+
+    #[test]
+    fn a_shallow_wall_brush_scrapes_along() {
+        let wall = Wall::new(Vec2::new(3.0, -50.0), Vec2::new(3.0, 500.0), 0.3, 6.0);
+        let (car, yaw, frames) = brush_wall(wall, None);
+        // The same coast with the wall out of reach.
+        let (free, _, _) = brush_wall(Wall { a: wall.a + Vec2::X * 100.0, b: wall.b + Vec2::X * 100.0, ..wall }, Some(frames));
+        let kept = car.vel.length() / free.vel.length();
+        let along = libm::atan2f(car.vel.x, car.vel.z).to_degrees();
+        eprintln!("4° brush at 110: kept {:.1} % ({:.1} vs {:.1} km/h), yaw ≤ {yaw:.2} rad/s, heading {along:.1}°, x {:.2}, impacts {:.2}", kept * 100.0, car.vel.length() * 3.6, free.vel.length() * 3.6, car.pos.x, car.impacts);
+        assert!(frames < 400, "never touched the wall");
+        assert!(kept > 0.85, "kept {kept}");
+        assert!(yaw < 0.6, "spun: {yaw} rad/s");
+        // Moving along the wall (not into it, not bounced far off), on its own side.
+        assert!(along.abs() < 4.0, "travelling at {along}° to the wall");
+        assert!(car.pos.x < 3.0 - 0.3 - 0.85, "through the wall: {:?}", car.pos);
+        assert!(!car.damage.wrecked());
+    }
+
+    /// A wall across the road at the tree's distance, its face where the trunk's is.
+    const ACROSS: Wall = Wall { a: Vec2::new(-15.0, 20.0), b: Vec2::new(15.0, 20.0), radius: 0.4, top: 3.0 };
+
+    #[test]
+    fn a_wall_head_on_stops_the_car_like_a_trunk() {
+        let (wall, _) = drive_into(50.0, &OneWall(ACROSS), DamageMode::Simulation);
+        let (tree, _) = drive_at(50.0, TREE);
+        eprintln!("50 km/h: wall v {:.2} z {:.2} dmg {:.3} imp {:.1} / tree v {:.2} z {:.2} dmg {:.3} imp {:.1}", wall.speed(), wall.pos.z, wall.damage.worst(), wall.impacts, tree.speed(), tree.pos.z, tree.damage.worst(), tree.impacts);
+        assert!(wall.pos.z < 20.0 - 1.5 && wall.speed().abs() < 3.0, "{:?} at {}", wall.pos, wall.speed());
+        assert!((wall.impacts - tree.impacts).abs() < 0.25 * tree.impacts, "{} vs {}", wall.impacts, tree.impacts);
+        let (w, t) = (wall.damage.worst(), tree.damage.worst());
+        assert!(w > 0.5 * t && w < 1.5 * t && !wall.damage.wrecked(), "{w} vs {t}");
+    }
+
+    #[test]
+    fn a_wall_end_is_a_post() {
+        // The wall runs away from the car, its round end where the trunk is.
+        let end = Wall::new(Vec2::new(0.0, 20.0), Vec2::new(0.0, 60.0), 0.4, 10.0);
+        let (wall, _) = drive_into(50.0, &OneWall(end), DamageMode::Simulation);
+        let (tree, _) = drive_at(50.0, TREE);
+        assert!(wall.pos.z < 20.0 - 1.5 && wall.speed().abs() < 3.0, "{:?} at {}", wall.pos, wall.speed());
+        assert!((wall.impacts - tree.impacts).abs() < 0.1 * tree.impacts, "{} vs {}", wall.impacts, tree.impacts);
+        assert!((wall.damage.worst() - tree.damage.worst()).abs() < 0.1, "{:?} vs {:?}", wall.damage, tree.damage);
+    }
+
+    #[test]
+    fn a_car_above_a_wall_passes() {
+        // A kerb-high wall under the body.
+        let low = Wall { top: 0.05, ..ACROSS };
+        let (car, _) = drive_into(50.0, &OneWall(low), DamageMode::Simulation);
+        assert!(car.pos.z > 30.0 && car.impacts == 0.0, "{:?} impacts {}", car.pos, car.impacts);
+    }
+
+    #[test]
+    fn box_against_wall() {
+        let half = Vec2::new(0.9, 2.0);
+        // Beside the box's right side, 0.1 m off: no touch with r 0.05, 0.2 m deep with 0.3.
+        let (a, b) = (Vec2::new(1.0, -5.0), Vec2::new(1.0, 5.0));
+        assert!(box_vs_wall(half, a, b, 0.05).is_none());
+        let (_, n, d) = box_vs_wall(half, a, b, 0.3).unwrap();
+        assert!((n - Vec2::NEG_X).length() < 1e-5 && (d - 0.2).abs() < 1e-5, "{n} {d}");
+        // An end just ahead of the nose: pushed straight back, like a post.
+        let (q, n, _) = box_vs_wall(half, Vec2::new(0.0, -2.2), Vec2::new(0.0, -9.0), 0.4).unwrap();
+        assert!((n - Vec2::Y).length() < 1e-5 && q == Vec2::new(0.0, -2.0), "{q} {n}");
+        // Crossing the box near its right side: out to the left (its own side), not through.
+        let (_, n, d) = box_vs_wall(half, Vec2::new(0.6, -5.0), Vec2::new(0.6, 5.0), 0.2).unwrap();
+        assert!((n - Vec2::NEG_X).length() < 1e-5 && (d - 0.5).abs() < 1e-5, "{n} {d}");
     }
 
     #[test]

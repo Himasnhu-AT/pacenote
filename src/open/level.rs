@@ -419,7 +419,9 @@ pub fn from_level(world: &mut World) -> Result<WorldData, String> {
     data.validate()?;
     let net = data.net();
     world.insert_resource(PointsSpawned::default());
-    let data = placeable::gather(world, &data, &net);
+    let mut data = placeable::gather(world, &data, &net);
+    // An older level's grade notes are read in its own format, then brought up to date.
+    data.migrate();
     data.validate()?;
     Ok(data)
 }

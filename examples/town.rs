@@ -85,9 +85,9 @@ fn setup(world: &mut World) {
     let t1 = std::time::Instant::now();
     let layout = buildings::layout(&net);
     let t2 = std::time::Instant::now();
-    let obs = buildings::obstacles(&layout);
+    let obs = buildings::walls(&layout);
     info!(
-        "town: roads + terrain {:.0} ms, layout {:.0} ms ({} buildings, {} blocks, {} wall cylinders)",
+        "town: roads + terrain {:.0} ms, layout {:.0} ms ({} buildings, {} blocks, {} walls)",
         (t1 - t0).as_secs_f64() * 1e3,
         (t2 - t1).as_secs_f64() * 1e3,
         layout.buildings.len(),
@@ -160,19 +160,20 @@ fn setup(world: &mut World) {
     world.spawn((Name::new("roads"), Mesh3d(roads_mesh), MeshMaterial3d(rmat), KeepDetail, Scenery));
 
     if has_flag("obstacles") {
-        // Wall cylinders as red octagonal tubes, 2 m tall.
+        // Walls as red 2 m-tall slabs, their full thickness (the round ends left square).
         let mut pos = Vec::new();
         let mut idx: Vec<u32> = Vec::new();
-        for o in &obs {
+        for w in &obs {
             let base = pos.len() as u32;
-            for k in 0..8 {
-                let a = k as f32 / 8.0 * std::f32::consts::TAU;
-                let p = o.pos + Vec2::new(a.cos(), a.sin()) * o.radius;
-                pos.push([p.x, net.town_y.min(o.top - 2.0), p.y]);
-                pos.push([p.x, net.town_y.min(o.top - 2.0) + 2.0, p.y]);
+            let d = (w.b - w.a).normalize_or(Vec2::X);
+            let (s, n) = (d * w.radius, d.perp() * w.radius);
+            let y = net.town_y.min(w.top - 2.0);
+            for p in [w.a - s - n, w.b + s - n, w.b + s + n, w.a - s + n] {
+                pos.push([p.x, y, p.y]);
+                pos.push([p.x, y + 2.0, p.y]);
             }
-            for k in 0..8u32 {
-                let (a, b) = (base + k * 2, base + ((k + 1) % 8) * 2);
+            for k in 0..4u32 {
+                let (a, b) = (base + k * 2, base + ((k + 1) % 4) * 2);
                 idx.extend_from_slice(&[a, b, a + 1, b, b + 1, a + 1]);
             }
         }
