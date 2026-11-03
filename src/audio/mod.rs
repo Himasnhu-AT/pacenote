@@ -190,9 +190,9 @@ fn start_output(
 
 fn surface_class(s: Surface) -> usize {
     match s {
-        Surface::Gravel => car::GRAVEL,
-        Surface::Tarmac => car::TARMAC,
-        Surface::Mud => car::MUD,
+        Surface::Gravel | Surface::Loose => car::GRAVEL,
+        Surface::Tarmac | Surface::Dusty => car::TARMAC,
+        Surface::Mud | Surface::Ditch => car::MUD,
         Surface::Snow => car::SNOW,
         Surface::Verge | Surface::Rough => car::OFFROAD,
     }

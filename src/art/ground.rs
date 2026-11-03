@@ -343,7 +343,8 @@ fn verge(s: &StageWorld, road: &Road, stations: &[usize], st0: f32, side: f32) -
         for &(o, alpha) in &prof {
             let lat = side * (e + o + rag * (1.0 - (o + 0.7) / 2.8));
             let q = Vec3::new(p.x, 0.0, p.z) + l * lat;
-            let ground = s.heights.height_at(q.x, q.z);
+            // The ground the car drives on (the open world's ditches and shoulders included).
+            let ground = crate::vehicle::Ground::height(s, q.x, q.z);
             let on_road = road.height_at(&station_pos(road, i, lat)) + 0.045;
             let y = if lat.abs() <= road.width[i] * 0.5 + 0.55 { on_road.max(ground + 0.03) } else { ground + 0.05 };
             pos.push((Vec3::new(q.x, y, q.z) - center).to_array());

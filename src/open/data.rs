@@ -112,7 +112,9 @@ impl WorldData {
     pub fn net(&self) -> RoadNet {
         let roads: Vec<NetRoad> = self.roads.iter().map(net_road).collect();
         let junctions = roads::find_junctions(&roads);
-        RoadNet { seed: self.seed, roads, junctions, town_y: self.town_y, land: super::land::land(self.seed) }
+        let mut net = RoadNet { seed: self.seed, roads, junctions, town_y: self.town_y, land: super::land::land(self.seed) };
+        super::profile::dress(&mut net);
+        net
     }
 
     /// Checks data from a level file before anything is built from it: version, sizes, finite

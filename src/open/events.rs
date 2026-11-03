@@ -69,6 +69,8 @@ fn slice(road: &Road, a: usize, b: usize) -> Road {
     // The road's own banking (it may be edited), so the route drives as the road does in free roam.
     r.bank = road.bank[a..=b].to_vec();
     r.dont_cut = road.dont_cut[a..=b].to_vec();
+    r.crown = road.crown[a..=b].to_vec();
+    r.rut = road.rut[a..=b].to_vec();
     r
 }
 
@@ -81,6 +83,8 @@ fn lap(road: &Road, from: usize) -> Road {
     let mut r = Road::from_centreline(&pts, &y, idx.iter().map(|&i| road.width[i]).collect(), idx.iter().map(|&i| road.surface[i]).collect());
     r.bank = idx.iter().map(|&i| road.bank[i]).collect();
     r.dont_cut = idx.iter().map(|&i| road.dont_cut[i]).collect();
+    r.crown = idx.iter().map(|&i| road.crown[i]).collect();
+    r.rut = idx.iter().map(|&i| road.rut[i]).collect();
     r
 }
 

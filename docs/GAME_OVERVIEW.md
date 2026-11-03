@@ -180,9 +180,15 @@ x = −2,000 m                                             x = +2,000 m
   ~17 % for a few metres where a road meets another), crests kept.
 - **Junctions** get their own meshes (`open/junctions.rs`, `art/junctions.rs`), ribbons trimmed
   back to the mouths. No town kerbs or zebras any more.
-- **Surfaces:** tarmac / gravel / mud (where the moisture map is wet) per station, a 3 m verge,
-  then grass on the valley floor or rough ground elsewhere. Crown, ditches and grip across the
-  road come in phase 4 of `RALLY_MAP.md`.
+- **Cross-section** (`profile.rs`): a crown (5-8 cm), worn wheel tracks (2-4 cm) on gravel,
+  corners banked in (60 %), flat (25 %) or off-camber (15 %, called "off camber"), small
+  undulations on gravel and forest roads; beyond the edge a 0.5 m shoulder, then on the side cut
+  into the hill a V ditch 0.25-0.45 m deep and on the other side the ground, dropping off steeply
+  where the land falls away. The car feels this exactly near a road; the terrain is shaped to
+  match.
+- **Grip across the road:** gravel wheel tracks are firm; the crown, the outside of bends and the
+  edges are loose gravel (`Loose`, 85 % grip); the ditch drags (`Ditch`); tarmac within 40 m of a
+  gravel road's junction is dusty (`Dusty`, 82 %); mud where the moisture map is wet.
 
 ### 4.3 Terrain
 

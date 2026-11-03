@@ -141,10 +141,16 @@ impl StageWorld {
 
 impl Ground for StageWorld {
     fn height(&self, x: f32, z: f32) -> f32 {
-        self.heights.height_at(x, z)
+        match &self.open {
+            Some(o) => o.ground_height(x, z),
+            None => self.heights.height_at(x, z),
+        }
     }
     fn normal(&self, x: f32, z: f32) -> Vec3 {
-        self.heights.smooth_normal_at(x, z)
+        match &self.open {
+            Some(o) => o.ground_normal(x, z),
+            None => self.heights.smooth_normal_at(x, z),
+        }
     }
     fn surface(&self, x: f32, z: f32) -> Surface {
         match &self.open {

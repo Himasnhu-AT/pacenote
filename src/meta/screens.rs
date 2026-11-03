@@ -430,6 +430,9 @@ pub fn surface_name(s: Surface) -> &'static str {
         Surface::Snow => "Snow",
         Surface::Verge => "Verge",
         Surface::Rough => "Rough",
+        Surface::Loose => "Loose gravel",
+        Surface::Ditch => "Ditch",
+        Surface::Dusty => "Dusty tarmac",
     }
 }
 

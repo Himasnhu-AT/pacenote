@@ -53,6 +53,13 @@ pub enum Surface {
     Verge,
     /// Off the road further out: rough ground.
     Rough,
+    /// Loose gravel ("marbles") swept off the wheel tracks: on the crown and the outside of a
+    /// corner. Open world only, by lateral position (`open::roads::surface`).
+    Loose,
+    /// The drainage ditch beside a road: soft, it drags a wheel that drops in.
+    Ditch,
+    /// Tarmac dirtied with gravel dragged out of a junction with a gravel road.
+    Dusty,
 }
 
 impl Surface {
@@ -66,6 +73,9 @@ impl Surface {
             Surface::Snow => (0.42, 0.6),
             Surface::Verge => (0.6, 0.75),
             Surface::Rough => (0.5, 0.9),
+            Surface::Loose => (0.66, 0.75),
+            Surface::Ditch => (0.5, 1.0),
+            Surface::Dusty => (0.88, 0.2),
         }
     }
 }
@@ -245,8 +255,18 @@ pub struct Road {
     /// corner here breaks the car, so its pace note gets "don't cut". All false until the
     /// road dressing sets it.
     pub dont_cut: Vec<bool>,
+    /// How far the centre stands above the edges (m): the road's crown, for water to run off.
+    /// Zero on the old stages; the open world sets it (`open::profile`).
+    pub crown: Vec<f32>,
+    /// Depth (m) of the two wheel tracks worn into a loose surface. Zero on the old stages.
+    pub rut: Vec<f32>,
     grid: SegGrid,
 }
+
+/// Lateral distance (m) of a worn wheel track from the line a car drives (half its track).
+pub const TRACK_LINE: f32 = 0.78;
+/// Half-width (m) of a worn wheel track.
+pub const TRACK_HALF: f32 = 0.32;
 
 /// Where a point is relative to the road.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -289,7 +309,8 @@ impl Road {
         let curv = smooth(&raw, 3);
         let bank: Vec<f32> = curv.iter().map(|k| (-k * 9.0).clamp(-0.07, 0.07)).collect();
         let grid = SegGrid::build(&pts, 32.0);
-        Road { dont_cut: vec![false; pts.len()], pts, dir, curv, width, bank, surface, grid }
+        let n = pts.len();
+        Road { dont_cut: vec![false; n], crown: vec![0.0; n], rut: vec![0.0; n], pts, dir, curv, width, bank, surface, grid }
     }
 
     pub fn len(&self) -> usize {
@@ -323,13 +344,26 @@ impl Road {
         best.filter(|(d2, _)| *d2 <= max * max).map(|(_, r)| r)
     }
 
-    /// Road surface height at a road position (banking applied).
+    /// Road surface height at a road position: banking, crown and wheel tracks applied (the
+    /// edges stay at the banked line; the crown lifts the middle).
     pub fn height_at(&self, r: &RoadPos) -> f32 {
         let j = (r.i + 1).min(self.pts.len() - 1);
+        let lerp = |v: &[f32]| v[r.i] + (v[j] - v[r.i]) * r.t;
         let y = self.pts[r.i].y + (self.pts[j].y - self.pts[r.i].y) * r.t;
-        let bank = self.bank[r.i] + (self.bank[j] - self.bank[r.i]) * r.t;
         let half = self.half_width(r);
-        y + bank * r.lateral.clamp(-half, half)
+        let lat = r.lateral.clamp(-half, half);
+        let mut h = y + lerp(&self.bank) * lat;
+        let crown = lerp(&self.crown);
+        if crown != 0.0 {
+            let u = lat / half.max(0.1);
+            h += crown * (1.0 - u * u);
+        }
+        let rut = lerp(&self.rut);
+        if rut != 0.0 {
+            let d = (lat.abs() - TRACK_LINE) / TRACK_HALF;
+            h -= rut * (1.0 - d * d).max(0.0);
+        }
+        h
     }
 
     pub fn half_width(&self, r: &RoadPos) -> f32 {
@@ -573,7 +607,8 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
     // Banked into the corner: a left-hander is lower on the left (lateral +).
     let bank: Vec<f32> = curv.iter().map(|k| (-k * 9.0).clamp(-0.07, 0.07)).collect();
     let grid = SegGrid::build(&pts, 32.0);
-    Road { dont_cut: vec![false; pts.len()], pts, dir, curv, width, bank, surface, grid }
+    let n = pts.len();
+    Road { dont_cut: vec![false; n], crown: vec![0.0; n], rut: vec![0.0; n], pts, dir, curv, width, bank, surface, grid }
 }
 
 /// Steps along a feature from `pos`: curvature eases towards `target_k` then back to zero.

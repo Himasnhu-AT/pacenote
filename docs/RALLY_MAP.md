@@ -75,13 +75,13 @@ Ticked as each step lands on main (commit in brackets).
 - [x] 3.10 Re-bake the level, editor live-edit still works (base terrain kept for reshaping), docs
 
 ### Phase 4: cross-section and grip
-- [ ] 4.1 Crown (+6-10 cm) in the road profile, mesh and car ground
-- [ ] 4.2 Banking mix: 60% +2-4°, 25% flat, 15% off-camber -2-5° (flagged)
-- [ ] 4.3 Cut-side V ditch (0.25-0.45 m deep, 0.8-1.2 m wide), exact in the car's ground, drawn in the road mesh
-- [ ] 4.4 Fill side: 0.5 m shoulder, then a 1.5-4 m steep bank where the land falls > 20%
-- [ ] 4.5 Micro-undulation (12-35 m, ±0.15-0.45 m) on gravel and forest
-- [ ] 4.6 Lateral grip: wheel tracks (2 cm ruts), crown/outside marbles 82-88%, ditch drag
-- [ ] 4.7 Dusty tarmac for 40 m after a gravel junction
+- [x] 4.1 Crown (+6-10 cm) in the road profile, mesh and car ground
+- [x] 4.2 Banking mix: 60% +2-4°, 25% flat, 15% off-camber -2-5° (flagged)
+- [x] 4.3 Cut-side V ditch (0.25-0.45 m deep, 0.8-1.2 m wide), exact in the car's ground, drawn in the road mesh
+- [x] 4.4 Fill side: 0.5 m shoulder, then a 1.5-4 m steep bank where the land falls > 20%
+- [x] 4.5 Micro-undulation (12-35 m, ±0.15-0.45 m) on gravel and forest
+- [x] 4.6 Lateral grip: wheel tracks (2 cm ruts), crown/outside marbles 82-88%, ditch drag
+- [x] 4.7 Dusty tarmac for 40 m after a gravel junction
 
 ### Phase 5: events as chains
 - [ ] 5.1 Event = ordered road pieces across junctions (data, level file, editor)
@@ -116,3 +116,13 @@ Ticked as each step lands on main (commit in brackets).
   ends, tightest hairpin 8.1 m), valley village + service park (110 buildings), traffic on the
   tarmac only, level re-baked. The logging *loop* became a camp-to-hillclimb track (a loop on
   the escarpment kept crossing its own road).
+- Phase 4: done. `stage::Road` has a crown and worn wheel tracks per station (in `height_at`,
+  so the mesh and the car agree); `open::profile` dresses each road (crown by kind, less in
+  bends; a V ditch 0.25-0.45 m deep on the side cut into the hill, none near junctions; dusty
+  tarmac 40 m round gravel junctions) and gives the car the exact cross-section within a few
+  metres of a road (shoulder, ditch, blend into the terrain); the 2 m terrain is shaped to
+  match, with a steep drop-off where the land falls away > 20 %. Corners bank 60 / 25 / 15 %
+  (in / flat / off-camber, measured 16 % off-camber, 30 % flat); gravel and forest roads
+  undulate (25-35 m, up to 0.2 m). New surfaces `Loose` (marbles: crown, outside of bends,
+  beyond the tracks; 85 % of gravel's grip), `Ditch` (drag: a car coasting from 40 km/h with two
+  wheels in keeps 22 km/h after 2 s vs 26 on the road) and `Dusty` (82 % of tarmac).

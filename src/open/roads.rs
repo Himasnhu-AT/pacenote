@@ -52,6 +52,10 @@ pub struct NetRoad {
     pub closed: bool,
     /// Traffic speed limit (m/s) when set in the world data; else by kind (`traffic::limit`).
     pub limit: Option<f32>,
+    /// Ditch depth (m) per station, left and right (`open::profile::dress`; empty before).
+    pub ditch: Vec<[f32; 2]>,
+    /// Tarmac dirtied by a gravel road joining (per station; empty before dressing).
+    pub dusty: Vec<bool>,
     /// Bounding box (XZ) grown by the widest reach anyone asks for, for quick rejects.
     lo: Vec2,
     hi: Vec2,
@@ -92,7 +96,7 @@ impl NetRoad {
             lo = lo.min(Vec2::new(p.x, p.z));
             hi = hi.max(Vec2::new(p.x, p.z));
         }
-        NetRoad { kind, road, closed, limit: None, lo: lo - REACH, hi: hi + REACH }
+        NetRoad { kind, road, closed, limit: None, ditch: Vec::new(), dusty: Vec::new(), lo: lo - REACH, hi: hi + REACH }
     }
 }
 
@@ -245,6 +249,61 @@ fn road_heights(land: &Land, pts: &[Vec2], grade: f32, start: Option<f32>, end: 
         }
     }
     y
+}
+
+/// Small rises and dips (25-35 m apart, up to ~0.2 m, and a 12 m ripple) so the suspension
+/// works on the straights; less where the road already climbs hard, none near its ends. Kept
+/// below the pace notes' crest threshold (vertical curvature 0.015 1/m).
+fn undulate(y: &mut [f32], max_grade: f32, seed: u64) {
+    let n = y.len();
+    let end = (30.0 / STEP) as usize;
+    let base = y.to_vec();
+    for i in 1..n.saturating_sub(1) {
+        let s = i as f32 * STEP;
+        let grade = (base[i + 1] - base[i - 1]).abs() / (2.0 * STEP);
+        let room = (1.0 - grade / max_grade).clamp(0.0, 1.0);
+        let fade = ((i.min(n - 1 - i) as f32) / end as f32).min(1.0);
+        let u = 0.17 * noise(Vec2::new(s / 30.0, 1.1), seed ^ 0xB0) + 0.035 * noise(Vec2::new(s / 12.0, 2.3), seed ^ 0xB1);
+        y[i] += u * room * fade;
+    }
+}
+
+/// Banking corner by corner, as on real gravel roads: most lean slightly into the bend
+/// (+2-4°, gravel built up on the outside), a quarter are flat, and about one in seven lean
+/// the wrong way (off-camber, -2-5°: the road wraps round the outside of a spur). Tarmac only
+/// leans in. Straights are flat (the crown drains them). Ramps in and out.
+fn banking(road: &Road, kind: RoadKind, seed: u64) -> Vec<f32> {
+    let n = road.len();
+    let mut target = vec![0.0f32; n];
+    let mut i = 0;
+    let mut k = 0u32;
+    while i < n {
+        if road.curv[i].abs() < 1.0 / 150.0 {
+            i += 1;
+            continue;
+        }
+        let sign = road.curv[i].signum();
+        let start = i;
+        while i < n && road.curv[i].signum() == sign && road.curv[i].abs() >= 1.0 / 220.0 {
+            i += 1;
+        }
+        // (Uniform per corner: smooth noise would rarely reach the ends of the range.)
+        let mut rng = crate::stage::Rng::new(seed ^ 0xBA00 ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let (u, v) = (rng.f(), rng.f());
+        k += 1;
+        // Lean in (radians ≈ rise per metre at these angles): + into the bend.
+        let lean = match kind {
+            RoadKind::Street | RoadKind::BRoad => 0.02 + 0.03 * v,
+            _ if u < 0.6 => 0.035 + 0.035 * v,
+            _ if u < 0.85 => 0.0,
+            _ => -(0.035 + 0.05 * v),
+        };
+        // Into a left bend (+ curvature) the left side is lower: bank (rise to the left) < 0.
+        for t in target.iter_mut().take(i).skip(start) {
+            *t = -sign * lean;
+        }
+    }
+    smooth(&target, 4)
 }
 
 fn surfaces(kind: RoadKind, pts: &[Vec2], land: &Land, seed: u64) -> Vec<Surface> {
@@ -403,9 +462,13 @@ impl Builder<'_> {
         }
         let k = self.roads.len();
         let sseed = self.seed ^ (0xA0 + k as u64);
-        let y = road_heights(self.land, &pts, rules.max_grade, from.map(|a| a.y), to.map(|b| b.y));
+        let mut y = road_heights(self.land, &pts, rules.max_grade, from.map(|a| a.y), to.map(|b| b.y));
+        if matches!(kind, RoadKind::Gravel | RoadKind::Forest) {
+            undulate(&mut y, rules.max_grade, sseed);
+        }
         let n = pts.len();
-        let road = Road::from_centreline(&pts, &y, widths(kind, n, sseed), surfaces(kind, &pts, self.land, sseed));
+        let mut road = Road::from_centreline(&pts, &y, widths(kind, n, sseed), surfaces(kind, &pts, self.land, sseed));
+        road.bank = banking(&road, kind, sseed);
         self.planner.take(&pts, 40.0);
         self.roads.push(NetRoad::new(kind, road, false));
         Some(k)
@@ -470,35 +533,61 @@ fn build(seed: u64) -> RoadNet {
     let roads = b.roads;
     let junctions = find_junctions(&roads);
     let town_y = land.coarse(pl.village);
-    RoadNet { seed, roads, junctions, town_y, land }
+    let mut net = RoadNet { seed, roads, junctions, town_y, land };
+    super::profile::dress(&mut net);
+    net
 }
 
-/// A point's height in the finished world: the land, shaped by the nearest road.
+/// A point's height in the finished world (the 2 m terrain): the land, shaped by the nearest
+/// road (`open::profile::shaped`).
 pub fn height(net: &RoadNet, x: f32, z: f32) -> f32 {
     let p = Vec2::new(x, z);
     let base = net.land.height(p);
-    match net.nearest(p, crate::stage::SHAPE_REACH) {
-        Some(n) => crate::stage::shaped(base, &net.roads[n.road].road, &n.at),
+    match net.nearest(p, super::profile::REACH.1) {
+        Some(n) => {
+            let nr = &net.roads[n.road];
+            super::profile::shaped(base, &nr.road, &nr.ditch, &n.at)
+        }
         None => base,
     }
 }
 
-/// What the tyres are on at (x, z): a road, its verge, valley grass or rough ground.
+/// What the tyres are on at (x, z). On a gravel road: the two worn wheel tracks (full grip)
+/// around the line a car drives, loose gravel ("marbles") on the crown between them, beyond
+/// them and on the outside of a bend; on tarmac, dusty near a gravel road's junction. Off it:
+/// the shoulder (verge), the ditch, the verge, then valley grass or rough ground.
 pub fn surface(net: &RoadNet, x: f32, z: f32) -> Surface {
+    use super::profile::{DITCH_W, SHOULDER};
+    use crate::stage::{TRACK_HALF, TRACK_LINE};
     let p = Vec2::new(x, z);
-    match net.nearest(p, 14.0) {
-        Some(n) => {
-            let r = &net.roads[n.road].road;
-            let half = r.half_width(&n.at);
-            if n.at.lateral.abs() <= half {
-                r.surface[n.at.i]
-            } else if n.at.lateral.abs() <= half + 3.0 {
-                Surface::Verge
-            } else {
-                off_road(net, p)
+    let Some(n) = net.nearest(p, 14.0) else { return off_road(net, p) };
+    let nr = &net.roads[n.road];
+    let r = &nr.road;
+    let (i, lat) = (n.at.i, n.at.lateral);
+    let half = r.half_width(&n.at);
+    let a = lat.abs();
+    if a <= half {
+        return match r.surface[i] {
+            Surface::Tarmac if nr.dusty.get(i).copied().unwrap_or(false) => Surface::Dusty,
+            Surface::Gravel => {
+                // Outside of a bend (a left turn's outside is its right, lateral < 0).
+                let outside = r.curv[i].abs() > 1.0 / 80.0 && lat * r.curv[i] < 0.0;
+                let in_track = (a - TRACK_LINE).abs() <= TRACK_HALF + 0.15;
+                if in_track && !(outside && a > TRACK_LINE) { Surface::Gravel } else { Surface::Loose }
             }
-        }
-        None => off_road(net, p),
+            s => s,
+        };
+    }
+    let side = if lat >= 0.0 { 0 } else { 1 };
+    let ditch = nr.ditch.get(i).map_or(0.0, |d| d[side]);
+    if a <= half + SHOULDER {
+        Surface::Verge
+    } else if ditch > 0.0 && a <= half + SHOULDER + DITCH_W {
+        Surface::Ditch
+    } else if a <= half + 3.0 {
+        Surface::Verge
+    } else {
+        off_road(net, p)
     }
 }
 
@@ -624,9 +713,17 @@ mod tests {
         let valley = &n.roads[0].road;
         let p = valley.pts[valley.len() / 2];
         assert_eq!(surface(&n, p.x, p.z), Surface::Tarmac, "valley road");
-        let forest = n.roads.iter().find(|r| r.kind == RoadKind::Forest).unwrap();
-        let p = forest.road.pts[forest.road.len() / 2];
-        assert!(matches!(surface(&n, p.x, p.z), Surface::Gravel | Surface::Mud));
+        // A gravel road: firm in the wheel tracks, loose on the crown between them.
+        let gravel = n.roads.iter().find(|r| r.kind == RoadKind::Gravel).unwrap();
+        let i = (0..gravel.road.len()).find(|&i| gravel.road.curv[i].abs() < 1.0 / 400.0 && gravel.road.surface[i] == Surface::Gravel && i > 200).unwrap();
+        let p = Vec2::new(gravel.road.pts[i].x, gravel.road.pts[i].z);
+        let left = -gravel.road.dir[i].perp();
+        let at = |lat: f32| surface(&n, (p + left * lat).x, (p + left * lat).y);
+        assert_eq!(at(crate::stage::TRACK_LINE), Surface::Gravel);
+        assert_eq!(at(-crate::stage::TRACK_LINE), Surface::Gravel);
+        assert_eq!(at(0.0), Surface::Loose);
+        assert_eq!(at(gravel.road.width[i] * 0.5 - 0.05), Surface::Loose);
+        assert_eq!(at(gravel.road.width[i] * 0.5 + 0.3), Surface::Verge, "shoulder");
     }
 }
 

@@ -169,10 +169,11 @@ pub fn intensity(kind: Kind, surface: Option<Surface>, speed: f32, slip_ratio: f
     let roll = v * moving * if rear { 0.7 } else { 0.35 };
     let loose = (roll + slip * (0.4 + 0.6 * v)).clamp(0.0, 1.0);
     match (kind, s) {
-        (Kind::Dust, Surface::Gravel) => loose,
+        (Kind::Dust, Surface::Gravel | Surface::Loose) => loose,
+        (Kind::Dust, Surface::Dusty) => loose * 0.4,
         (Kind::Dust, Surface::Verge | Surface::Rough) => loose * 0.5,
-        (Kind::Chips, Surface::Gravel) => (slip * v * 1.4).clamp(0.0, 1.0),
-        (Kind::Mud, Surface::Mud) => loose,
+        (Kind::Chips, Surface::Gravel | Surface::Loose) => (slip * v * 1.4).clamp(0.0, 1.0),
+        (Kind::Mud, Surface::Mud | Surface::Ditch) => loose,
         (Kind::Mud, Surface::Verge | Surface::Rough) => (slip * v * 0.5).clamp(0.0, 1.0),
         (Kind::Snow, Surface::Snow) => loose,
         (Kind::Smoke, Surface::Tarmac) => ((slip - 0.5) * 2.0).clamp(0.0, 1.0) * v,

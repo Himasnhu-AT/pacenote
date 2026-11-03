@@ -9,6 +9,7 @@ pub mod forest;
 pub mod junctions;
 pub mod land;
 pub mod plan;
+pub mod profile;
 pub mod level;
 pub mod live;
 pub mod placeable;
@@ -159,12 +160,33 @@ impl OpenWorld {
     }
 }
 
+impl OpenWorld {
+    /// The ground the car drives on: the exact road cross-section near a road (crown, wheel
+    /// tracks, shoulder, ditch; `profile::ground`), the terrain elsewhere.
+    pub fn ground_height(&self, x: f32, z: f32) -> f32 {
+        let hf = self.heights.height_at(x, z);
+        profile::ground(&self.net, Vec2::new(x, z), hf).unwrap_or(hf)
+    }
+
+    /// The ground's normal: from the exact profile near a road, the terrain's elsewhere.
+    pub fn ground_normal(&self, x: f32, z: f32) -> Vec3 {
+        let p = Vec2::new(x, z);
+        if self.net.nearest(p, 9.0).is_none() {
+            return self.heights.smooth_normal_at(x, z);
+        }
+        let e = 0.25;
+        let dx = self.ground_height(x + e, z) - self.ground_height(x - e, z);
+        let dz = self.ground_height(x, z + e) - self.ground_height(x, z - e);
+        Vec3::new(-dx, 2.0 * e, -dz).normalize()
+    }
+}
+
 impl Ground for OpenWorld {
     fn height(&self, x: f32, z: f32) -> f32 {
-        self.heights.height_at(x, z)
+        self.ground_height(x, z)
     }
     fn normal(&self, x: f32, z: f32) -> Vec3 {
-        self.heights.smooth_normal_at(x, z)
+        self.ground_normal(x, z)
     }
     fn surface(&self, x: f32, z: f32) -> Surface {
         roads::surface(&self.net, x, z)

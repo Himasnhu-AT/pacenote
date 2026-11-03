@@ -751,6 +751,12 @@ pub fn tyre(s: Surface) -> Tyre {
         Surface::Mud => t(0.58, 12.0, 0.17, 0.85, 0.8),
         Surface::Verge => t(0.62, 12.0, 0.17, 0.82, 0.75),
         Surface::Rough => t(0.55, 13.0, 0.18, 0.85, 0.9),
+        // Marbles: 85 % of gravel's grip, looser past the peak, more rolling drag.
+        Surface::Loose => t(0.72, 12.0, 0.16, 0.86, 0.75),
+        // A ditch: soft, deep, it drags.
+        Surface::Ditch => t(0.5, 13.0, 0.18, 0.84, 1.0),
+        // Tarmac with gravel on it: 82 % of tarmac's grip.
+        Surface::Dusty => t(0.94, 8.0, 0.11, 0.8, 0.15),
     }
 }
 
