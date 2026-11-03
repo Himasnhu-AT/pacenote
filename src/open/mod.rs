@@ -14,6 +14,7 @@ pub mod placeable;
 pub mod roads;
 pub mod tour;
 pub mod traffic;
+pub mod walls;
 
 use std::sync::Arc;
 
@@ -21,7 +22,7 @@ use bevy::math::{Vec2, Vec3};
 use engine::world::Heightfield;
 
 use crate::stage::Surface;
-use crate::vehicle::{Ground, Obstacle};
+use crate::vehicle::{Ground, Obstacle, Wall};
 pub use roads::{RoadKind, RoadNet};
 
 /// Seed of the one world.
@@ -56,9 +57,9 @@ pub struct OpenWorld {
     pub data: Arc<data::WorldData>,
     pub net: Arc<RoadNet>,
     pub heights: Arc<Heightfield>,
-    /// Town and farm buildings, and their walls as solid cylinders for the car.
+    /// Town and farm buildings, and the straight walls the car can hit (their facades).
     pub buildings: Arc<buildings::Layout>,
-    pub walls: Arc<buildings::ObstacleGrid>,
+    pub walls: Arc<walls::WallGrid>,
     /// Where the traffic cars are (written by `traffic::TrafficPlugin` each step; the same
     /// `Arc` as the `TrafficSolids` resource): solid for the car in free roam.
     pub traffic: traffic::TrafficSolids,
@@ -134,7 +135,8 @@ impl OpenWorld {
             None => Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z)),
         };
         let layout = buildings::layout_baked(&net, &data.lots, &data.buildings);
-        let walls = buildings::ObstacleGrid::new(&buildings::obstacles(&layout), 10.0);
+        // Every straight wall the car can hit: facades now; parapets and barriers go here too.
+        let walls = walls::WallGrid::new(&buildings::walls(&layout), 10.0);
         Ok(OpenWorld {
             data: Arc::new(data),
             net: Arc::new(net),
@@ -168,8 +170,11 @@ impl Ground for OpenWorld {
     }
     fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
         out.clear();
-        self.walls.query(p, r, out);
         self.traffic.obstacles(p, r, out);
+    }
+    fn walls(&self, p: Vec2, r: f32, out: &mut Vec<Wall>) {
+        out.clear();
+        self.walls.query(p, r, out);
     }
 }
 

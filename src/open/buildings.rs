@@ -4,8 +4,8 @@
 //!
 //! - [`layout`]: pure and deterministic from the road network (its seed), like `stage.rs`: the
 //!   same bits on every machine (no platform trig, no hash-map order).
-//! - [`obstacles`] / [`ObstacleGrid`]: the walls as rows of solid cylinders for the car sim
-//!   (`vehicle::Obstacle` is a vertical cylinder), overlapping so nothing slips between them.
+//! - [`walls`]: each facade as one straight wall (`vehicle::Wall`) for the car sim, so a car
+//!   brushing a building scrapes along it.
 //! - [`spawn`]: one merged mesh per block (walls, roofs, sidewalks, lot paving) with a single
 //!   material: a procedural facade atlas (windows, shopfronts, doors, planks, roof tiles,
 //!   paving) tinted by vertex colour. Nothing spawns in headless runs.
@@ -15,7 +15,7 @@ use bevy::math::{Vec2, Vec3};
 
 use super::roads::{self, BLOCK, PLATEAU, RING_R, RoadKind, RoadNet, TOWN};
 use crate::stage::{Rng, STEP};
-use crate::vehicle::Obstacle;
+use crate::vehicle::Wall;
 
 /// Sidewalk between the street's edge and the lots (m).
 pub const SIDEWALK: f32 = 3.0;
@@ -24,12 +24,9 @@ pub const FLOOR: f32 = 3.2;
 pub const HOUSE_FLOOR: f32 = 2.9;
 /// Parapet on flat roofs (height above the roof, thickness).
 pub const PARAPET: (f32, f32) = (0.9, 0.25);
-/// Wall collision: cylinders of this radius, centres this far inside the wall face, at most
-/// this far apart. A wall face then bulges out by at most ~0.15 m between centres and is
-/// recessed by at most ~0.15 m: the car stops within a hand's width of the plaster.
-pub const WALL_R: f32 = 1.2;
-pub const WALL_INSET: f32 = 1.05;
-pub const WALL_STEP: f32 = 1.6;
+/// Wall collision: each facade is a segment this far inside the face, grown by as much, so
+/// the car stops at the plaster. (The corners are rounded by it: ~0.2 m off the corner.)
+pub const WALL_R: f32 = 0.5;
 
 /// What a building is (sets its size, storeys, roof and facade).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
@@ -580,95 +577,79 @@ pub fn overlaps(a: &Building, b: &Building, margin: f32) -> bool {
 
 // ---------------------------------------------------------------- collision
 
-/// The walls as solid cylinders: along each wall [`WALL_INSET`] inside the face, at most
-/// [`WALL_STEP`] apart (corners included), up to the roof's top.
-pub fn obstacles(layout: &Layout) -> Vec<Obstacle> {
+/// The facades as solid walls: one segment per side, [`WALL_R`] inside the face and grown
+/// by it, up to the roof's top. A footprint thinner than that is one segment down its middle.
+/// Facades in line (a row of shops) are joined into one wall: apart, their round ends would
+/// leave a notch at every party wall for a scraping car to catch on.
+pub fn walls(layout: &Layout) -> Vec<Wall> {
     let mut out = Vec::new();
     for b in &layout.buildings {
         let top = b.top();
-        let h = (b.half - Vec2::splat(WALL_INSET)).max(Vec2::splat(0.0));
-        if h.x < 0.5 || h.y < 0.5 {
-            out.push(Obstacle::solid(b.centre, b.half.max_element() + 0.1, top));
-            continue;
-        }
+        let r = WALL_R.min(b.half.min_element());
+        let h = b.half - Vec2::splat(r);
         let c = [Vec2::new(-h.x, -h.y), Vec2::new(h.x, -h.y), Vec2::new(h.x, h.y), Vec2::new(-h.x, h.y)];
+        let first = out.len();
         for k in 0..4 {
-            let (a, e) = (c[k], c[(k + 1) % 4]);
-            let n = ((e - a).length() / WALL_STEP).ceil().max(1.0) as usize;
-            for s in 0..n {
-                let l = a + (e - a) * (s as f32 / n as f32);
-                out.push(Obstacle::solid(b.at(l), WALL_R, top));
+            let (a, e) = (b.at(c[k]), b.at(c[(k + 1) % 4]));
+            // (A thin footprint's sides repeat each other: one is enough.)
+            if !(a == e && k > 0 || out[first..].iter().any(|w: &Wall| (w.a, w.b) == (a, e) || (w.a, w.b) == (e, a))) {
+                out.push(Wall::new(a, e, r, top));
             }
         }
+    }
+    join_in_line(out)
+}
+
+/// A wall's line (direction angle and offset, quantised), its start and end along it, and its
+/// direction.
+type Line = ((i64, i64), f32, f32, Vec2);
+
+/// Joins walls on one line (to a mrad and 10 cm) whose ends meet (within their two radii and a
+/// few cm): sorted by line then position along it, so the result is the same on every machine.
+fn join_in_line(walls: Vec<Wall>) -> Vec<Wall> {
+    // Each wall as (line: direction angle in [0, π) and offset, quantised; start, end along
+    // it; direction).
+    let line = |w: &Wall| -> Line {
+        let d = (w.b - w.a).normalize_or_zero();
+        let d = if d.x < 0.0 || d.x == 0.0 && d.y < 0.0 { -d } else { d };
+        let (s, e) = (w.a.dot(d), w.b.dot(d));
+        let key = ((libm::atan2f(d.y, d.x) * 1000.0).round() as i64, (d.perp().dot(w.a) * 10.0).round() as i64);
+        (key, s.min(e), s.max(e), d)
+    };
+    let mut keyed: Vec<_> = walls.iter().filter(|w| w.a != w.b).map(|w| (line(w), *w)).collect();
+    keyed.sort_by(|(a, _), (b, _)| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.total_cmp(&b.2)));
+    let mut out: Vec<Wall> = walls.iter().filter(|w| w.a == w.b).copied().collect();
+    let mut run: Option<(Line, Wall)> = None;
+    for (l, w) in keyed {
+        if let Some((rl, rw)) = &mut run
+            && l.0 == rl.0
+            && (l.1 - rl.2) <= rw.radius + w.radius + 0.05
+            && (w.radius - rw.radius).abs() < 1e-3
+        {
+            if l.2 > rl.2 {
+                rl.2 = l.2;
+                // The far end, on the run's line.
+                rw.b = rw.a + rl.3 * (rl.2 - rl.1);
+            }
+            rw.top = rw.top.max(w.top);
+            continue;
+        }
+        if let Some((_, rw)) = run.take() {
+            out.push(rw);
+        }
+        // Start a run along the canonical direction.
+        let (a, b) = (on_line(&w, l.3, l.1), on_line(&w, l.3, l.2));
+        run = Some((l, Wall { a, b, ..w }));
+    }
+    if let Some((_, rw)) = run {
+        out.push(rw);
     }
     out
 }
 
-/// Obstacles bucketed on a grid for quick "near the car" queries.
-#[derive(Clone, Debug)]
-pub struct ObstacleGrid {
-    lo: Vec2,
-    cell: f32,
-    nx: usize,
-    nz: usize,
-    cells: Vec<Vec<Obstacle>>,
-    max_r: f32,
-}
-
-impl ObstacleGrid {
-    /// Buckets `obs` (by centre) into `cell`-metre cells.
-    pub fn new(obs: &[Obstacle], cell: f32) -> ObstacleGrid {
-        let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
-        let mut max_r: f32 = 0.0;
-        for o in obs {
-            lo = lo.min(o.pos);
-            hi = hi.max(o.pos);
-            max_r = max_r.max(o.radius);
-        }
-        if obs.is_empty() {
-            (lo, hi) = (Vec2::ZERO, Vec2::ZERO);
-        }
-        let nx = ((hi.x - lo.x) / cell).floor() as usize + 1;
-        let nz = ((hi.y - lo.y) / cell).floor() as usize + 1;
-        let mut cells = vec![Vec::new(); nx * nz];
-        for o in obs {
-            let (i, j) = (((o.pos.x - lo.x) / cell) as usize, ((o.pos.y - lo.y) / cell) as usize);
-            cells[j.min(nz - 1) * nx + i.min(nx - 1)].push(*o);
-        }
-        ObstacleGrid { lo, cell, nx, nz, cells, max_r }
-    }
-
-    /// Appends (doesn't clear) every obstacle whose circle comes within `r` of `p`, in a fixed
-    /// order (cells row by row, then insertion order).
-    pub fn query(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
-        let reach = r + self.max_r;
-        let i0 = ((p.x - reach - self.lo.x) / self.cell).floor().max(0.0) as usize;
-        let j0 = ((p.y - reach - self.lo.y) / self.cell).floor().max(0.0) as usize;
-        let i1 = ((p.x + reach - self.lo.x) / self.cell).floor();
-        let j1 = ((p.y + reach - self.lo.y) / self.cell).floor();
-        if i1 < 0.0 || j1 < 0.0 {
-            return;
-        }
-        let (i1, j1) = ((i1 as usize).min(self.nx - 1), (j1 as usize).min(self.nz - 1));
-        for j in j0..=j1 {
-            for i in i0..=i1 {
-                for o in &self.cells[j * self.nx + i] {
-                    let rr = r + o.radius;
-                    if o.pos.distance_squared(p) < rr * rr {
-                        out.push(*o);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.cells.iter().map(Vec::len).sum()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+/// The point of `w`'s line at `t` along `d`.
+fn on_line(w: &Wall, d: Vec2, t: f32) -> Vec2 {
+    w.a + d * (t - w.a.dot(d))
 }
 
 // ---------------------------------------------------------------- rendering
@@ -1412,6 +1393,7 @@ mod render {
 mod tests {
     use super::*;
     use crate::open::SEED;
+    use crate::open::walls::WallGrid;
 
     fn net() -> RoadNet {
         roads::generate(SEED)
@@ -1422,7 +1404,7 @@ mod tests {
         let n = net();
         let (a, b) = (layout(&n), layout(&n));
         assert_eq!(a.buildings, b.buildings);
-        assert_eq!(obstacles(&a), obstacles(&b));
+        assert_eq!(walls(&a), walls(&b));
         let town = a.blocks.iter().filter(|b| b.cell.is_some()).count();
         assert_eq!(town, 36);
         let count = |u| a.buildings.iter().filter(|b| b.use_ == u).count();
@@ -1512,36 +1494,48 @@ mod tests {
     #[test]
     fn walls_are_solid() {
         let l = layout(&net());
-        let obs = obstacles(&l);
-        eprintln!("obstacles: {}", obs.len());
-        assert!(obs.len() > 5_000 && obs.len() < 60_000, "{}", obs.len());
-        let grid = ObstacleGrid::new(&obs, 10.0);
-        assert_eq!(grid.len(), obs.len());
+        let ws = walls(&l);
+        // Four sides a building, less the facades joined in rows.
+        let joined = 4 * l.buildings.len() - ws.len();
+        eprintln!("walls: {} for {} buildings ({joined} facades joined onto a neighbour's)", ws.len(), l.buildings.len());
+        assert!(ws.len() > 1_000, "{}", ws.len());
+        assert!(joined > 100, "rows of shops joined into one wall");
+        let grid = WallGrid::new(&ws, 10.0);
+        assert_eq!(grid.len(), ws.len());
         let mut near = Vec::new();
         for b in &l.buildings {
             let top = b.top();
-            // Every point 0.2 m behind the wall face (away from the corners) is inside a cylinder
-            // (between two, the face itself is up to ~0.16 m uncovered), and no cylinder sticks
-            // out more than 0.2 m.
-            let h = b.half - Vec2::splat(0.2);
+            // The whole face, to within a few cm of the plaster, is inside a wall up to the top
+            // (corners: the round ends cut ~0.2 m off).
+            let h = b.half - Vec2::splat(0.03);
             for (a, e) in [(Vec2::new(-h.x, -h.y), Vec2::new(h.x, -h.y)), (Vec2::new(h.x, -h.y), Vec2::new(h.x, h.y)), (Vec2::new(h.x, h.y), Vec2::new(-h.x, h.y)), (Vec2::new(-h.x, h.y), Vec2::new(-h.x, -h.y))] {
                 let len = (e - a).length();
-                let mut s = 0.5;
-                while s < len - 0.5 {
+                let mut s = WALL_R.min(b.half.min_element());
+                while s < len - WALL_R {
                     let p = b.at(a + (e - a) * (s / len));
                     near.clear();
                     grid.query(p, 0.0, &mut near);
-                    assert!(near.iter().any(|o| o.top >= top - 1e-3), "gap in the wall of {b:?} at {p}");
+                    assert!(near.iter().any(|w| w.top >= top - 1e-3), "gap in the wall of {b:?} at {p}");
                     s += 0.37;
                 }
             }
+            // Solid through the middle of each side: a point just outside it is within reach.
+            near.clear();
+            grid.query(b.at(Vec2::new(0.0, -b.half.y - 0.1)), 0.2, &mut near);
+            assert!(!near.is_empty(), "{b:?} open in the middle");
         }
-        for o in &obs {
-            let owner = l.buildings.iter().find(|b| b.contains(o.pos, 0.0)).expect("cylinder inside a building");
-            let d = o.pos - owner.centre;
-            let lx = d.dot(owner.axis).abs() + o.radius;
-            let lz = d.dot(owner.axis.perp()).abs() + o.radius;
-            assert!(lx <= owner.half.x + 0.2 && lz <= owner.half.y + 0.2, "cylinder at {} sticks out of {owner:?}", o.pos);
+        // No wall sticks out of the buildings: a point 5 cm outside a face, away from other
+        // buildings, is outside every wall.
+        for b in &l.buildings {
+            for l2 in [Vec2::new(0.0, -b.half.y - 0.05), Vec2::new(0.0, b.half.y + 0.05), Vec2::new(-b.half.x - 0.05, 0.0), Vec2::new(b.half.x + 0.05, 0.0)] {
+                let p = b.at(l2);
+                if l.buildings.iter().any(|o| !std::ptr::eq(o, b) && o.contains(p, 0.1)) {
+                    continue;
+                }
+                near.clear();
+                grid.query(p, 0.0, &mut near);
+                assert!(near.is_empty(), "wall sticks out of {b:?} at {p}: {near:?}");
+            }
         }
         // Streets stay clear.
         near.clear();
@@ -1551,8 +1545,8 @@ mod tests {
         assert!(near.is_empty(), "spawn point is clear");
     }
 
-    /// Flat town ground with the buildings' wall cylinders.
-    struct Town(f32, ObstacleGrid);
+    /// Flat town ground with the buildings' walls.
+    struct Town(f32, WallGrid);
     impl crate::vehicle::Ground for Town {
         fn height(&self, _: f32, _: f32) -> f32 {
             self.0
@@ -1563,10 +1557,67 @@ mod tests {
         fn surface(&self, _: f32, _: f32) -> crate::stage::Surface {
             crate::stage::Surface::Tarmac
         }
-        fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
+        fn obstacles(&self, _: Vec2, _: f32, out: &mut Vec<crate::vehicle::Obstacle>) {
+            out.clear();
+        }
+        fn walls(&self, p: Vec2, r: f32, out: &mut Vec<Wall>) {
             out.clear();
             self.1.query(p, r, out);
         }
+    }
+
+    #[test]
+    fn a_car_scrapes_along_a_row_of_shops() {
+        use crate::vehicle::{Car, Input, Spec, step};
+        let n = net();
+        let l = layout(&n);
+        let ws = walls(&l);
+        let g = Town(n.town_y, WallGrid::new(&ws, 10.0));
+        let spec = Spec::default();
+        // The longest joined facade with open street in front of it.
+        let mut best: Option<(Wall, Vec2)> = None;
+        for w in &ws {
+            let d = (w.b - w.a).normalize_or_zero();
+            let mid = (w.a + w.b) * 0.5;
+            for side in [d.perp(), -d.perp()] {
+                let clear = (0..=10).all(|k| {
+                    let p = w.a.lerp(w.b, k as f32 / 10.0) + side * 4.0;
+                    !l.buildings.iter().any(|b| b.contains(p, 1.5))
+                });
+                if clear && best.is_none_or(|(b, _)| w.a.distance(w.b) > b.a.distance(b.b)) && !l.buildings.iter().any(|b| b.contains(mid + side * (w.radius + 0.1), 0.0)) {
+                    best = Some((*w, side));
+                }
+            }
+        }
+        let (w, out) = best.unwrap();
+        let d = (w.b - w.a).normalize();
+        eprintln!("facade {:.0} m", w.a.distance(w.b));
+        assert!(w.a.distance(w.b) > 40.0);
+        // 110 km/h at 4° toward it, from 1.5 m off the plaster, 5 m along it.
+        let ang = 4f32.to_radians();
+        let dir = d * libm::cosf(ang) - out * libm::sinf(ang);
+        let start = w.a + d * 5.0 + out * (w.radius + 1.5);
+        let heading = libm::atan2f(dir.x, dir.y);
+        let mut car = Car::new(Vec3::new(start.x, n.town_y + 0.6, start.y), heading);
+        assert!(Vec2::new(car.forward().x, car.forward().z).dot(dir) > 0.999, "heading");
+        let v = 110.0 / 3.6;
+        car.vel = car.forward() * v;
+        for wh in &mut car.wheels {
+            wh.spin = v / spec.wheel_radius;
+        }
+        let (mut yaw, mut closest) = (0.0f32, f32::MAX);
+        for _ in 0..60 {
+            step(&mut car, &spec, Input::default(), &g, 1.0 / 60.0);
+            yaw = yaw.max(car.ang.y.abs());
+            closest = closest.min((Vec2::new(car.pos.x, car.pos.z) - w.a).dot(out) - w.radius);
+        }
+        let along = Vec2::new(car.vel.x, car.vel.z).normalize().dot(out);
+        eprintln!("after 1 s: {:.1} km/h, yaw ≤ {yaw:.2} rad/s, centre came within {closest:.2} m of the plaster, drift {along:.3}", car.vel.length() * 3.6);
+        // It touched (the centre is ~0.9 m in from the side), kept its speed and didn't spin
+        // in, and is moving along the wall or away from it.
+        assert!(closest < 0.95 && closest > 0.8, "{closest}");
+        assert!(car.vel.length() > 0.85 * v && yaw < 0.8, "{} m/s, yaw {yaw}", car.vel.length());
+        assert!(along > -0.01, "into the wall: {along}");
     }
 
     #[test]
@@ -1574,7 +1625,7 @@ mod tests {
         use crate::vehicle::{Car, Input, Spec, step};
         let n = net();
         let l = layout(&n);
-        let g = Town(n.town_y, ObstacleGrid::new(&obstacles(&l), 10.0));
+        let g = Town(n.town_y, WallGrid::new(&walls(&l), 10.0));
         let spec = Spec::default();
         // Head on and at 35° into a shop facing −z (the car at heading 0 drives towards +z),
         // from the middle of the street in front of it.
@@ -1613,7 +1664,7 @@ mod map {
     use super::*;
 
     /// `PACENOTE_TOWN_SVG=town.svg cargo test --lib open::buildings::map -- --ignored`: the town
-    /// from above: streets, sidewalks, lots by kind, footprints by use, wall cylinders.
+    /// from above: streets, sidewalks, lots by kind, footprints by use, wall segments.
     #[test]
     #[ignore]
     fn draw() {
@@ -1650,8 +1701,8 @@ mod map {
             let pts: Vec<String> = b.corners().iter().map(|c| format!("{:.2},{:.2}", c.x, c.y)).collect();
             s += &format!(r##"<polygon points="{}" fill="{fill}" stroke="#202020" stroke-width="0.3"><title>{:?} {} floors {:?}</title></polygon>"##, pts.join(" "), b.use_, b.floors, b.roof);
         }
-        for o in obstacles(&l) {
-            s += &format!(r##"<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="none" stroke="#ff3030" stroke-width="0.12"/>"##, o.pos.x, o.pos.y, o.radius);
+        for w in walls(&l) {
+            s += &format!(r##"<line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" stroke="#ff3030" stroke-opacity="0.5" stroke-linecap="round" stroke-width="{:.2}"/>"##, w.a.x, w.a.y, w.b.x, w.b.y, 2.0 * w.radius);
         }
         s += "</svg>";
         std::fs::write(out, s).unwrap();

@@ -1256,7 +1256,7 @@ fn wheel_slip_is_steady_at_low_speed() {
     let mut flips = 0;
     for i in 0..(SUBSTEPS * 60 * 2) {
         let (t, b) = pedals(&car, 4.0);
-        substep(&mut car, &spec, Input { throttle: t.max(0.05), brake: b, ..Input::default() }, &g, &obstacles, h);
+        substep(&mut car, &spec, Input { throttle: t.max(0.05), brake: b, ..Input::default() }, &g, &obstacles, &[], h);
         for (k, w) in car.wheels.iter().enumerate() {
             if i > SUBSTEPS * 10 && w.slip_ratio * prev[k] < 0.0 && w.slip_ratio.abs() > 0.005 {
                 flips += 1;
