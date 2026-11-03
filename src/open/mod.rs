@@ -4,6 +4,7 @@
 
 pub mod buildings;
 pub mod data;
+pub mod ecology;
 pub mod events;
 pub mod forest;
 pub mod junctions;

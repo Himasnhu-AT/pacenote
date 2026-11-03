@@ -218,7 +218,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
     if let Ok(out) = pcg_core::evaluate(&graph, &inputs, Some(band)) {
         let mut grid: HashMap<(i32, i32), Vec<Obstacle>> = HashMap::new();
         let cell = |c: Vec2| ((c.x / OBS_CELL).floor() as i32, (c.y / OBS_CELL).floor() as i32);
-        for (port, radius) in [("trunks", 0.32f32), ("boulders", 0.85)] {
+        for (port, radius) in [("trunks", 0.32f32), ("boulders", 0.85), ("stumps", 0.3)] {
             if let Some(p) = out.emits.get(port) {
                 for k in 0..p.len() {
                     let c = Vec2::new(p.pos[k].x, p.pos[k].z);
@@ -372,10 +372,18 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
             rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(4.0), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
         }
     }
+    // The open world's ecology (`open::ecology`): above the treeline, valley fields, clear-cuts.
+    let (alpine, fields, clearcut) = match &w.open {
+        Some(o) => crate::open::ecology::masks(&o.net),
+        None => (Vec::new(), Vec::new(), Vec::new()),
+    };
     let hf = &w.heights;
     let inputs = Inputs::default()
         .rects("area", vec![Rect::new(Vec2::ZERO, Vec2::splat(half - 4.0))])
         .rects("road", rects)
+        .rects("alpine", alpine)
+        .rects("fields", fields)
+        .rects("clearcut", clearcut)
         .surface(pcg_core::Surface::Heightfield { origin: hf.origin(), cell: hf.spacing(), width: hf.nx() as usize, heights: hf.heights().to_vec() });
 
     // Trees are drawn by `art::trees` from the `trunks` points (species mix per biome there).
@@ -406,17 +414,51 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .node("forest", Op::DensityNoise { scale: 160.0, octaves: 3, lo: forest_lo, hi: forest_hi }, &["tree_pts"])
         .node("trees_in", Op::DensityFilter { lo: 0.15, hi: 1.0 }, &["forest"])
         .node("trees_clear", Op::Difference { against: "road".into(), pad: 4.5 }, &["trees_in"])
-        .node("trees_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.75, 1.35), jitter: 0.0 }, &["trees_clear"])
-        .node("trees_on", Op::Project { offset: -0.1, align: false }, &["trees_tf"])
+        // None above the treeline, on the valley fields or in the clear-cuts.
+        .node("alpine", Op::Input { name: "alpine".into() }, &[])
+        .node("fields", Op::Input { name: "fields".into() }, &[])
+        .node("clearcut", Op::Input { name: "clearcut".into() }, &[])
+        .node("trees_low", Op::Difference { against: "alpine".into(), pad: 0.0 }, &["trees_clear"])
+        .node("trees_wood", Op::Difference { against: "fields".into(), pad: 0.0 }, &["trees_low"])
+        .node("trees_kept", Op::Difference { against: "clearcut".into(), pad: 0.0 }, &["trees_wood"])
+        .node("trees_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.75, 1.35), jitter: 0.0 }, &["trees_kept"])
+        // Stunted trees, few, above the treeline; single trees out on the fields.
+        .node("alp_pts", Op::PoissonSample { radius: 24.0 }, &["area"])
+        .node("alp_in", Op::Intersect { with: "alpine".into(), pad: 0.0 }, &["alp_pts"])
+        .node("alp_keep", Op::Keep { fraction: 0.35 }, &["alp_in"])
+        .node("alp_clear", Op::Difference { against: "road".into(), pad: 4.5 }, &["alp_keep"])
+        .node("alp_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.4, 0.7), jitter: 0.0 }, &["alp_clear"])
+        .node("field_pts", Op::PoissonSample { radius: 30.0 }, &["area"])
+        .node("field_in", Op::Intersect { with: "fields".into(), pad: 0.0 }, &["field_pts"])
+        .node("field_keep", Op::Keep { fraction: 0.4 }, &["field_in"])
+        .node("field_clear", Op::Difference { against: "road".into(), pad: 6.0 }, &["field_keep"])
+        .node("field_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.8, 1.25), jitter: 0.0 }, &["field_clear"])
+        .node("trees_all", Op::Union, &["trees_tf", "alp_tf", "field_tf"])
+        .node("trees_on", Op::Project { offset: -0.1, align: false }, &["trees_all"])
         .node("trunks", Op::Emit { port: "trunks".into() }, &["trees_on"])
         // Boulders and rocks.
         .node("rock_pts", Op::PoissonSample { radius: 12.0 }, &["area"])
         .node("rock_keep", Op::Keep { fraction: rock_keep }, &["rock_pts"])
         .node("rock_clear", Op::Difference { against: "road".into(), pad: 2.2 }, &["rock_keep"])
         .node("rock_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.6, 1.6), jitter: 0.0 }, &["rock_clear"])
-        .node("rock_on", Op::Project { offset: -0.25, align: true }, &["rock_tf"])
+        // Bare rock above the treeline.
+        .node("scree_pts", Op::PoissonSample { radius: 7.0 }, &["area"])
+        .node("scree_in", Op::Intersect { with: "alpine".into(), pad: 0.0 }, &["scree_pts"])
+        .node("scree_keep", Op::Keep { fraction: 0.55 }, &["scree_in"])
+        .node("scree_clear", Op::Difference { against: "road".into(), pad: 2.2 }, &["scree_keep"])
+        .node("scree_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.7, 2.2), jitter: 0.0 }, &["scree_clear"])
+        .node("rock_all", Op::Union, &["rock_tf", "scree_tf"])
+        .node("rock_on", Op::Project { offset: -0.25, align: true }, &["rock_all"])
         .node("rocks", spawn(&rocks, Tier::Essential, true), &["rock_on"])
         .node("boulders", Op::Emit { port: "boulders".into() }, &["rock_on"])
+        // Stumps in the clear-cuts: solid (0.3 m), low.
+        .node("stump_pts", Op::PoissonSample { radius: 5.5 }, &["area"])
+        .node("stump_in", Op::Intersect { with: "clearcut".into(), pad: 0.0 }, &["stump_pts"])
+        .node("stump_clear", Op::Difference { against: "road".into(), pad: 2.5 }, &["stump_in"])
+        .node("stump_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.8, 1.3), jitter: 0.0 }, &["stump_clear"])
+        .node("stump_on", Op::Project { offset: -0.05, align: true }, &["stump_tf"])
+        .node("stump_mesh", spawn(&[("stump", 1.0)], Tier::Essential, true), &["stump_on"])
+        .node("stumps", Op::Emit { port: "stumps".into() }, &["stump_on"])
         // Bushes and grass tufts: detail, thinned at low quality.
         .node("bush_pts", Op::PoissonSample { radius: 3.2 }, &["area"])
         .node("bush_keep", Op::Keep { fraction: bush_keep }, &["bush_pts"])
@@ -455,7 +497,9 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
 /// while rocks and bushes stream near the camera (`engine::pcg::PcgStreaming`).
 pub fn tree_graph(w: &StageWorld) -> (Graph, Inputs) {
     let (full, inputs) = dressing(w);
-    let keep = ["area", "road", "tree_pts", "forest", "trees_in", "trees_clear", "trees_tf", "trees_on", "trunks"];
+    let keep = [
+        "area", "road", "tree_pts", "forest", "trees_in", "trees_clear", "alpine", "fields", "clearcut", "trees_low", "trees_wood", "trees_kept", "trees_tf", "alp_pts", "alp_in", "alp_keep", "alp_clear", "alp_tf", "field_pts", "field_in", "field_keep", "field_clear", "field_tf", "trees_all", "trees_on", "trunks",
+    ];
     let mut g = full;
     g.nodes.retain(|n| keep.contains(&n.id.as_str()));
     (g, inputs)

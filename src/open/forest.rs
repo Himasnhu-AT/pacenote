@@ -64,7 +64,8 @@ impl ForestSolids {
         }
         let a = Area::new(Vec2::new(t.0 as f32, t.1 as f32) * TILE, Vec2::new(t.0 as f32 + 1.0, t.1 as f32 + 1.0) * TILE);
         let Ok(out) = pcg_core::evaluate(&self.graph, &self.inputs, Some(a)) else { return tile };
-        for (port, radius, edits) in [("trunks", 0.32f32, &self.trees), ("boulders", 0.85, &self.dressing)] {
+        // (port, trunk radius at scale 1, height at scale 1, the hand edits that apply)
+        for (port, radius, height, edits) in [("trunks", 0.32f32, 4.0f32, &self.trees), ("boulders", 0.85, 4.0, &self.dressing), ("stumps", 0.3, 0.6, &self.dressing)] {
             let Some(p) = out.emits.get(port) else { continue };
             let edited;
             let p = match edits {
@@ -83,7 +84,7 @@ impl ForestSolids {
                     continue;
                 }
                 let cell = ((c.x / CELL).floor() as i32, (c.y / CELL).floor() as i32);
-                tile.entry(cell).or_default().push(Obstacle::solid(c, radius * p.scale[k].x, p.pos[k].y + 4.0 * p.scale[k].y));
+                tile.entry(cell).or_default().push(Obstacle::solid(c, radius * p.scale[k].x, p.pos[k].y + height * p.scale[k].y));
             }
         }
         for v in tile.values_mut() {
@@ -349,5 +350,28 @@ mod tests {
         a.sort_by_key(key);
         b.sort_by_key(key);
         assert_eq!(a, b);
+    }
+
+    /// A clear-cut is stumps (low, 0.3 m, solid), no trunks; above the treeline trees are few.
+    #[test]
+    fn clearcuts_have_stumps_and_the_plateau_is_bare() {
+        let w = crate::world::generate(&super::super::def());
+        let net = &w.open.as_ref().unwrap().net;
+        let (alpine, _, cuts) = crate::open::ecology::masks(net);
+        let cut = &cuts[0];
+        let mut out = Vec::new();
+        w.obstacles(cut.center, 25.0, &mut out);
+        let (stumps, trunks): (Vec<&Obstacle>, Vec<&Obstacle>) = out.iter().filter(|o| cut.contains(o.pos, -2.0)).partition(|o| o.radius < 0.45 && o.top - w.heights.height_at(o.pos.x, o.pos.y) < 1.2);
+        eprintln!("clear-cut at {}: {} stumps, {} other solids", cut.center, stumps.len(), trunks.len());
+        assert!(stumps.len() > 20, "{} stumps", stumps.len());
+        // (Boulders may lie there; no tree trunks: those are 4 m+ tall.)
+        assert!(trunks.iter().all(|o| o.top - w.heights.height_at(o.pos.x, o.pos.y) < 6.0 || o.radius > 0.6), "trunks in the clear-cut");
+        // Above the treeline: far fewer trunks than a forest the same size.
+        let alp = alpine.iter().max_by(|a, b| (a.half.x * a.half.y).total_cmp(&(b.half.x * b.half.y))).unwrap();
+        let mut out = Vec::new();
+        w.obstacles(alp.center, 20.0, &mut out);
+        let tall = out.iter().filter(|o| o.radius < 0.6 && o.top - w.heights.height_at(o.pos.x, o.pos.y) > 1.2).count();
+        eprintln!("above the treeline at {}: {tall} trunks within 20 m", alp.center);
+        assert!(tall < 8, "{tall} trunks above the treeline");
     }
 }
