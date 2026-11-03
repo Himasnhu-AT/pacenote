@@ -22,7 +22,8 @@ use super::roads::{self, NetRoad, RoadKind, RoadNet};
 use crate::stage::{Corner, Road, Surface, TimeOfDay};
 
 /// Format version of [`WorldData`] (bump with a migration when fields change meaning).
-pub const VERSION: u32 = 1;
+/// 2: grade overrides use the sim-rally scale, 0 = hairpin, 1 = square ([`WorldData::migrate`]).
+pub const VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub struct WorldData {
@@ -77,7 +78,8 @@ pub struct RoadPoint {
 }
 
 /// A hand-set pace-note grade: the corner of any event that covers station `station` of road
-/// `road` is called as `grade` (1 hairpin … 6 flat-out kink).
+/// `road` is called as `grade` (`stage::HAIRPIN` = 0, 1 square … 6 flat-out kink; in version 1
+/// data 1 was the hairpin, see [`WorldData::migrate`]).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub struct GradeOverride {
     pub road: u32,
@@ -169,7 +171,7 @@ impl WorldData {
             return Err("two events share an id".into());
         }
         for g in &self.grades {
-            if len(g.road).is_none_or(|n| g.station as usize >= n) || !(1..=6).contains(&g.grade) {
+            if len(g.road).is_none_or(|n| g.station as usize >= n) || g.grade > 6 {
                 return Err(format!("grade {g:?}"));
             }
         }
@@ -202,13 +204,30 @@ impl WorldData {
         Ok(())
     }
 
+    /// Brings data of an older format version up to [`VERSION`]. Version 1 graded 1 (hairpin)
+    /// … 6, and every radius under 22 m was called "hairpin": its 1 becomes the hairpin (0),
+    /// so a hand-set note is still called as it was.
+    pub fn migrate(&mut self) {
+        if self.version < 2 {
+            for g in &mut self.grades {
+                if g.grade <= 1 {
+                    g.grade = crate::stage::HAIRPIN;
+                }
+            }
+        }
+        self.version = self.version.max(VERSION);
+    }
+
     /// Sets the grade of every corner of event `e` that a [`GradeOverride`] falls in.
     pub fn apply_grades(&self, e: &EventDef, net: &RoadNet, corners: &mut [Corner]) {
         for g in &self.grades {
             let Some(s) = events::route_s(e, net, g.road as usize, g.station as usize) else { continue };
             // (A corner's `end` is where the next one may start: half-open.)
             if let Some(c) = corners.iter_mut().find(|c| c.start <= s && s < c.end) {
-                c.grade = g.grade.clamp(1, 6);
+                c.grade = g.grade.min(6);
+                // Keep "tightens" / "opens" only while they still go looser than the grade.
+                c.tightens_from = c.tightens_from.filter(|t| *t > c.grade);
+                c.opens_to = c.opens_to.filter(|t| *t > c.grade);
             }
         }
     }
@@ -423,9 +442,26 @@ mod tests {
         let mut corners = crate::stage::corners(&e.route);
         let c = corners.iter().find(|c| c.grade > 2).cloned().expect("a corner above grade 2");
         let station = e.from as u32 + ((c.start + c.end) * 0.5 / crate::stage::STEP) as u32;
-        data.grades.push(GradeOverride { road: e.road as u32, station, grade: 1 });
+        data.grades.push(GradeOverride { road: e.road as u32, station, grade: crate::stage::HAIRPIN });
         data.apply_grades(e, &net, &mut corners);
-        assert_eq!(corners.iter().find(|x| x.start == c.start).unwrap().grade, 1);
+        assert_eq!(corners.iter().find(|x| x.start == c.start).unwrap().grade, crate::stage::HAIRPIN);
+        assert!(data.validate().is_ok(), "a hairpin override (0) is valid");
+    }
+
+    /// Version 1 grades (1 = hairpin) read as they were meant: 1 → hairpin, the rest unchanged.
+    #[test]
+    fn version_1_grades_migrate() {
+        let mut data = WorldData::generate(crate::open::SEED);
+        data.version = 1;
+        data.grades = vec![GradeOverride { road: 0, station: 1, grade: 1 }, GradeOverride { road: 0, station: 2, grade: 4 }];
+        assert!(data.validate().is_ok());
+        data.migrate();
+        assert_eq!(data.version, VERSION);
+        assert_eq!(data.grades.iter().map(|g| g.grade).collect::<Vec<_>>(), [crate::stage::HAIRPIN, 4]);
+        // Current data is left alone.
+        data.grades[1].grade = 1;
+        data.migrate();
+        assert_eq!(data.grades[1].grade, 1, "square stays square");
     }
 
     /// An edited speed limit reaches the traffic lanes' road.

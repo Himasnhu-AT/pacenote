@@ -100,6 +100,14 @@ Ticked as each step lands on main (commit in brackets).
 
 ## Status
 
-- Phase 1: in progress.
+- Phase 1: done. `stage::grade_for` holds the radius table; the hairpin is grade 0
+  (`stage::HAIRPIN`), so world data went to version 2 and a version 1 grade override of 1 is
+  migrated to 0. `Corner` gained `crest_into`, `tightens_from`, `opens_to`, `off_camber` and
+  `dont_cut`. Calls read like "hairpin left", "square right", "three left tightens one",
+  "crest into two right" and "four right over crest, don't cut". The six new words were
+  rendered with `cook_voice.py --only`. `Road::dont_cut` (per station: a hazard on the inside
+  edge) is all false until phase 6 sets it from culverts and rocks; event routes carry it over.
+  Fixed on the way: `Road::from_centreline` had its curvature sign backwards (+ was right), so
+  open-world calls were mirrored and its default banking leaned out of corners.
 - Phase 2: in progress.
 - Phase 3: in progress.

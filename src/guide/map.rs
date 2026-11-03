@@ -60,9 +60,10 @@ pub const NOTES: usize = 8;
 
 pub const BG: Color = Color::srgb(0.067, 0.078, 0.09);
 
-/// Grade colour: 1 (hairpin, red) … 6 (flat, green).
+/// Grade colour: hairpin (deep red), 1 (square, red) … 6 (flat, green).
 pub fn grade_color(grade: u8) -> Color {
     match grade {
+        0 => Color::srgb(0.85, 0.12, 0.3),
         1 => Color::srgb(0.95, 0.27, 0.25),
         2 => Color::srgb(0.98, 0.5, 0.2),
         3 => Color::srgb(0.98, 0.72, 0.2),
@@ -311,7 +312,7 @@ fn rebuild(mut commands: Commands, g: Res<GuideStage>, screen: Res<GuideScreen>,
         let d = road.dir[i];
         let right = Vec2::new(-d.y, -d.x);
         let out = if c.turn == Turn::Left { right } else { -right };
-        let txt = format!("{}{}", if c.turn == Turn::Left { "L" } else { "R" }, c.grade);
+        let txt = format!("{}{}", if c.turn == Turn::Left { "L" } else { "R" }, crate::stage::grade_label(c.grade));
         commands.spawn((
             GuideView,
             MapStatic,

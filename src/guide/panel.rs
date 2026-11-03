@@ -20,7 +20,7 @@ use super::coach::{self, Grade, GuideCalls};
 use super::map::{CREST, MapCamera, MapView, NOTES, grade_color, panel_px};
 use super::{GuideFeed, GuideScreen, GuideStage, GuideView, Note, upcoming, view_wanted};
 use crate::net_session::Session;
-use crate::stage::Turn;
+use crate::stage::{self, Turn};
 
 const PANEL_BG: Color = Color::srgba(0.085, 0.1, 0.115, 0.96);
 const LINE: Color = Color::srgba(1.0, 1.0, 1.0, 0.08);
@@ -267,7 +267,13 @@ fn call(out: &mut String, g: &GuideStage, n: &Note) -> Color {
     match n.corner {
         Some(k) => {
             let c = &g.corners[k];
-            let _ = write!(out, "{} {}", if c.turn == Turn::Left { "LEFT" } else { "RIGHT" }, c.grade);
+            let side = if c.turn == Turn::Left { "LEFT" } else { "RIGHT" };
+            // A corner that tightens is called by its entry ("LEFT 4  TIGHTENS 1").
+            let _ = match c.tightens_from {
+                Some(g) => write!(out, "{side} {g}"),
+                None if c.hairpin() => write!(out, "{side} HAIRPIN"),
+                None => write!(out, "{side} {}", c.grade),
+            };
             grade_color(c.grade)
         }
         None => {
@@ -292,11 +298,26 @@ fn mods(out: &mut String, g: &GuideStage, n: &Note) {
     if c.end - c.start > 70.0 {
         sep(out, "LONG");
     }
-    if c.crest {
+    if c.crest_into {
+        sep(out, "CREST INTO");
+    }
+    if c.tightens_from.is_some() {
+        sep(out, &format!("TIGHTENS {}", stage::grade_label(c.grade)));
+    }
+    if let Some(g) = c.opens_to {
+        sep(out, &format!("OPENS {g}"));
+    }
+    if c.crest && !c.crest_into {
         sep(out, "OVER CREST");
+    }
+    if c.dont_cut {
+        sep(out, "DON'T CUT");
     }
     if c.narrows {
         sep(out, "NARROWS");
+    }
+    if c.off_camber {
+        sep(out, "OFF CAMBER");
     }
 }
 

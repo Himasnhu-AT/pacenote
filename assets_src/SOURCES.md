@@ -852,7 +852,7 @@ Downloaded and not used (all CC0): Chippy569's distant-mic loops and sweeps; TRP
 
 ## voice_piper (co-driver phrase bank, added 2026-11-02)
 
-The co-driver's voice: 130 clips (numbers, pace-note words, damage and recovery lines), rendered once at build time by `tools/audio/cook_voice.py` with Piper into `assets/sounds/voice/*.ogg` (mono 24 kHz Ogg Vorbis, silence trimmed, levelled; `bank.txt` lists the words each clip says), ~1 MB. Model downloaded into `assets_src/voice_piper/` (114 MB, not shipped).
+The co-driver's voice: 136 clips (the six sim-rally note words added 2026-11-03 with `--only`) (numbers, pace-note words, damage and recovery lines), rendered once at build time by `tools/audio/cook_voice.py` with Piper into `assets/sounds/voice/*.ogg` (mono 24 kHz Ogg Vorbis, silence trimmed, levelled; `bank.txt` lists the words each clip says), ~1 MB. Model downloaded into `assets_src/voice_piper/` (114 MB, not shipped).
 
 ### Piper voice en_GB-cori-high (`piper_cori`)
 - **Source page:** https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/cori/high
