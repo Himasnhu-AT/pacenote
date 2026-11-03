@@ -42,36 +42,45 @@ obstacles), so the open world is a new `Ground`; the car, damage, physics and HU
 - Events: a route = a list of road pieces; its own `Road` gives corners and crests, so the
   pace-note planner and the results/records flow carry over.
 
-## The level file and the editor (branch `editor`)
+## The level file and the editor
+
+Needs the engine folder on the engine's `editor` branch (level, spline and editor features)
+until that branch is merged to engine main.
 
 The world is a level: `assets/levels/open.level.ron` plus its terrain in `assets/levels/open/`
 (`terrain.ron` + `terrain.r16`, 2001² at 2 m). The game reads it at start (`open::level::load`,
-0.04 s; the open world builds in under a second), or the file `--level` names; a missing or bad
-level logs an error and the world is generated from the seed instead.
+0.04 s; the open world builds in under a second), or the file `--level` names (an open-world
+level starts the open world, no `--open` needed); a missing or bad level logs an error and the
+world is generated from the seed instead.
 
 What the level holds (`src/open/level.rs`):
 
 | Entity | Components | Is |
 |---|---|---|
-| `road N (kind)` | `Spline`, `RoadSpline { kind, speed_kmh }` | a road. Control points where needed (every station within 3 cm of the curve); `tags` = surface + kind (`data::tags`), `bank` = roll in radians. Loading samples it every 2 m. Roads are numbered in stable-id order (events and grades use the number). |
+| `road N (kind)` | `Spline`, `RoadSpline { kind, speed_kmh }` | a road. Control points where needed (every station within 10 cm sideways, 3 cm in height of the curve); `tags` = surface + kind (`data::tags`), `bank` = roll in radians. Loading samples it every 2 m. Roads are numbered in stable-id order (events and grades use the number). |
 | `open world` | `WorldDoc { data, terrain }` | seed, town height, time of day, events (road, start/finish station), town lots; the terrain folder |
 | `home`, `event start: …`, grade notes | `HomePoint`, `EventStart`, `GradeNote` | the placeables (`placeable.rs`): moved in the editor, snapped to the road on load |
-| `trees`, `dressing` | `Foliage`, `PcgOverrides` | hand edits of the trees and of the rocks / bushes; the game puts the `PcgVolume` on them |
+| `house 12`, `shop 40`, … | `Building` | one building each (617): kind, size, floors, storey height, roof, colours; its Transform places it. The game builds its mesh as a child |
+| `Trees`, `Dressing` | `Foliage`, `PcgOverrides`, `PcgFollowTerrain` | hand edits of the trees and of the rocks / bushes; the game puts the `PcgVolume` on them |
 
-Edit it with the game's own binary: `cargo run -- --open --editor --level assets/levels/open.level.ron`
-(the `dev` feature includes the engine's `editor`). Save writes the level and, if sculpted, the
-terrain files. Play runs the game on a copy of the level.
+Edit it with the game's own binary: `cargo run -- --editor --level assets/levels/open.level.ron`
+(the `dev` feature includes the engine's `editor`). Save writes the level and, if sculpted or
+painted, the terrain files (only what changed). Play runs the game on a copy of the level
+(`--level-origin` tells it where the terrain is).
 
-What reacts to an edit:
-- **Trees, rocks, bushes** (Foliage tool): at once in the viewport; the car's colliders apply
-  the same overrides when the world loads.
-- **Terrain** (Sculpt / Paint): at once in the viewport and for the car after Play / reload.
-- **Roads, event starts, home, grades** (Spline / Move / Place): on the next load (Play). The
-  viewport keeps showing the roads as loaded; the terrain is not re-shaped around a moved road
-  (sculpt it to match).
+What reacts to an edit (`open::live`, 0.3 s after the last change, ~0.7 s):
+- **Roads** (Spline tool): the road, its junctions and verges, the ground around the part
+  that moved (re-shaped from the generator's hills; sculpts elsewhere stay), trees kept off
+  it, traffic lanes, event finishes on it. Undo goes back the same way.
+- **Event starts, home, grade notes** (Move / Place): the event's route and marker.
+- **Buildings** (Details, Move / Rotate, Delete, Place): the building's mesh at once; the car's
+  walls and where trees grow.
+- **Trees, rocks, bushes** (Foliage tool) and **terrain** (Sculpt / Paint): at once; trees
+  follow the ground. The car's tree colliders apply the edits when the world loads.
 
 Records and ghosts of an event are keyed by its route and the level's content (file +
-terrain), so an edited level starts fresh boards.
+terrain), so an edited level starts fresh boards. Dev command `open.check` lists roads more
+than 5 cm off the live ground.
 
 Re-bake (throws away every edit): `cargo run -- --bake-world assets/levels/open.level.ron`.
 
