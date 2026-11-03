@@ -58,9 +58,12 @@ pub struct EventDef {
     /// The road of the network it starts on, and the station it starts at.
     pub road: usize,
     pub from: usize,
-    /// Its pieces (road, from, to) and where each starts along the route (station index).
-    pub legs: Vec<(usize, usize, usize, usize)>,
+    /// Its pieces and where each starts along the route.
+    pub legs: Vec<LegAt>,
 }
+
+/// A piece of a route: (road, from station, to station, index along the route where it starts).
+pub type LegAt = (usize, usize, usize, usize);
 
 /// A further piece of an event's route: stations `from` to `to` of road `road` (driven
 /// backwards when `from > to`), starting where the piece before ends (at a junction).
@@ -273,7 +276,7 @@ pub fn check_legs(net_len: impl Fn(u32) -> Option<usize>, pos: impl Fn(u32, u32)
 /// The route along `legs`: each piece's stations in driving order (banking turned round on a
 /// piece driven backwards), the turn from one piece onto the next rounded off. With where each
 /// piece starts along it.
-fn chain(net: &RoadNet, legs: &[Leg]) -> Result<(Road, Vec<(usize, usize, usize, usize)>), String> {
+fn chain(net: &RoadNet, legs: &[Leg]) -> Result<(Road, Vec<LegAt>), String> {
     let pos = |r: u32, i: u32| {
         let p = net.roads[r as usize].road.pts[i as usize];
         Vec2::new(p.x, p.z)
