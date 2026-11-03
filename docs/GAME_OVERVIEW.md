@@ -490,9 +490,8 @@ exists**. The open world keeps ~145k trees resident and ~2.4 GB at High.
 
 ### 9.6 Tooling
 
-- Editor (engine `editor` branch, 3 Nov): after engine `3fa9765` the editor viewport stays on
-  one view and ignores camera moves (reported to the engine session); the build at `3fa9765`
-  works.
+- Editor (engine `editor` branch, 3 Nov): between engine `3fa9765` and `53614ee` the viewport
+  froze on one view when the editor adopted the game's camera; fixed in `53614ee`.
 - Metrics viewer: until engine `8ab2de8` (2 Nov) the per-second metrics lines carried the core
   frame/CPU/GPU/memory keys only once, so those panels froze; fixed, with a regression test.
 - Several Bevy 0.20 regressions were found only by running the game (blank window from a camera
