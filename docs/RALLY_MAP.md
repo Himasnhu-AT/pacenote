@@ -46,5 +46,5 @@ Each phase is playable, tested and merged to main on its own.
 ## Status
 
 - Phase 1: in progress.
-- Phase 2: in progress.
+- Phase 2: done for buildings. `vehicle::Wall` segments (`Ground::walls`, `open::walls::WallGrid`); facades are one wall per side, rows of shops joined. A 4° brush at 110 km/h keeps 97 % of its speed. Parapets and barriers still to add.
 - Phase 3: in progress.
