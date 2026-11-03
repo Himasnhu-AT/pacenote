@@ -23,7 +23,8 @@ pub struct EventStart {
     pub event: u32,
 }
 
-/// A hand-set pace-note grade for the corner at this point of the road (1 hairpin … 6 kink).
+/// A hand-set pace-note grade for the corner at this point of the road (0 hairpin, 1 square …
+/// 6 kink; a version 1 level's 1 is the hairpin, migrated by `level::from_level`).
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
 #[reflect(Component, Default)]
 pub struct GradeNote {
@@ -144,7 +145,7 @@ pub fn gather(world: &mut World, data: &WorldData, net: &RoadNet) -> WorldData {
         .iter(world)
         .filter_map(|(t, g)| {
             let on = g.road.and_then(|r| station(t.translation, Some(r as usize))).or_else(|| station(t.translation, None));
-            on.map(|(road, i)| GradeOverride { road: road as u32, station: i as u32, grade: g.grade.clamp(1, 6) })
+            on.map(|(road, i)| GradeOverride { road: road as u32, station: i as u32, grade: g.grade.min(6) })
         })
         .collect();
     grades.extend(unplaced);

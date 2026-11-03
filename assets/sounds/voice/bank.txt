@@ -1,6 +1,6 @@
 # The co-driver phrase bank: <file stem>\t<key>|<key>... (written by tools/audio/cook_voice.py)
 n0	0
-n1	1
+n1	1|one
 n2	2|two
 n3	3|three
 n4	4|four
@@ -98,6 +98,12 @@ over_crest	over crest
 narrows	narrows
 careful	careful
 into	into
+square	square
+tightens	tightens
+opens	opens
+crest_into	crest into
+dont_cut	don't cut
+off_camber	off camber
 to_flying_finish	to flying finish
 flying_finish	flying finish
 flat_out	flat out

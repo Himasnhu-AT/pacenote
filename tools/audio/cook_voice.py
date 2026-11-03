@@ -2,8 +2,9 @@
 with Piper (neural TTS, run here at build time only) -> assets/sounds/voice/*.ogg + bank.txt.
 
 The game never runs a TTS: it plays lines by joining these clips (src/audio/voice.rs). The
-vocabulary is what src/codriver/ can produce (calls.rs: distances, left/right, grades, "long",
-"over crest", "narrows", "careful", "into", the finish; mod.rs: ready, splits and times, damage,
+vocabulary is what src/codriver/ can produce (calls.rs: distances, left/right, grades ("hairpin",
+"square", "one".."six"), "tightens", "opens", "long", "over crest", "crest into", "don't cut",
+"narrows", "off camber", "careful", "into", the finish; mod.rs: ready, splits and times, damage,
 recovery); `cargo test --lib voice` checks that every line those can make is covered.
 
 Voice: Piper `en_GB-cori-high` (Bryce Beattie, trained from scratch on public-domain LibriVox
@@ -12,7 +13,8 @@ assets_src/SOURCES.md. Output: mono 24 kHz Ogg Vorbis, silence trimmed, levelled
 
 Run with a Python that has piper-tts and numpy (a venv; Piper is GPL, used as a tool only):
     <venv>/bin/python -I tools/audio/cook_voice.py --model assets_src/voice_piper/en_GB-cori-high.onnx
-Needs ffmpeg and oggenc.
+Needs ffmpeg and oggenc. `--only stem,stem` renders just those clips (new words) and leaves the
+others as they are; bank.txt is always written whole.
 """
 import os
 import subprocess
@@ -56,13 +58,15 @@ def vocabulary():
     nums = list(range(0, 60)) + list(range(60, 200, 10)) + list(range(200, 1001, 50))
     for n in nums:
         keys = [str(n)]
-        if 2 <= n <= 6:
-            keys.append(NUM_WORDS[n])  # the grades "two".."six"
+        if 1 <= n <= 6:
+            keys.append(NUM_WORDS[n])  # the grades "one".."six" (1 is "one" in "tightens one")
         v.append((f'n{n}', spell(n), keys))
     words = [
         # Pace notes.
         ('left', 'left'), ('right', 'right'), ('hairpin', 'hairpin'), ('long', 'long'),
         ('over_crest', 'over crest'), ('narrows', 'narrows'), ('careful', 'careful'), ('into', 'into'),
+        ('square', 'square'), ('tightens', 'tightens'), ('opens', 'opens'), ('crest_into', 'crest into'),
+        ('dont_cut', "don't cut"), ('off_camber', 'off camber'),
         ('to_flying_finish', 'to flying finish'), ('flying_finish', 'flying finish'), ('flat_out', 'flat out'),
         ('ready', 'Ready.'), ('co_driver_on', 'Co-driver on.'),
         # Splits and times.
@@ -160,15 +164,19 @@ def main():
     os.chdir(os.path.dirname(data))
     voice = PiperVoice.load(model, espeak_data_dir='espeak-ng-data')
     os.makedirs(OUT, exist_ok=True)
-    for f in os.listdir(OUT):
-        if f.endswith('.ogg'):
-            os.remove(os.path.join(OUT, f))
+    only = set(args[args.index('--only') + 1].split(',')) if '--only' in args else None
+    if only is None:
+        for f in os.listdir(OUT):
+            if f.endswith('.ogg'):
+                os.remove(os.path.join(OUT, f))
     total, secs, lines = 0, 0.0, []
     for stem, text, keys in vocabulary():
+        lines.append(f'{stem}\t{"|".join(keys)}')
+        if only is not None and stem not in only:
+            continue
         y = level(trim(render(voice, text)))
         total += write(stem, y)
         secs += len(y) / RATE
-        lines.append(f'{stem}\t{"|".join(keys)}')
         if '--report' in args:
             print(f'{stem:22s} {len(y) / RATE:5.2f} s  "{text}"')
     with open(os.path.join(OUT, 'bank.txt'), 'w', encoding='utf-8') as f:

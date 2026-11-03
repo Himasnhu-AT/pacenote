@@ -23,7 +23,7 @@ per-stage leaderboards.
 | Never sees | The map, the corner list | The car camera (only a small rear-view thumbnail would be cheating: none) |
 | Voice | Open mic or push-to-talk | Push-to-talk (default) |
 
-The guide's corner list is graded from the road geometry (1 = hairpin … 6 = flat-out kink, plus
+The guide's corner list is graded from the road geometry (hairpin, 1 = square … 6 = flat-out kink, plus
 crests, jumps, narrows, "don't cut"), the same scale real co-drivers use; reading it out in time
 is the guide's skill.
 
