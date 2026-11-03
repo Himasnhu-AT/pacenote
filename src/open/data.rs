@@ -110,7 +110,7 @@ impl WorldData {
     pub fn net(&self) -> RoadNet {
         let roads: Vec<NetRoad> = self.roads.iter().map(net_road).collect();
         let junctions = roads::find_junctions(&roads);
-        RoadNet { seed: self.seed, roads, junctions, town_y: self.town_y }
+        RoadNet { seed: self.seed, roads, junctions, town_y: self.town_y, land: super::land::land(self.seed) }
     }
 
     /// Checks data from a level file before anything is built from it: version, sizes, finite
@@ -173,10 +173,8 @@ impl WorldData {
                 return Err(format!("grade {g:?}"));
             }
         }
-        for l in &self.lots {
-            if l.i >= buildings::TOWN_BLOCKS || l.j >= buildings::TOWN_BLOCKS {
-                return Err(format!("lot {l:?} outside the town grid"));
-            }
+        if self.lots.len() > 1_000 {
+            return Err(format!("{} lots", self.lots.len()));
         }
         if self.buildings.len() > MAX_BUILDINGS {
             return Err(format!("{} buildings (at most {MAX_BUILDINGS})", self.buildings.len()));
@@ -247,7 +245,7 @@ const MIN_GAP: f32 = 0.01;
 const MAX_GAP: f32 = 4.0 * crate::stage::STEP;
 
 const SURFACES: [Surface; 6] = [Surface::Gravel, Surface::Tarmac, Surface::Mud, Surface::Snow, Surface::Verge, Surface::Rough];
-const KINDS: [RoadKind; 4] = [RoadKind::Street, RoadKind::Highway, RoadKind::Country, RoadKind::Forest];
+const KINDS: [RoadKind; 4] = [RoadKind::Street, RoadKind::BRoad, RoadKind::Gravel, RoadKind::Forest];
 
 /// A spline point's `tags` for a road point: bits 0–3 the surface, 4–7 the road's kind.
 pub fn tags(kind: RoadKind, surface: Surface) -> u32 {
@@ -383,8 +381,8 @@ mod tests {
         let side: Vec<RoadPoint> = (0..=30).map(|i| pt(41.0, 60.5 - i as f32 * 2.0)).collect();
         let mut d = WorldData::generate(crate::open::SEED);
         d.roads = vec![
-            RoadData { kind: RoadKind::Country, closed: false, speed_kmh: None, points: main },
-            RoadData { kind: RoadKind::Country, closed: false, speed_kmh: None, points: side },
+            RoadData { kind: RoadKind::Gravel, closed: false, speed_kmh: None, points: main },
+            RoadData { kind: RoadKind::Gravel, closed: false, speed_kmh: None, points: side },
         ];
         let net = d.net();
         assert_eq!(net.junctions.len(), 1, "{:?}", net.junctions);

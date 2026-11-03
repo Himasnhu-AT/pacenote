@@ -13,7 +13,7 @@
 use bevy::log::warn;
 use bevy::math::{Vec2, Vec3};
 
-use super::roads::{self, BLOCK, PLATEAU, RING_R, RoadKind, RoadNet, TOWN};
+use super::roads::{self, RoadKind, RoadNet};
 use crate::stage::{Rng, STEP};
 use crate::vehicle::Obstacle;
 
@@ -223,37 +223,9 @@ fn pick<T: Copy>(rng: &mut Rng, xs: &[T]) -> T {
     xs[((rng.f() * xs.len() as f32) as usize).min(xs.len() - 1)]
 }
 
-fn shuffle<T>(rng: &mut Rng, xs: &mut [T]) {
-    for i in (1..xs.len()).rev() {
-        let j = ((rng.f() * (i + 1) as f32) as usize).min(i);
-        xs.swap(i, j);
-    }
-}
 
 fn bits(rng: &mut Rng) -> u32 {
     (rng.f() * 16_777_216.0) as u32
-}
-
-/// How a row of buildings along a block edge is made.
-struct RowStyle {
-    use_: Use,
-    setback: (f32, f32),
-    depth: (f32, f32),
-    width: (f32, f32),
-    /// Chance of a gap after a building, and its size.
-    gap: (f32, f32, f32),
-    /// The last building stretches to the row's end.
-    fill: bool,
-    /// Space between the side rows and the end rows at the corners.
-    corner: f32,
-}
-
-fn row_style(u: Use) -> RowStyle {
-    match u {
-        Use::Downtown => RowStyle { use_: u, setback: (0.0, 0.0), depth: (16.0, 22.0), width: (12.0, 24.0), gap: (0.15, 2.0, 3.0), fill: true, corner: 0.0 },
-        Use::Shop => RowStyle { use_: u, setback: (0.0, 0.0), depth: (11.0, 15.0), width: (7.0, 14.0), gap: (0.35, 1.5, 4.0), fill: true, corner: 1.5 },
-        _ => RowStyle { use_: Use::House, setback: (3.0, 6.0), depth: (8.0, 11.0), width: (8.0, 12.0), gap: (1.0, 3.0, 7.0), fill: false, corner: 3.0 },
-    }
 }
 
 /// Storeys and roof for a building of `use_` in a block whose centre is `ring` (0 = downtown,
@@ -290,41 +262,6 @@ fn building(rng: &mut Rng, use_: Use, ring: u32, centre: Vec2, axis: Vec2, half:
     Building { centre, axis, half, front, floors, floor_h, ground, base, roof, pitch, use_, wall, roof_col, bits: bits(rng) }
 }
 
-/// A row along one edge of the lot `(lo, hi)`. `side`: 0 = the −z edge, 1 = +z, 2 = −x, 3 = +x.
-/// Along x (sides 0, 1) the row spans `a0..a1` in x; along z (sides 2, 3) in z.
-#[allow(clippy::too_many_arguments)]
-fn row(out: &mut Vec<Building>, rng: &mut Rng, st: &RowStyle, ring: u32, lo: Vec2, hi: Vec2, side: u8, a0: f32, a1: f32, y: f32) {
-    let mut a = a0;
-    loop {
-        let left = a1 - a;
-        if left < st.width.0 {
-            break;
-        }
-        let mut w = rng.range(st.width.0, st.width.1).min(left);
-        if st.fill && left - w < st.width.0 {
-            w = left;
-        }
-        let depth = rng.range(st.depth.0, st.depth.1);
-        let set = rng.range(st.setback.0, st.setback.1);
-        let mid = a + w * 0.5;
-        // Front faces the street: 0 → −z (front 3), 1 → +z (front 1), 2 → −x (front 2), 3 → +x (front 0).
-        let (centre, front) = match side {
-            0 => (Vec2::new(mid, lo.y + set + depth * 0.5), 3),
-            1 => (Vec2::new(mid, hi.y - set - depth * 0.5), 1),
-            2 => (Vec2::new(lo.x + set + depth * 0.5, mid), 2),
-            _ => (Vec2::new(hi.x - set - depth * 0.5, mid), 0),
-        };
-        let half = if side < 2 { Vec2::new(w * 0.5, depth * 0.5) } else { Vec2::new(depth * 0.5, w * 0.5) };
-        out.push(building(rng, st.use_, ring, centre, Vec2::X, half, front, y, y - 0.3));
-        a += w;
-        // A gap, unless it would leave too little for the next building of a filled row.
-        let gap = if rng.chance(st.gap.0) { rng.range(st.gap.1, st.gap.2) } else { 0.0 };
-        if !st.fill || a1 - a - gap >= st.width.0 {
-            a += gap;
-        }
-    }
-}
-
 /// Builds the layout for a road network (its seed and town height).
 pub fn layout(net: &RoadNet) -> Layout {
     layout_with(net, &[])
@@ -339,119 +276,111 @@ pub struct LotData {
     pub kind: LotKind,
 }
 
-/// Blocks along each side of the town grid.
-pub const TOWN_BLOCKS: u32 = (2.0 * TOWN / BLOCK + 0.5) as u32;
-
-/// Which ring of blocks block (`i`, `j`) is in (0 = the four round the centre).
-fn ring_of(i: u32, j: u32) -> u32 {
-    let n = TOWN_BLOCKS;
-    let c = |k: u32| (k as i32 * 2 - (n as i32 - 1)).unsigned_abs() / 2;
-    c(i).max(c(j))
+/// Lot kinds set in the world data. The valley village has no grid of blocks, so none are
+/// generated (kept for old level files: they're ignored with a warning).
+pub fn town_lots(_seed: u64) -> Vec<LotData> {
+    Vec::new()
 }
 
-/// The town's block kinds as the seed picks them.
-fn town_kinds(seed: u64) -> std::collections::BTreeMap<(u32, u32), LotKind> {
-    let n = TOWN_BLOCKS;
-    // Shuffled per ring.
-    let mut rng = Rng::new(seed ^ 0xB11D_0000);
-    let mut kinds = std::collections::BTreeMap::new();
-    for ring in 0..n.div_ceil(2) {
-        let mut cells: Vec<(u32, u32)> = (0..n).flat_map(|j| (0..n).map(move |i| (i, j))).filter(|&(i, j)| ring_of(i, j) == ring).collect();
-        let mut list: Vec<LotKind> = match ring {
-            0 => vec![LotKind::Plaza, LotKind::Tower],
-            1 => vec![LotKind::Park, LotKind::Parking, LotKind::Apartments, LotKind::Apartments],
-            _ => vec![LotKind::Park, LotKind::Park, LotKind::Parking, LotKind::Apartments, LotKind::Rows(Use::Shop), LotKind::Rows(Use::Shop), LotKind::Rows(Use::Shop), LotKind::Rows(Use::Shop)],
-        };
-        let rest = match ring {
-            0 => LotKind::Rows(Use::Downtown),
-            1 => LotKind::Rows(Use::Shop),
-            _ => LotKind::Rows(Use::House),
-        };
-        while list.len() < cells.len() {
-            list.push(rest);
-        }
-        shuffle(&mut rng, &mut cells);
-        for (c, k) in cells.into_iter().zip(list) {
-            kinds.insert(c, k);
-        }
-    }
-    kinds
-}
-
-/// The town's block kinds as the seed picks them, as world data.
-pub fn town_lots(seed: u64) -> Vec<LotData> {
-    town_kinds(seed).into_iter().map(|((i, j), kind)| LotData { i, j, kind }).collect()
-}
-
-/// [`layout`] with the block kinds in `lots` instead of the generated ones (a block's
-/// buildings come from its own seed, so the other blocks don't change). Farms stay generated.
+/// The buildings of the world: the valley village along the B-road and its lanes, sheds round
+/// the service park, farms along the gravel roads. `lots` is ignored (no town grid any more).
 pub fn layout_with(net: &RoadNet, lots: &[LotData]) -> Layout {
-    let seed = net.seed;
-    let y = net.town_y;
-    let n = TOWN_BLOCKS;
-    let inset = RoadKind::Street.width() * 0.5 + SIDEWALK;
-    let mut kinds = town_kinds(seed);
-    for l in lots {
-        match kinds.get_mut(&(l.i, l.j)) {
-            Some(_) if l.kind == LotKind::Farm => warn!("lot ({}, {}): a town block can't be a farm; kept as generated", l.i, l.j),
-            Some(k) => *k = l.kind,
-            None => warn!("lot ({}, {}) is outside the town grid; ignored", l.i, l.j),
-        }
+    if !lots.is_empty() {
+        warn!("{} town lot kinds in the world data: the village has no blocks; ignored", lots.len());
     }
     let mut blocks = Vec::new();
     let mut buildings = Vec::new();
-    for j in 0..n {
-        for i in 0..n {
-            let x0 = -TOWN + i as f32 * BLOCK;
-            let z0 = -TOWN + j as f32 * BLOCK;
-            let (lo, hi) = (Vec2::new(x0 + inset, z0 + inset), Vec2::new(x0 + BLOCK - inset, z0 + BLOCK - inset));
-            let kind = kinds[&(i, j)];
-            let ring = ring_of(i, j);
-            let mut rng = Rng::new(seed ^ 0xB10C_0000 ^ ((j * n + i) as u64).wrapping_mul(0x9E37_79B9));
-            let first = buildings.len();
-            match kind {
-                LotKind::Rows(u) => {
-                    let st = row_style(u);
-                    let band = st.setback.1 + st.depth.1 + st.corner;
-                    row(&mut buildings, &mut rng, &st, ring, lo, hi, 0, lo.x, hi.x, y);
-                    row(&mut buildings, &mut rng, &st, ring, lo, hi, 1, lo.x, hi.x, y);
-                    row(&mut buildings, &mut rng, &st, ring, lo, hi, 2, lo.y + band, hi.y - band, y);
-                    row(&mut buildings, &mut rng, &st, ring, lo, hi, 3, lo.y + band, hi.y - band, y);
-                }
-                LotKind::Apartments => {
-                    // Two slabs along opposite edges, set back behind a strip of grass.
-                    let along_x = rng.chance(0.5);
-                    let size = hi - lo;
-                    for s in [0u8, 1] {
-                        let depth = rng.range(13.0, 16.0);
-                        let len = (if along_x { size.x } else { size.y }) - rng.range(10.0, 22.0);
-                        let set = rng.range(4.0, 7.0);
-                        let c = lo + size * 0.5;
-                        let off = (if along_x { size.y } else { size.x }) * 0.5 - set - depth * 0.5;
-                        let sign = if s == 0 { -1.0 } else { 1.0 };
-                        let (centre, half, front) = if along_x {
-                            (c + Vec2::new(0.0, sign * off), Vec2::new(len * 0.5, depth * 0.5), if s == 0 { 3 } else { 1 })
-                        } else {
-                            (c + Vec2::new(sign * off, 0.0), Vec2::new(depth * 0.5, len * 0.5), if s == 0 { 2 } else { 0 })
-                        };
-                        buildings.push(building(&mut rng, Use::Apartment, ring, centre, Vec2::X, half, front, y, y - 0.3));
+    village(net, &mut blocks, &mut buildings);
+    farms(net, &mut blocks, &mut buildings);
+    Layout { seed: net.seed, town_y: net.town_y, blocks, buildings }
+}
+
+/// A building of `use_` and `half` size beside road station `p` (direction `dir`), on the
+/// `out` side `reach` m from the centreline, if the ground is flat enough and nothing is in the
+/// way. Its front faces the road.
+#[allow(clippy::too_many_arguments)]
+fn frontage(net: &RoadNet, rng: &mut Rng, buildings: &[Building], use_: Use, ring: u32, p: Vec2, dir: Vec2, out: Vec2, reach: f32, half: Vec2) -> Option<Building> {
+    let c = p + out * (reach + half.y);
+    let front = if dir.perp().dot(-out) > 0.0 { 1 } else { 3 };
+    let probe = Building { centre: c, axis: dir, half, front, floors: 1, floor_h: 3.0, ground: 0.0, base: 0.0, roof: Roof::Flat, pitch: 0.0, use_, wall: 0, roof_col: 0, bits: 0 };
+    let hs: Vec<f32> = probe.corners().iter().chain(std::iter::once(&c)).map(|q| roads::height(net, q.x, q.y)).collect();
+    let (lo_h, hi_h) = hs.iter().fold((f32::MAX, f32::MIN), |(a, b), &h| (a.min(h), b.max(h)));
+    let fits = clear_of_roads(net, &probe, 3.0) && hi_h - lo_h < 2.5 && !buildings.iter().any(|b| overlaps(b, &probe, 2.5));
+    fits.then(|| building(rng, use_, ring, c, dir, half, front, hi_h + 0.15, lo_h - 0.4))
+}
+
+/// The valley village: houses (and shops near the middle) on both sides of the B-road within
+/// [`VILLAGE_R`] of the village centre and along the lanes; sheds round the service park.
+fn village(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
+    let pl = net.places();
+    let mut rng = Rng::new(net.seed ^ 0x7111_A6E5);
+    let near_junction = |p: Vec2| net.junctions.iter().any(|j| j.pos.distance(p) < 16.0);
+    let first = buildings.len();
+    for r in net.roads.iter().filter(|r| matches!(r.kind, RoadKind::Street | RoadKind::BRoad)) {
+        let road = &r.road;
+        let mut i = 0;
+        while i < road.len() {
+            let p = Vec2::new(road.pts[i].x, road.pts[i].z);
+            let dv = p.distance(pl.village);
+            let lane = r.kind == RoadKind::Street;
+            if (dv < VILLAGE_R || (lane && dv < VILLAGE_R * 1.6)) && !near_junction(p) {
+                let dir = road.dir[i];
+                for side in [1.0, -1.0] {
+                    if !rng.chance(if dv < VILLAGE_R * 0.5 { 0.9 } else { 0.7 }) {
+                        continue;
+                    }
+                    let shop = dv < 110.0 && !lane && rng.chance(0.55);
+                    let (use_, half, set) = if shop {
+                        (Use::Shop, Vec2::new(rng.range(5.0, 8.0), rng.range(5.0, 7.0)), rng.range(2.5, 4.0))
+                    } else {
+                        (Use::House, Vec2::new(rng.range(4.0, 6.0), rng.range(4.0, 5.5)), rng.range(5.0, 9.0))
+                    };
+                    let reach = road.width[i] * 0.5 + set;
+                    if let Some(b) = frontage(net, &mut rng, buildings, use_, if shop { 1 } else { 2 }, p, dir, dir.perp() * side, reach, half) {
+                        buildings.push(b);
                     }
                 }
-                LotKind::Tower => {
-                    let s = rng.range(15.0, 19.0);
-                    let c = (lo + hi) * 0.5 + Vec2::new(rng.range(-6.0, 6.0), rng.range(-6.0, 6.0));
-                    // Its front faces the town centre.
-                    let to = -c;
-                    let front = if to.x.abs() > to.y.abs() { if to.x > 0.0 { 0 } else { 2 } } else if to.y > 0.0 { 1 } else { 3 };
-                    buildings.push(building(&mut rng, Use::Tower, ring, c, Vec2::X, Vec2::splat(s), front, y, y - 0.3));
-                }
-                LotKind::Plaza | LotKind::Park | LotKind::Parking | LotKind::Farm => {}
+                i += (rng.range(18.0, 26.0) / STEP) as usize;
+            } else {
+                i += (10.0 / STEP) as usize;
             }
-            blocks.push(Block { cell: Some((i, j)), min: lo, max: hi, kind, buildings: (first..buildings.len()).collect() });
         }
     }
-    farms(net, &mut blocks, &mut buildings);
-    Layout { seed, town_y: y, blocks, buildings }
+    group(blocks, buildings, first, LotKind::Rows(Use::House));
+    // Service park: a row of big sheds set back on the far side of the B-road.
+    let first = buildings.len();
+    let valley = &net.roads[0].road;
+    if let Some(at) = valley.nearest(pl.park, 300.0) {
+        for k in -3i32..=3 {
+            let i = (at.i as i32 + k * 14).clamp(0, valley.len() as i32 - 1) as usize;
+            let p = Vec2::new(valley.pts[i].x, valley.pts[i].z);
+            let dir = valley.dir[i];
+            let half = Vec2::new(rng.range(9.0, 13.0), rng.range(7.0, 10.0));
+            let side = if pl.park.y > valley.pts[at.i].z { -1.0 } else { 1.0 };
+            if let Some(b) = frontage(net, &mut rng, buildings, Use::Barn, 3, p, dir, dir.perp() * side, valley.width[i] * 0.5 + 14.0, half) {
+                buildings.push(b);
+            }
+        }
+    }
+    group(blocks, buildings, first, LotKind::Parking);
+}
+
+/// How far from the village centre (m) the B-road is built up.
+pub const VILLAGE_R: f32 = 300.0;
+
+/// A block (no lot drawn) holding `buildings[first..]`.
+fn group(blocks: &mut Vec<Block>, buildings: &[Building], first: usize, kind: LotKind) {
+    if first == buildings.len() {
+        return;
+    }
+    let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+    for b in &buildings[first..] {
+        for q in b.corners() {
+            lo = lo.min(q);
+            hi = hi.max(q);
+        }
+    }
+    blocks.push(Block { cell: None, min: lo, max: hi, kind, buildings: (first..buildings.len()).collect() });
 }
 
 /// [`layout_with`], with `baked` buildings (a level's) in place of the generated ones when
@@ -478,19 +407,18 @@ pub fn layout_baked(net: &RoadNet, lots: &[LotData], baked: &[Building]) -> Layo
     l
 }
 
-/// A farmhouse (and usually a barn behind it) every so often along the country roads, between
-/// the town's plateau and the ring, on ground flat enough, clear of every road.
+/// A farmhouse (and usually a barn behind it) every so often along the gravel roads below the
+/// plateau and away from the village, on ground flat enough, clear of every road.
 fn farms(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
     let mut rng = Rng::new(net.seed ^ 0xFA53);
     let every = (170.0 / STEP) as usize;
-    for r in net.roads.iter().filter(|r| r.kind == RoadKind::Country) {
+    for r in net.roads.iter().filter(|r| r.kind == RoadKind::Gravel) {
         let road = &r.road;
         let mut i = every / 2;
         while i < road.len() {
             let p = Vec2::new(road.pts[i].x, road.pts[i].z);
-            let d = p.x.abs().max(p.y.abs());
-            let r_len = p.length();
-            if d > PLATEAU.0 + 60.0 && r_len < RING_R - 300.0 && rng.chance(0.65) {
+            let low = road.pts[i].y < 260.0 && p.distance(net.places().village) > VILLAGE_R + 150.0;
+            if low && rng.chance(0.5) {
                 let dir = road.dir[i];
                 let side = if rng.chance(0.5) { 1.0 } else { -1.0 };
                 let out = dir.perp() * side;
@@ -1471,27 +1399,21 @@ mod tests {
     }
 
     #[test]
-    fn town_inside_the_plateau_and_blocks() {
+    fn a_valley_village() {
         let n = net();
         let l = layout(&n);
-        for blk in l.blocks.iter().filter(|b| b.cell.is_some()) {
-            for &i in &blk.buildings {
-                let b = &l.buildings[i];
-                assert!((b.ground - n.town_y).abs() < 1e-4);
-                assert!((2..=8).contains(&b.floors), "{b:?}");
-                for c in b.corners() {
-                    assert!(c.x.abs().max(c.y.abs()) < PLATEAU.0, "{c}");
-                    assert!(c.x >= blk.min.x - 1e-3 && c.x <= blk.max.x + 1e-3 && c.y >= blk.min.y - 1e-3 && c.y <= blk.max.y + 1e-3, "{c} outside its lot");
-                }
+        let pl = n.places();
+        let village = l.buildings.iter().filter(|b| b.centre.distance(pl.village) < VILLAGE_R * 1.7).count();
+        eprintln!("village buildings: {village}, all: {}", l.buildings.len());
+        assert!((60..=140).contains(&village), "{village} buildings in the village");
+        assert!(l.buildings.len() <= 200, "{} buildings", l.buildings.len());
+        for b in &l.buildings {
+            assert!((1..=4).contains(&b.floors), "{b:?}");
+            for c in b.corners() {
+                let h = roads::height(&n, c.x, c.y);
+                assert!(h >= b.base - 1e-3 && h <= b.ground + 1e-3, "ground {h} vs base {} floor {}", b.base, b.ground);
             }
         }
-        // Taller downtown than out at the edge.
-        let mean = |f: &dyn Fn(f32) -> bool| {
-            let v: Vec<f32> = l.buildings.iter().filter(|b| b.ground == l.town_y && f(b.centre.x.abs().max(b.centre.y.abs()))).map(|b| b.floors as f32).collect();
-            v.iter().sum::<f32>() / v.len() as f32
-        };
-        let (inner, outer) = (mean(&|d| d < BLOCK), mean(&|d| d > 2.0 * BLOCK));
-        assert!(inner > outer + 2.0, "downtown {inner} vs edge {outer} storeys");
     }
 
     #[test]
@@ -1545,9 +1467,8 @@ mod tests {
         }
         // Streets stay clear.
         near.clear();
-        grid.query(Vec2::new(0.0, 0.0), 6.0, &mut near);
-        assert!(near.is_empty());
-        grid.query(Vec2::new(-TOWN + 40.0, 0.0), 6.0, &mut near);
+        let (spawn, _) = roads::spawn(&net());
+        grid.query(Vec2::new(spawn.x, spawn.z), 6.0, &mut near);
         assert!(near.is_empty(), "spawn point is clear");
     }
 

@@ -15,7 +15,7 @@ use engine::ui::toast::Toast;
 
 use super::roads::{RoadKind, RoadNet};
 use crate::drive::DrivenCar;
-use crate::stage::{self, Road, STEP, Surface};
+use crate::stage::{self, Road, STEP};
 use crate::world::StageWorld;
 
 /// Event ids start here (stages are 1..=20, the open world is 0).
@@ -110,30 +110,31 @@ pub fn specs(net: &RoadNet) -> Vec<EventData> {
         out.push(EventData { id, name, kind, road: road as u32, from: from as u32, to: to as u32 });
         id += 1;
     };
-    // Rallies: each forest road from just off the ring to its end.
+    // Rallies: each forest road, end to end (phase 5 chains them across junctions).
     for (k, (ri, r)) in net.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::Forest).enumerate() {
         let from = (16.0 / STEP) as usize;
-        push(format!("{} rally", RALLY_NAMES[k % RALLY_NAMES.len()]), EventKind::Rally, ri, from, r.road.len() - 1);
+        push(format!("{} rally", RALLY_NAMES[k % RALLY_NAMES.len()]), EventKind::Rally, ri, from, r.road.len() - 1 - from);
     }
-    // Sprints: the gravel country roads, town to ring.
-    for (ri, r) in net.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::Country && r.road.surface.iter().filter(|s| **s != Surface::Tarmac).count() * 2 > r.road.len()) {
-        let p = r.road.pts[0];
-        let dir = if p.x.abs() > p.z.abs() {
-            if p.x > 0.0 { "East" } else { "West" }
-        } else if p.z > 0.0 {
-            "South"
-        } else {
+    // Sprints: the gravel roads.
+    for (ri, r) in net.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::Gravel) {
+        let mid = r.road.pts[r.road.len() / 2];
+        let dir = if mid.x.abs() > mid.z.abs() {
+            if mid.x > 0.0 { "East" } else { "West" }
+        } else if mid.z > 0.0 {
             "North"
+        } else {
+            "South"
         };
         let from = (16.0 / STEP) as usize;
-        push(format!("{dir} road sprint"), EventKind::Sprint, ri, from, r.road.len() - 1 - from);
+        push(format!("{dir} gravel sprint"), EventKind::Sprint, ri, from, r.road.len() - 1 - from);
     }
-    // A lap of the ring from where the east country road joins it.
-    if let Some((ri, ring)) = net.roads.iter().enumerate().find(|(_, r)| r.kind == RoadKind::Highway) {
-        let from = ring.road.nearest(Vec2::new(super::roads::RING_R, 0.0), 400.0).map_or(0, |p| p.i);
-        // Start a little past the junction.
-        let from = (from + (40.0 / STEP) as usize) % ring.road.len();
-        push("Ring lap".into(), EventKind::Lap, ri, from, from);
+    // The tarmac hillclimb: the B-road that climbs.
+    if let Some((ri, r)) = net.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::BRoad).max_by(|a, b| {
+        let rise = |r: &&super::roads::NetRoad| (r.road.pts[r.road.len() - 1].y - r.road.pts[0].y).abs();
+        rise(&a.1).total_cmp(&rise(&b.1))
+    }) {
+        let from = (16.0 / STEP) as usize;
+        push("Hillclimb".into(), EventKind::Sprint, ri, from, r.road.len() - 1 - from);
     }
     out
 }

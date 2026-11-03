@@ -1,5 +1,5 @@
-//! A fixed free-roam drive for measuring (docs/ASSETS_BRIEF.md §1): from mid-town along the
-//! middle east-west street, out along the east country road, then about a kilometre of the ring. The
+//! A fixed free-roam drive for measuring (docs/ASSETS_BRIEF.md §1): from the village along the
+//! valley B-road, then up the basin gravel road. The
 //! dev autopilot follows `StageWorld::road`, so `open.tour` puts this route there (traffic stays
 //! on: it's free roam, not an event) and the car at its start.
 
@@ -7,17 +7,15 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 
-use super::roads::{RoadKind, RoadNet, TOWN};
+use super::roads::{RoadKind, RoadNet};
 use crate::stage::Road;
 
-/// The tour's centreline, from the network (deterministic).
+/// The tour's centreline, from the network (deterministic): the valley B-road from the
+/// village east to its end, then up the basin gravel road.
 pub fn route(net: &RoadNet) -> Option<Road> {
-    let street = net.nearest(Vec2::new(0.0, 0.0), 2.0).map(|n| n.road)?;
-    let street = &net.roads[street].road;
-    let spoke = net.roads.iter().find(|r| r.kind == RoadKind::Country && r.road.pts[0].x > TOWN - 1.0 && r.road.pts[0].z.abs() < 1.0)?;
-    let ring = net.roads.iter().find(|r| r.kind == RoadKind::Highway)?;
-    let end = *spoke.road.pts.last()?;
-    let at = ring.road.nearest(Vec2::new(end.x, end.z), 10.0)?.i;
+    let valley = &net.roads.first()?.road;
+    let basin = net.roads.iter().find(|r| r.kind == RoadKind::Gravel)?;
+    let from = valley.nearest(net.places().village, 400.0)?.i;
     let (mut pts, mut y, mut w, mut s) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut take = |r: &Road, idx: &mut dyn Iterator<Item = usize>| {
         for i in idx {
@@ -31,13 +29,8 @@ pub fn route(net: &RoadNet) -> Option<Road> {
             s.push(r.surface[i]);
         }
     };
-    // The street is the x = -TOWN..TOWN line at z = 0: from mid-town (x = -60) to its east end,
-    // so a 60 s drive at ~105 km/h covers town, the country road and some ring.
-    let from = ((TOWN - 60.0) / crate::stage::STEP) as usize;
-    take(street, &mut (from..street.len()));
-    take(&spoke.road, &mut (0..spoke.road.len()));
-    let n = ring.road.len();
-    take(&ring.road, &mut (0..500).map(|k| (at + k) % n));
+    take(valley, &mut (from..valley.len()));
+    take(&basin.road, &mut (0..basin.road.len().min(800)));
     Some(Road::from_centreline(&pts, &y, w, s))
 }
 

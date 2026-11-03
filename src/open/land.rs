@@ -43,6 +43,12 @@ pub struct Land {
     pub river: Vec<Vec2>,
 }
 
+impl std::fmt::Debug for Land {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Land(seed {:#x})", self.seed)
+    }
+}
+
 impl Land {
     fn idx(x: usize, z: usize) -> usize {
         z * N + x

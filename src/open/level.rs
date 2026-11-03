@@ -54,7 +54,7 @@ pub struct RoadSpline {
 
 impl Default for RoadSpline {
     fn default() -> Self {
-        RoadSpline { kind: RoadKind::Country, speed_kmh: None }
+        RoadSpline { kind: RoadKind::Gravel, speed_kmh: None }
     }
 }
 

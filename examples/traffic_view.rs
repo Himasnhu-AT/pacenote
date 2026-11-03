@@ -41,15 +41,16 @@ fn chase(traffic: Res<Traffic>, focus: Res<TrafficFocus>, cars: Query<(&TrafficC
 fn setup(mut commands: Commands, meshes: Option<ResMut<Assets<Mesh>>>, mats: Option<ResMut<Assets<StandardMaterial>>>) {
     let ring = std::env::args().any(|a| a == "--ring");
     let net = roads::generate(SEED);
-    // Where to look: the crossroads one block east and north of the centre, or where the east
-    // country road meets the ring.
+    // Where to look: the village junction nearest its centre, or the B-road's east end.
     let (focus, eye) = if ring {
-        let hw = &net.roads.iter().find(|r| r.kind == roads::RoadKind::Highway).unwrap().road;
-        let j = net.junctions.iter().filter(|j| j.pos.x > 1000.0).min_by(|a, b| a.pos.y.abs().total_cmp(&b.pos.y.abs())).unwrap().pos;
+        let hw = &net.roads[0].road;
+        let j = net.junctions.iter().max_by(|a, b| a.pos.x.total_cmp(&b.pos.x)).unwrap().pos;
         let y = hw.nearest(j, 5.0).map_or(net.town_y, |at| hw.height_at(&at));
         (Vec3::new(j.x, y, j.y), Vec3::new(j.x - 30.0, y + 14.0, j.y + 34.0))
     } else {
-        let c = Vec3::new(roads::BLOCK, net.town_y, roads::BLOCK);
+        let v = net.places().village;
+        let j = net.junctions.iter().min_by(|a, b| a.pos.distance(v).total_cmp(&b.pos.distance(v))).unwrap().pos;
+        let c = Vec3::new(j.x, roads::height(&net, j.x, j.y), j.y);
         (c, c + Vec3::new(-14.0, 4.5, 17.0))
     };
     let mut traffic = Traffic::new(&net, TrafficConfig { cars: 90, radius: 280.0, despawn: 400.0, spawn_min: 150.0, ..default() });

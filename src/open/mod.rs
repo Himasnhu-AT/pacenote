@@ -8,6 +8,7 @@ pub mod events;
 pub mod forest;
 pub mod junctions;
 pub mod land;
+pub mod plan;
 pub mod level;
 pub mod live;
 pub mod placeable;

@@ -1,38 +1,42 @@
-//! The road network of the open world: a town street grid, a highway ring, country roads from
-//! town to the ring, and winding forest roads off the ring. Pure and deterministic (libm, no
-//! platform floats), like `stage.rs`: the same seed gives the same bits on every machine.
+//! The road network of the open world, laid on the land (`open::land`) by the planner
+//! (`open::plan`): a valley B-road along the river through the village and service park, a
+//! tarmac hillclimb up the west side, a gravel road through the basin and up the east wall, a
+//! mountain pass over the plateau, forestry roads on the escarpment with a logging loop, a
+//! gully road and a southern gravel loop over two river crossings. Every road ends on another
+//! road: no dead ends. Pure and deterministic (libm, no platform floats), like `stage.rs`.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use bevy::math::{Vec2, Vec3};
 
-use crate::stage::{Rng, Road, RoadPos, STEP, Surface, fbm, noise, smooth};
+use super::land::{self, Land, Zone};
+use super::plan::{self, Planner, Rules};
+use crate::stage::{Road, RoadPos, STEP, Surface, noise, smooth};
 
 /// Half the side of the region (m): the world spans -HALF..HALF in x and z.
-pub const HALF: f32 = 2000.0;
-/// Town streets run on this grid (m), from -TOWN to TOWN.
-pub const TOWN: f32 = 330.0;
-pub const BLOCK: f32 = 110.0;
-/// The town plateau is flat inside this (max-norm) distance and blends out by the next.
-pub const PLATEAU: (f32, f32) = (400.0, 640.0);
-/// Mean radius of the highway ring (m).
-pub const RING_R: f32 = 1450.0;
+pub const HALF: f32 = land::HALF;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
 pub enum RoadKind {
+    /// Village lanes (tarmac).
     Street,
-    Highway,
-    Country,
+    /// The valley B-road and the tarmac hillclimb.
+    BRoad,
+    /// Fast gravel roads.
+    Gravel,
+    /// Forestry and mountain tracks (gravel, single car width).
     Forest,
 }
 
 impl RoadKind {
+    /// Typical full width (m); gravel and forest roads vary around it.
     pub fn width(self) -> f32 {
         match self {
-            RoadKind::Street => 11.0,
-            RoadKind::Highway => 14.0,
-            RoadKind::Country => 8.0,
-            RoadKind::Forest => 6.6,
+            RoadKind::Street => 5.0,
+            RoadKind::BRoad => 6.5,
+            RoadKind::Gravel => 4.6,
+            RoadKind::Forest => 3.4,
         }
     }
 }
@@ -42,7 +46,7 @@ impl RoadKind {
 pub struct NetRoad {
     pub kind: RoadKind,
     pub road: Road,
-    /// The last point joins the first (the ring).
+    /// The last point joins the first.
     pub closed: bool,
     /// Traffic speed limit (m/s) when set in the world data; else by kind (`traffic::limit`).
     pub limit: Option<f32>,
@@ -64,8 +68,10 @@ pub struct RoadNet {
     pub seed: u64,
     pub roads: Vec<NetRoad>,
     pub junctions: Vec<Junction>,
-    /// The town plateau height (m).
+    /// The village's ground height (m).
     pub town_y: f32,
+    /// The land under it (`land::land(seed)`).
+    pub land: Arc<Land>,
 }
 
 /// The nearest road to a point.
@@ -108,6 +114,11 @@ impl RoadNet {
     /// Total length of road (m).
     pub fn length(&self) -> f32 {
         self.roads.iter().map(|r| r.road.length()).sum()
+    }
+
+    /// The places the network connects.
+    pub fn places(&self) -> plan::Places {
+        plan::places(&self.land)
     }
 }
 
@@ -167,114 +178,68 @@ fn crosses(a: &Road, i: usize, b: &Road, j: usize) -> bool {
     a.dir[i].dot(b.dir[j]).abs() < 0.9
 }
 
-/// Hills before the roads shape them; flat in town.
+/// The land's height before the roads shape it.
 pub fn base_height(p: Vec2, seed: u64) -> f32 {
-    let s = seed ^ 0x0BE7;
-    let warp = Vec2::new(fbm(p / 1600.0, 3, s ^ 1), fbm(p / 1600.0, 3, s ^ 2)) * 160.0;
-    let q = (p + warp) / 820.0;
-    let h = fbm(q, 6, s) * 58.0;
-    let ridge = 1.0 - fbm(q * 0.7, 4, s ^ 3).abs();
-    let detail = fbm(p / 40.0, 3, s ^ 4) * 1.0;
-    let natural = h + (ridge * ridge - 0.4) * 18.0 + detail;
-    let town = town_height(seed);
-    let d = p.x.abs().max(p.y.abs());
-    let t = smoothstep(((d - PLATEAU.0) / (PLATEAU.1 - PLATEAU.0)).clamp(0.0, 1.0));
-    town + (natural - town) * t
-}
-
-/// The plateau the town sits on: the natural height at the centre.
-fn town_height(seed: u64) -> f32 {
-    let s = seed ^ 0x0BE7;
-    let p = Vec2::ZERO;
-    let warp = Vec2::new(fbm(p / 1600.0, 3, s ^ 1), fbm(p / 1600.0, 3, s ^ 2)) * 160.0;
-    fbm((p + warp) / 820.0, 6, s) * 58.0
+    land::land(seed).height(p)
 }
 
 fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Heights along a centreline: the ground smoothed and held to `grade` (rise per metre),
-/// pinned to `start` / `end` heights (if given) and blended into them over 120 m.
-fn road_heights(pts: &[Vec2], seed: u64, grade: f32, start: Option<f32>, end: Option<f32>, closed: bool) -> Vec<f32> {
-    let mut y: Vec<f32> = pts.iter().map(|p| base_height(*p, seed)).collect();
-    y = smooth(&y, 20);
-    let max_step = grade * STEP;
-    for _ in 0..2 {
-        for i in 1..y.len() {
-            y[i] = y[i].clamp(y[i - 1] - max_step, y[i - 1] + max_step);
-        }
-        for i in (0..y.len() - 1).rev() {
-            y[i] = y[i].clamp(y[i + 1] - max_step, y[i + 1] + max_step);
-        }
-        if closed {
-            let n = y.len();
-            y[0] = y[0].clamp(y[n - 1] - max_step, y[n - 1] + max_step);
-        }
-    }
+/// Heights along a centreline: the land smoothed and held to `grade` (rise per metre), pinned
+/// to `start` / `end` heights (if given) and blended into them over 40 m.
+fn road_heights(land: &Land, pts: &[Vec2], grade: f32, start: Option<f32>, end: Option<f32>) -> Vec<f32> {
+    let mut y: Vec<f32> = pts.iter().map(|p| land.height(*p)).collect();
+    y = smooth(&y, 6);
     let n = y.len();
-    let blend = (120.0 / STEP) as usize;
-    if let Some(a) = start {
-        for i in 0..blend.min(n) {
-            let t = smoothstep(i as f32 / blend as f32);
-            y[i] = a + (y[i] - a) * t;
-        }
-    }
-    if let Some(b) = end {
-        for i in 0..blend.min(n) {
-            let t = smoothstep(i as f32 / blend as f32);
-            let j = n - 1 - i;
-            y[j] = b + (y[j] - b) * t;
-        }
-    }
-    smooth(&y, 4)
-}
-
-/// Points every STEP m along a straight line from `a` to `b` (both included).
-fn line(a: Vec2, b: Vec2) -> Vec<Vec2> {
-    let n = ((b - a).length() / STEP).round().max(1.0) as usize;
-    (0..=n).map(|i| a + (b - a) * (i as f32 / n as f32)).collect()
-}
-
-/// Coarse occupancy of what's built, for keeping new roads apart.
-#[derive(Default)]
-struct Occupied {
-    cells: HashMap<(i32, i32), Vec<Vec2>>,
-}
-
-const OCC: f32 = 25.0;
-
-impl Occupied {
-    fn add(&mut self, pts: &[Vec2]) {
-        for p in pts.iter().step_by(3) {
-            self.cells.entry(((p.x / OCC).floor() as i32, (p.y / OCC).floor() as i32)).or_default().push(*p);
-        }
-    }
-
-    fn near(&self, p: Vec2, r: f32) -> bool {
-        let (x0, x1) = (((p.x - r) / OCC).floor() as i32, ((p.x + r) / OCC).floor() as i32);
-        let (z0, z1) = (((p.y - r) / OCC).floor() as i32, ((p.y + r) / OCC).floor() as i32);
-        for z in z0..=z1 {
-            for x in x0..=x1 {
-                if let Some(v) = self.cells.get(&(x, z))
-                    && v.iter().any(|q| q.distance_squared(p) < r * r)
-                {
-                    return true;
-                }
+    let pin = |y: &mut Vec<f32>, metres: f32| {
+        let blend = ((metres / STEP) as usize).min(n / 2).max(1);
+        if let Some(a) = start {
+            for i in 0..blend {
+                let t = smoothstep(i as f32 / blend as f32);
+                y[i] = a + (y[i] - a) * t;
             }
         }
-        false
+        if let Some(b) = end {
+            for i in 0..blend {
+                let t = smoothstep(i as f32 / blend as f32);
+                let j = n - 1 - i;
+                y[j] = b + (y[j] - b) * t;
+            }
+        }
+    };
+    pin(&mut y, 40.0);
+    // Held to the grade, the pinned ends fixed.
+    let max_step = grade * STEP;
+    for _ in 0..4 {
+        for i in 1..n {
+            if end.is_some() && i == n - 1 {
+                break;
+            }
+            y[i] = y[i].clamp(y[i - 1] - max_step, y[i - 1] + max_step);
+        }
+        for i in (0..n - 1).rev() {
+            if start.is_some() && i == 0 {
+                break;
+            }
+            y[i] = y[i].clamp(y[i + 1] - max_step, y[i + 1] + max_step);
+        }
     }
+    let mut y = smooth(&y, 2);
+    pin(&mut y, 12.0);
+    y
 }
 
-fn surfaces(kind: RoadKind, n: usize, gravel: bool, seed: u64) -> Vec<Surface> {
-    (0..n)
-        .map(|i| match kind {
-            RoadKind::Street | RoadKind::Highway => Surface::Tarmac,
-            RoadKind::Country if !gravel => Surface::Tarmac,
-            _ => {
-                // Gravel with muddy patches.
-                if noise(Vec2::splat(i as f32 * STEP / 90.0 + 3.7), seed) * 0.5 + 0.5 > 0.82 { Surface::Mud } else { Surface::Gravel }
+fn surfaces(kind: RoadKind, pts: &[Vec2], land: &Land, seed: u64) -> Vec<Surface> {
+    pts.iter()
+        .enumerate()
+        .map(|(i, p)| match kind {
+            RoadKind::Street | RoadKind::BRoad => Surface::Tarmac,
+            RoadKind::Gravel | RoadKind::Forest => {
+                // Mud where the water runs, and in patches.
+                let patch = noise(Vec2::splat(i as f32 * STEP / 90.0 + 3.7), seed) * 0.5 + 0.5;
+                if kind == RoadKind::Forest && (land.wet(*p) > 0.62 || patch > 0.86) { Surface::Mud } else { Surface::Gravel }
             }
         })
         .collect()
@@ -282,32 +247,12 @@ fn surfaces(kind: RoadKind, n: usize, gravel: bool, seed: u64) -> Vec<Surface> {
 
 fn widths(kind: RoadKind, n: usize, seed: u64) -> Vec<f32> {
     let w = kind.width();
+    let vary = |amp: f32, wave: f32| -> Vec<f32> { (0..n).map(|i| w + amp * noise(Vec2::new(i as f32 * STEP / wave, 0.4), seed)).collect() };
     match kind {
-        RoadKind::Forest => (0..n)
-            .map(|i| {
-                let v = noise(Vec2::splat(i as f32 * STEP / 160.0), seed) * 0.5 + 0.5;
-                w - 1.2 * v * v * v
-            })
-            .collect(),
+        RoadKind::Gravel => vary(0.4, 220.0),
+        RoadKind::Forest => vary(0.4, 160.0),
         _ => vec![w; n],
     }
-}
-
-/// The ring: a closed loop around the town, its radius wandering with the angle.
-fn ring_points(seed: u64) -> Vec<Vec2> {
-    let circumference = core::f32::consts::TAU * RING_R;
-    let n = (circumference / STEP) as usize;
-    let mut pts: Vec<Vec2> = (0..n)
-        .map(|i| {
-            let a = i as f32 / n as f32 * core::f32::consts::TAU;
-            let (s, c) = (libm::sinf(a), libm::cosf(a));
-            let wob = noise(Vec2::new(c, s) * 2.2, seed ^ 0x2196) * 170.0 + noise(Vec2::new(c, s) * 6.0, seed ^ 0x2197) * 40.0;
-            Vec2::new(c, s) * (RING_R + wob)
-        })
-        .collect();
-    // Even spacing (the wobble stretches some stretches).
-    pts = resample(&pts, true);
-    pts
 }
 
 /// Points every STEP m along a polyline.
@@ -339,215 +284,176 @@ fn resample(pts: &[Vec2], closed: bool) -> Vec<Vec2> {
     out
 }
 
-/// A road from `a` to `b` that bends: the straight line, pushed sideways by smooth noise up to
-/// `amp` m, faded to nothing at both ends (it leaves and arrives straight). Resampled to STEP.
-fn curve(a: Vec2, b: Vec2, amp: f32, seed: u64) -> Vec<Vec2> {
-    let len = (b - a).length();
-    let side = (b - a).perp() / len.max(1e-3);
-    let n = (len / 4.0).max(2.0) as usize;
-    let raw: Vec<Vec2> = (0..=n)
-        .map(|i| {
-            let t = i as f32 / n as f32;
-            // sin(π) is a hair below zero in f32: clamp before the fractional power (NaN otherwise).
-            let fade = libm::sinf(t * core::f32::consts::PI).max(0.0).powf(0.7);
-            let off = (noise(Vec2::new(t * len / 520.0, 0.3), seed) * 0.75 + noise(Vec2::new(t * len / 190.0, 2.1), seed ^ 5) * 0.25) * amp * fade;
-            a + (b - a) * t + side * off
-        })
-        .collect();
-    let mut pts = resample(&raw, false);
-    if let Some(l) = pts.last_mut() {
-        *l = b;
-    }
-    pts
+/// A station of a road to join: its point, height and the direction across the road towards
+/// `toward`.
+#[derive(Clone, Copy, Debug)]
+struct Attach {
+    pos: Vec2,
+    y: f32,
+    out: Vec2,
 }
 
-/// A winding road from `start` heading `h`, walking in STEP m steps for up to `len` m. It keeps
-/// inside `inside` (a test on the next point) and away from `occ`; with `target`, it is drawn
-/// towards it and stops on reaching it.
-#[allow(clippy::too_many_arguments)]
-fn wander(start: Vec2, mut h: f32, len: f32, wiggle: f32, seed: u64, occ: &Occupied, inside: impl Fn(Vec2) -> bool, target: Option<(Vec2, f32)>) -> Vec<Vec2> {
-    let mut pts = vec![start];
-    let mut p = start;
-    let max_turn = STEP / 38.0; // tightest radius ~38 m
-    let steps = (len / STEP) as usize;
-    let clear = |q: Vec2, own: &[Vec2]| {
-        inside(q) && !occ.near(q, 45.0) && own.iter().rev().skip((60.0 / STEP) as usize).step_by(3).all(|o| o.distance_squared(q) > 45.0 * 45.0)
-    };
-    let dir = |a: f32| Vec2::new(libm::cosf(a), libm::sinf(a));
-    let mut boxed = 0;
-    for i in 0..steps {
-        let s = i as f32 * STEP;
-        // Desired turn: noise (bends), plus pull to the target.
-        let mut want = noise(Vec2::new(s / 140.0, 0.5), seed) * wiggle + noise(Vec2::new(s / 45.0, 1.5), seed ^ 9) * wiggle * 0.35;
-        if let Some((t, _)) = target {
-            let to = t - p;
-            let a = libm::atan2f(to.y, to.x);
-            let mut d = a - h;
-            while d > core::f32::consts::PI {
-                d -= core::f32::consts::TAU;
-            }
-            while d < -core::f32::consts::PI {
-                d += core::f32::consts::TAU;
-            }
-            want += d * 0.02;
-        }
-        // Look ahead: steer to whichever side is clear.
-        let ahead = |a: f32| p + dir(a) * 40.0;
-        if !clear(ahead(h + want), &pts) {
-            let (l, r) = (clear(ahead(h + 0.6), &pts), clear(ahead(h - 0.6), &pts));
-            want = match (l, r) {
-                (true, false) => max_turn,
-                (false, true) => -max_turn,
-                (true, true) => if noise(Vec2::new(s / 30.0, 7.0), seed) > 0.0 { max_turn } else { -max_turn },
-                (false, false) => {
-                    boxed += 1;
-                    if boxed > 12 {
-                        break;
-                    }
-                    max_turn
-                }
-            };
-        } else {
-            boxed = 0;
-        }
-        h += want.clamp(-max_turn, max_turn);
-        p += dir(h) * STEP;
-        pts.push(p);
-        if let Some((t, reach)) = target
-            && p.distance(t) < reach
-        {
-            break;
+/// The station of `roads[k]` nearest `near` (not within 40 m of either end), heading out
+/// towards `toward`.
+fn attach(roads: &[NetRoad], k: usize, near: Vec2, toward: Vec2) -> Attach {
+    let r = &roads[k].road;
+    let keep = (40.0 / STEP) as usize;
+    let mut best = keep.min(r.len() - 1);
+    for i in keep..r.len().saturating_sub(keep) {
+        let p = Vec2::new(r.pts[i].x, r.pts[i].z);
+        let q = Vec2::new(r.pts[best].x, r.pts[best].z);
+        if p.distance_squared(near) < q.distance_squared(near) {
+            best = i;
         }
     }
-    pts
+    let p = r.pts[best];
+    let pos = Vec2::new(p.x, p.z);
+    let side = r.dir[best].perp();
+    let out = if side.dot(toward - pos) >= 0.0 { side } else { -side };
+    Attach { pos, y: p.y, out }
 }
 
-/// Builds the network for `seed`.
+/// The end of `roads[k]` (first or last station).
+fn end_of(roads: &[NetRoad], k: usize, last: bool) -> Attach {
+    let r = &roads[k].road;
+    let i = if last { r.len() - 1 } else { 0 };
+    let p = r.pts[i];
+    let d = if last { r.dir[i] } else { -r.dir[i] };
+    Attach { pos: Vec2::new(p.x, p.z), y: p.y, out: d }
+}
+
+struct Builder<'a> {
+    seed: u64,
+    land: &'a Land,
+    planner: Planner<'a>,
+    roads: Vec<NetRoad>,
+}
+
+impl Builder<'_> {
+    /// Plans a road through `via` (start, waypoints, end), leaving `from` (if attached) across
+    /// its road and arriving on `to`.
+    fn road(&mut self, kind: RoadKind, rules: Rules, from: Option<Attach>, via: &[Vec2], to: Option<Attach>) -> Option<usize> {
+        // Leave and arrive straight across (or along) the joined road: the planner runs between
+        // points LEAD m out, and the last few metres are added straight.
+        const LEAD: f32 = 16.0;
+        let mut stops: Vec<Vec2> = Vec::new();
+        if let Some(a) = from {
+            stops.push(a.pos + a.out * LEAD);
+        }
+        stops.extend_from_slice(via);
+        if let Some(b) = to {
+            stops.push(b.pos + b.out * LEAD);
+        }
+        if stops.len() < 2 {
+            return None;
+        }
+        let mut cells: Vec<Vec2> = Vec::new();
+        let mut dir = from.map(|a| a.out);
+        let legs = stops.len() - 1;
+        for (li, w) in stops.windows(2).enumerate() {
+            let arrive = if li + 1 == legs { to.map(|b| -b.out) } else { None };
+            let leg = self.planner.route(w[0], dir, w[1], arrive, rules, 90.0)?;
+            if let (Some(a), Some(b)) = (leg.get(leg.len().saturating_sub(2)), leg.last()) {
+                dir = Some(*b - *a);
+            }
+            if !cells.is_empty() {
+                cells.pop();
+            }
+            cells.extend(leg);
+        }
+        if let Some(a) = from {
+            cells.splice(0..0, [a.pos, a.pos + a.out * (LEAD * 0.5)]);
+        }
+        if let Some(b) = to {
+            cells.extend([b.pos + b.out * (LEAD * 0.5), b.pos]);
+        }
+        let pts = resample(&plan::chaikin(&cells, 4), false);
+        if pts.len() < 4 {
+            return None;
+        }
+        let k = self.roads.len();
+        let sseed = self.seed ^ (0xA0 + k as u64);
+        let y = road_heights(self.land, &pts, rules.max_grade, from.map(|a| a.y), to.map(|b| b.y));
+        let n = pts.len();
+        let road = Road::from_centreline(&pts, &y, widths(kind, n, sseed), surfaces(kind, &pts, self.land, sseed));
+        self.planner.take(&pts, 40.0);
+        self.roads.push(NetRoad::new(kind, road, false));
+        Some(k)
+    }
+}
+
+/// Builds the network for `seed` (once per seed; later calls share it).
 pub fn generate(seed: u64) -> RoadNet {
-    let town_y = town_height(seed);
-    let mut roads: Vec<NetRoad> = Vec::new();
-    let mut junctions: Vec<Junction> = Vec::new();
-    let mut occ = Occupied::default();
-    let mut rng = Rng::new(seed ^ 0x5EED);
-
-    // Town: a street grid, flat.
-    let lines: Vec<f32> = {
-        let n = (2.0 * TOWN / BLOCK).round() as i32;
-        (0..=n).map(|i| -TOWN + i as f32 * BLOCK).collect()
-    };
-    let mut street_of = HashMap::new(); // (axis, line index) -> road index
-    for (axis, li) in [0, 1].iter().flat_map(|a| (0..lines.len()).map(move |i| (*a, i))) {
-        let c = lines[li];
-        let (a, b) = if axis == 0 { (Vec2::new(-TOWN, c), Vec2::new(TOWN, c)) } else { (Vec2::new(c, -TOWN), Vec2::new(c, TOWN)) };
-        let pts = line(a, b);
-        let n = pts.len();
-        let road = Road::from_centreline(&pts, &vec![town_y; n], widths(RoadKind::Street, n, seed), surfaces(RoadKind::Street, n, false, seed));
-        street_of.insert((axis, li), roads.len());
-        occ.add(&pts);
-        roads.push(NetRoad::new(RoadKind::Street, road, false));
+    static CACHE: OnceLock<Mutex<HashMap<u64, RoadNet>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(n) = cache.lock().unwrap().get(&seed) {
+        return n.clone();
     }
-    for (xi, &x) in lines.iter().enumerate() {
-        for (zi, &z) in lines.iter().enumerate() {
-            let ew = street_of[&(0, zi)]; // runs along x at z
-            let ns = street_of[&(1, xi)]; // runs along z at x
-            let station = |c: f32| ((c + TOWN) / STEP).round() as usize;
-            junctions.push(Junction { pos: Vec2::new(x, z), roads: vec![(ew, station(x)), (ns, station(z))] });
-        }
-    }
-
-    // The highway ring.
-    let ring_pts = ring_points(seed);
-    let ring_y = road_heights(&ring_pts, seed, 0.06, None, None, true);
-    let n = ring_pts.len();
-    let ring = roads.len();
-    roads.push(NetRoad::new(RoadKind::Highway, Road::from_centreline(&ring_pts, &ring_y, widths(RoadKind::Highway, n, seed), surfaces(RoadKind::Highway, n, false, seed)), true));
-    occ.add(&ring_pts);
-    let ring_at = |a: f32| -> (usize, Vec2) {
-        // The ring point in direction `a` from the centre.
-        let d = Vec2::new(libm::cosf(a), libm::sinf(a));
-        let mut best = (0, f32::MIN);
-        for (i, p) in ring_pts.iter().enumerate() {
-            let dot = p.normalize_or_zero().dot(d);
-            if dot > best.1 {
-                best = (i, dot);
-            }
-        }
-        (best.0, ring_pts[best.0])
-    };
-
-    // Country roads: from the end of the town's middle streets out to the ring.
-    let mid = lines.len() / 2;
-    let spokes = [
-        (0.0f32, Vec2::new(TOWN, 0.0), street_of[&(0, mid)], false),
-        (core::f32::consts::FRAC_PI_2, Vec2::new(0.0, TOWN), street_of[&(1, mid)], true),
-        (core::f32::consts::PI, Vec2::new(-TOWN, 0.0), street_of[&(0, mid)], false),
-        (-core::f32::consts::FRAC_PI_2, Vec2::new(0.0, -TOWN), street_of[&(1, mid)], true),
-    ];
-    let inside_region = |q: Vec2| q.x.abs() < HALF - 60.0 && q.y.abs() < HALF - 60.0;
-    for (k, (a, start, street, gravel)) in spokes.into_iter().enumerate() {
-        let (ri, target) = ring_at(a);
-        let sseed = seed ^ (0xC0 + k as u64);
-        let pts = curve(start, target, 140.0, sseed);
-        let y = road_heights(&pts, seed, 0.08, Some(town_y), Some(ring_y[ri]), false);
-        let n = pts.len();
-        let kind = RoadKind::Country;
-        let idx = roads.len();
-        roads.push(NetRoad::new(kind, Road::from_centreline(&pts, &y, widths(kind, n, sseed), surfaces(kind, n, gravel, sseed)), false));
-        occ.add(&pts);
-        let town_end = if start.x > 0.0 || start.y > 0.0 { roads[street].road.len() - 1 } else { 0 };
-        junctions.push(Junction { pos: start, roads: vec![(street, town_end), (idx, 0)] });
-        junctions.push(Junction { pos: target, roads: vec![(ring, ri), (idx, n - 1)] });
-    }
-
-    // Forest roads: from the ring into the quadrants between the spokes, winding, dead ends.
-    for k in 0..4 {
-        let a = core::f32::consts::FRAC_PI_4 + k as f32 * core::f32::consts::FRAC_PI_2 + rng.range(-0.15, 0.15);
-        let (ri, start) = ring_at(a);
-        let fseed = seed ^ (0xF0 + k as u64);
-        // Inward, between the town (plus a margin) and the ring.
-        let inner = TOWN + 160.0;
-        let ring_r = |q: Vec2| {
-            let (_, rp) = ring_at(libm::atan2f(q.y, q.x));
-            rp.length()
-        };
-        let inside = |q: Vec2| {
-            let d = q.length();
-            q.x.abs().max(q.y.abs()) > inner && d < ring_r(q) - 70.0 && inside_region(q)
-        };
-        // Leave the ring heading inward, then wander. Skip the ring's own occupancy at the
-        // start by starting 50 m in.
-        let h = a + core::f32::consts::PI;
-        let first = start + Vec2::new(libm::cosf(h), libm::sinf(h)) * 50.0;
-        let mut pts = line(start, first);
-        let more = wander(first, h, 3200.0, 0.022, fseed, &occ, inside, None);
-        pts.extend_from_slice(&more[1..]);
-        let pts = resample(&pts, false);
-        if pts.len() < (600.0 / STEP) as usize {
-            continue;
-        }
-        let y = road_heights(&pts, seed, 0.11, Some(ring_y[ri]), None, false);
-        let n = pts.len();
-        let kind = RoadKind::Forest;
-        let idx = roads.len();
-        roads.push(NetRoad::new(kind, Road::from_centreline(&pts, &y, widths(kind, n, fseed), surfaces(kind, n, true, fseed)), false));
-        occ.add(&pts);
-        junctions.push(Junction { pos: start, roads: vec![(ring, ri), (idx, 0)] });
-    }
-
-    RoadNet { seed, roads, junctions, town_y }
+    let n = build(seed);
+    cache.lock().unwrap().entry(seed).or_insert(n).clone()
 }
 
-/// A point's height in the finished world: the hills, shaped by the nearest road.
+fn build(seed: u64) -> RoadNet {
+    let land = land::land(seed);
+    let pl = plan::places(&land);
+    let mut b = Builder { seed, land: &land, planner: Planner::new(&land), roads: Vec::new() };
+    let tarmac_climb = Rules { max_turn: 3, w_turn: 0.9, ..Rules::TARMAC };
+    let flat = Rules { max_grade: 0.08, ..Rules::TARMAC };
+
+    // The valley B-road, west to east through the village and the service park.
+    let valley = b.road(RoadKind::BRoad, flat, None, &[pl.west, pl.village, pl.park, pl.east], None).expect("valley road");
+    // Tarmac hillclimb from its west end to the plateau.
+    let w_end = end_of(&b.roads, valley, false);
+    let climb = b.road(RoadKind::BRoad, tarmac_climb, Some(w_end), &[pl.pass_w], None);
+    // Basin gravel from its east end, by the quarry, up the east wall.
+    let e_end = end_of(&b.roads, valley, true);
+    let basin = b.road(RoadKind::Gravel, Rules::GRAVEL, Some(e_end), &[pl.quarry, pl.pass_e], None);
+    // The mountain pass over the plateau by the radio tower, joining the two climbs.
+    let from = climb.map(|k| end_of(&b.roads, k, true));
+    let to = basin.map(|k| end_of(&b.roads, k, true));
+    let pass = b.road(RoadKind::Forest, Rules::FOREST, from, &[pl.tower], to);
+    // Forestry road from the village up the escarpment past the logging camp to the pass.
+    let v_at = attach(&b.roads, valley, pl.village + Vec2::new(-80.0, 0.0), pl.camp);
+    let to = pass.map(|k| attach(&b.roads, k, pl.tower + Vec2::new(-500.0, -150.0), pl.camp));
+    let escarp = b.road(RoadKind::Forest, Rules::FOREST, Some(v_at), &[pl.camp], to);
+    // A logging loop off it round the camp.
+    if let Some(e) = escarp {
+        let a = attach(&b.roads, e, pl.camp + Vec2::new(0.0, -220.0), pl.camp + Vec2::new(-500.0, 0.0));
+        let c = attach(&b.roads, e, pl.camp + Vec2::new(60.0, 260.0), pl.camp + Vec2::new(-500.0, 0.0));
+        b.road(RoadKind::Forest, Rules::FOREST, Some(a), &[pl.camp + Vec2::new(-480.0, -60.0)], Some(c));
+    }
+    // The gully road from the service park up between escarpment and basin to the basin road.
+    let p_at = attach(&b.roads, valley, pl.park, pl.park + Vec2::Y * 100.0);
+    let to = basin.map(|k| attach(&b.roads, k, pl.quarry + Vec2::new(-150.0, 450.0), pl.park));
+    b.road(RoadKind::Gravel, Rules::GRAVEL, Some(p_at), &[(pl.park + pl.quarry) * 0.5 + Vec2::new(-250.0, 350.0)], to);
+    // The southern loop: over the river, through the hills, back over the river.
+    let s0 = attach(&b.roads, valley, pl.ford_w + Vec2::Y * 150.0, pl.ford_w);
+    let s1 = attach(&b.roads, valley, pl.ford_e + Vec2::Y * 150.0, pl.ford_e);
+    let bridge = Rules { bridge: true, ..Rules::GRAVEL };
+    b.road(RoadKind::Gravel, bridge, Some(s0), &[pl.ford_w, pl.south, pl.ford_e], Some(s1));
+    // Village lanes: a loop north of the B-road.
+    let l0 = attach(&b.roads, valley, pl.village + Vec2::new(-170.0, 0.0), pl.village + Vec2::Y * 200.0);
+    let l1 = attach(&b.roads, valley, pl.village + Vec2::new(170.0, 0.0), pl.village + Vec2::Y * 200.0);
+    let lane = Rules { max_turn: 3, w_turn: 0.3, ..Rules::TARMAC };
+    b.road(RoadKind::Street, lane, Some(l0), &[pl.village + Vec2::new(0.0, 150.0)], Some(l1));
+
+    let roads = b.roads;
+    let junctions = find_junctions(&roads);
+    let town_y = land.coarse(pl.village);
+    RoadNet { seed, roads, junctions, town_y, land }
+}
+
+/// A point's height in the finished world: the land, shaped by the nearest road.
 pub fn height(net: &RoadNet, x: f32, z: f32) -> f32 {
     let p = Vec2::new(x, z);
-    let base = base_height(p, net.seed);
+    let base = net.land.height(p);
     match net.nearest(p, crate::stage::SHAPE_REACH) {
         Some(n) => crate::stage::shaped(base, &net.roads[n.road].road, &n.at),
         None => base,
     }
 }
 
-/// What the tyres are on at (x, z): a road, its verge, town grass or rough ground.
+/// What the tyres are on at (x, z): a road, its verge, valley grass or rough ground.
 pub fn surface(net: &RoadNet, x: f32, z: f32) -> Surface {
     let p = Vec2::new(x, z);
     match net.nearest(p, 14.0) {
@@ -559,21 +465,24 @@ pub fn surface(net: &RoadNet, x: f32, z: f32) -> Surface {
             } else if n.at.lateral.abs() <= half + 3.0 {
                 Surface::Verge
             } else {
-                rough_or_grass(p)
+                off_road(net, p)
             }
         }
-        None => rough_or_grass(p),
+        None => off_road(net, p),
     }
 }
 
-fn rough_or_grass(p: Vec2) -> Surface {
-    if p.x.abs().max(p.y.abs()) < PLATEAU.0 { Surface::Verge } else { Surface::Rough }
+fn off_road(net: &RoadNet, p: Vec2) -> Surface {
+    if net.land.zone(p) == Zone::Valley { Surface::Verge } else { Surface::Rough }
 }
 
-/// Where to start: on the town's middle east-west street, near its west end, heading east.
+/// Where to start: on the B-road by the service park, heading east.
 pub fn spawn(net: &RoadNet) -> (Vec3, Vec2) {
-    let p = Vec2::new(-TOWN + 40.0, 0.0);
-    (Vec3::new(p.x, net.town_y, p.y), Vec2::X)
+    let park = net.places().park;
+    let r = &net.roads[0].road;
+    let i = r.nearest(park, 400.0).map_or(r.len() / 2, |p| p.i);
+    let p = r.pts[i];
+    (p, r.dir[i])
 }
 
 #[cfg(test)]
@@ -586,16 +495,17 @@ mod tests {
 
     #[test]
     fn deterministic_and_complete() {
-        let (a, b) = (net(), net());
+        let a = build(0x0E11_0001);
+        let b = build(0x0E11_0001);
         assert_eq!(a.roads.len(), b.roads.len());
         for (x, y) in a.roads.iter().zip(&b.roads) {
             assert_eq!(x.road.pts, y.road.pts);
         }
         let count = |k| a.roads.iter().filter(|r| r.kind == k).count();
-        assert_eq!(count(RoadKind::Highway), 1);
-        assert_eq!(count(RoadKind::Country), 4);
-        assert_eq!(count(RoadKind::Street), 14);
+        assert_eq!(count(RoadKind::BRoad), 2, "valley road and hillclimb");
+        assert!(count(RoadKind::Gravel) >= 3, "gravel roads: {}", count(RoadKind::Gravel));
         assert!(count(RoadKind::Forest) >= 3, "forest roads: {}", count(RoadKind::Forest));
+        assert!(count(RoadKind::Street) >= 1);
         // Plenty to drive: tens of km.
         assert!(a.length() > 20_000.0, "{} m", a.length());
     }
@@ -622,37 +532,44 @@ mod tests {
     }
 
     #[test]
-    fn spokes_join_town_and_ring() {
+    fn no_dead_ends() {
         let n = net();
-        for r in n.roads.iter().filter(|r| r.kind == RoadKind::Country) {
-            let (a, b) = (r.road.pts[0], *r.road.pts.last().unwrap());
-            assert!(Vec2::new(a.x, a.z).length() < TOWN * 1.5, "starts in town: {a}");
-            assert!((a.y - n.town_y).abs() < 0.5, "level with town at the start");
-            let ring = n.roads.iter().find(|r| r.kind == RoadKind::Highway).unwrap();
-            let at = ring.road.nearest(Vec2::new(b.x, b.z), 5.0).expect("ends on the ring");
-            assert!((ring.road.height_at(&at) - b.y).abs() < 0.6, "level with the ring at the end");
+        for (k, r) in n.roads.iter().enumerate() {
+            let (a, b) = (r.road.pts[0], r.road.pts[r.road.len() - 1]);
+            eprintln!("road {k} {:?} {} m: {a} .. {b}", r.kind, r.road.length());
         }
-    }
-
-    #[test]
-    fn forest_roads_keep_apart_from_other_roads() {
-        let n = net();
-        for (k, r) in n.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::Forest) {
-            // Past the first 120 m (where it leaves the ring) nothing else is near.
-            for p in r.road.pts.iter().skip(60).step_by(5) {
-                let q = Vec2::new(p.x, p.z);
-                for (j, o) in n.roads.iter().enumerate() {
-                    if j == k {
-                        continue;
-                    }
-                    assert!(o.road.nearest(q, 30.0).is_none(), "forest road {k} runs within 30 m of {:?} at {q}", o.kind);
-                }
+        for j in &n.junctions {
+            eprintln!("junction {} {:?}", j.pos, j.roads);
+        }
+        for (k, r) in n.roads.iter().enumerate() {
+            for (i, end) in [(0, "start"), (r.road.len() - 1, "end")] {
+                let joined = n.junctions.iter().any(|j| j.roads.iter().any(|&(rk, ri)| rk == k && ri.abs_diff(i) <= 1));
+                // The valley road's ends are where the hill roads start.
+                assert!(joined, "road {k} ({:?}) {end} joins nothing", r.kind);
             }
         }
     }
 
     #[test]
-    fn ground_is_level_across_roads_and_flat_in_town() {
+    fn grades_and_hairpins() {
+        let n = net();
+        let mut tightest = f32::MAX;
+        for r in &n.roads {
+            let (at, max) = r.road.pts.windows(2).map(|w| (w[1].y - w[0].y).abs() / STEP).enumerate().fold((0, 0.0f32), |a, (i, g)| if g > a.1 { (i, g) } else { a });
+            assert!(max < 0.16, "{:?} climbs {max} at station {at}/{}", r.kind, r.road.len());
+            if r.kind == RoadKind::Forest || r.kind == RoadKind::Gravel {
+                let (i, k) = r.road.curv.iter().enumerate().fold((0, 0.0f32), |a, (i, k)| if k.abs() > a.1 { (i, k.abs()) } else { a });
+                eprintln!("{:?}: tightest {} m at station {i}/{} {}", r.kind, 1.0 / k, r.road.len(), r.road.pts[i]);
+                tightest = tightest.min(1.0 / k);
+            }
+        }
+        // Real hairpins somewhere on the hill roads.
+        assert!(tightest < 14.0, "tightest corner {tightest} m");
+        assert!(tightest > 6.0, "tightest corner {tightest} m");
+    }
+
+    #[test]
+    fn ground_is_level_across_roads() {
         let n = net();
         for r in &n.roads {
             for i in (10..r.road.len() - 10).step_by(97) {
@@ -663,21 +580,19 @@ mod tests {
                 assert!((h - p.y).abs() < 0.8, "{:?} station {i}: ground {h} vs road {}", r.kind, p.y);
             }
         }
-        let h = height(&n, 150.0, -60.0);
-        assert!((h - n.town_y).abs() < 0.8, "town is flat: {h} vs {}", n.town_y);
     }
 
     #[test]
     fn surfaces() {
         let n = net();
-        assert_eq!(surface(&n, 0.0, 0.0), Surface::Tarmac, "town crossroads");
-        assert_eq!(surface(&n, 55.0, 55.0), Surface::Verge, "town block is grass");
+        let valley = &n.roads[0].road;
+        let p = valley.pts[valley.len() / 2];
+        assert_eq!(surface(&n, p.x, p.z), Surface::Tarmac, "valley road");
         let forest = n.roads.iter().find(|r| r.kind == RoadKind::Forest).unwrap();
         let p = forest.road.pts[forest.road.len() / 2];
         assert!(matches!(surface(&n, p.x, p.z), Surface::Gravel | Surface::Mud));
     }
 }
-
 
 #[cfg(test)]
 mod map {
@@ -691,9 +606,9 @@ mod map {
         let mut s = String::from(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2000 -2000 4000 4000" width="1000" height="1000"><rect x="-2000" y="-2000" width="4000" height="4000" fill="#1b1f1a"/>"##);
         for r in &n.roads {
             let (c, w) = match r.kind {
-                super::RoadKind::Street => ("#c8c8c8", 11),
-                super::RoadKind::Highway => ("#e0a030", 16),
-                super::RoadKind::Country => ("#7fb0e0", 10),
+                super::RoadKind::Street => ("#c8c8c8", 10),
+                super::RoadKind::BRoad => ("#e0a030", 14),
+                super::RoadKind::Gravel => ("#7fb0e0", 10),
                 super::RoadKind::Forest => ("#80c070", 8),
             };
             let d: Vec<String> = r.road.pts.iter().step_by(3).map(|p| format!("{:.0},{:.0}", p.x, p.z)).collect();
@@ -704,5 +619,59 @@ mod map {
         }
         s += "</svg>";
         std::fs::write(out, s).unwrap();
+    }
+
+    /// `PACENOTE_MAP_PPM=out.ppm cargo test --lib open::roads::map -- --ignored`: hillshade with
+    /// the roads (yellow B-road, blue gravel, green forest, white lanes), junctions red.
+    #[test]
+    #[ignore]
+    fn picture() {
+        use bevy::math::{Vec2, Vec3};
+        let Ok(out) = std::env::var("PACENOTE_MAP_PPM") else { return };
+        let n = super::generate(crate::open::SEED);
+        let px = 1000usize;
+        let mut img = vec![[0u8; 3]; px * px];
+        for row in 0..px {
+            for col in 0..px {
+                let p = Vec2::new(-2000.0 + (col as f32 + 0.5) * 4.0, 2000.0 - (row as f32 + 0.5) * 4.0);
+                let e = 4.0;
+                let h = |q: Vec2| n.land.height(q);
+                let nrm = Vec3::new(-(h(p + Vec2::X * e) - h(p - Vec2::X * e)), 2.0 * e, -(h(p + Vec2::Y * e) - h(p - Vec2::Y * e))).normalize();
+                let shade = nrm.dot(Vec3::new(-0.5, 0.7, 0.5).normalize()).max(0.0);
+                let t = ((h(p) - 80.0) / 400.0).clamp(0.0, 1.0);
+                let c = [0.35 + 0.45 * t, 0.5 + 0.2 * t, 0.3 + 0.5 * t];
+                img[row * px + col] = c.map(|ch| ((ch * (0.35 + 0.75 * shade)).clamp(0.0, 1.0) * 255.0) as u8);
+            }
+        }
+        let mut dot = |p: Vec2, r: i32, c: [u8; 3]| {
+            let (cx, cy) = (((p.x + 2000.0) / 4.0) as i32, ((2000.0 - p.y) / 4.0) as i32);
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    let (x, y) = (cx + dx, cy + dy);
+                    if dx * dx + dy * dy <= r * r && x >= 0 && y >= 0 && (x as usize) < px && (y as usize) < px {
+                        img[y as usize * px + x as usize] = c;
+                    }
+                }
+            }
+        };
+        for r in &n.roads {
+            let c = match r.kind {
+                super::RoadKind::Street => [240, 240, 240],
+                super::RoadKind::BRoad => [240, 190, 40],
+                super::RoadKind::Gravel => [90, 160, 240],
+                super::RoadKind::Forest => [60, 200, 70],
+            };
+            for q in &r.road.pts {
+                dot(Vec2::new(q.x, q.z), 1, c);
+            }
+        }
+        for j in &n.junctions {
+            dot(j.pos, 4, [230, 40, 40]);
+        }
+        let mut f = format!("P6 {px} {px} 255\n").into_bytes();
+        for c in img {
+            f.extend_from_slice(&c);
+        }
+        std::fs::write(out, f).unwrap();
     }
 }

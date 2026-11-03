@@ -31,8 +31,8 @@ const MAX_TANGENT: f32 = 40.0;
 pub fn radius(kind: RoadKind) -> f32 {
     match kind {
         RoadKind::Street => TOWN_KERB_R,
-        RoadKind::Highway => 22.0,
-        RoadKind::Country => 18.0,
+        RoadKind::BRoad => 22.0,
+        RoadKind::Gravel => 18.0,
         RoadKind::Forest => 15.0,
     }
 }

@@ -115,7 +115,8 @@ fn v3(p: Vec2, y: f32) -> Vec3 {
 /// shoulder rises above it.
 fn surface_y(open: &OpenWorld, town: bool, p: Vec2) -> f32 {
     let hf = open.heights.height_at(p.x, p.y);
-    if town && p.x.abs().max(p.y.abs()) < crate::open::roads::TOWN - 1.0 { (open.net.town_y + LIFT).max(hf + 0.02) } else { hf + LIFT }
+    let _ = town;
+    hf + LIFT
 }
 
 /// Spawns junction surfaces, their verges, kerbs and markings. `inside` = the ribbon segments
@@ -313,9 +314,9 @@ struct Plan {
     through: Vec<(usize, usize, f32)>,
 }
 
-/// Downtown: the crossings round the central blocks get zebras.
-fn downtown(p: Vec2) -> bool {
-    p.x.abs().max(p.y.abs()) <= crate::open::roads::BLOCK + 1.0
+/// Downtown crossings get zebras: the valley village has none.
+fn downtown(_: Vec2) -> bool {
+    false
 }
 
 impl Plan {
@@ -649,8 +650,8 @@ fn markings(bufs: &mut Bufs, open: &OpenWorld, geoms: &[JunctionGeom], inside: &
         }
         let (centre, edges) = match nr.kind {
             RoadKind::Street => (Some((0.06, 9.0)), false),
-            RoadKind::Country => (Some((0.06, 12.0)), true),
-            RoadKind::Highway => (Some((0.075, 15.0)), true),
+            RoadKind::Gravel => (Some((0.06, 12.0)), true),
+            RoadKind::BRoad => (Some((0.075, 15.0)), true),
             RoadKind::Forest => (None, false),
         };
         if let Some((w, period)) = centre {

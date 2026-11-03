@@ -76,8 +76,8 @@ const HAZARD_S: f32 = 4.0;
 pub fn limit(kind: RoadKind) -> f32 {
     match kind {
         RoadKind::Street => 40.0 / 3.6,
-        RoadKind::Highway => 100.0 / 3.6,
-        RoadKind::Country => 70.0 / 3.6,
+        RoadKind::BRoad => 100.0 / 3.6,
+        RoadKind::Gravel => 70.0 / 3.6,
         RoadKind::Forest => 50.0 / 3.6,
     }
 }
