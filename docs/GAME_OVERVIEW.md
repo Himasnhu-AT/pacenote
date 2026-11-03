@@ -2,7 +2,9 @@
 
 Written 2 Nov 2026 for an outside audit (human or AI). It describes what the game is meant to
 be, what exists today, how it is built and how we work, and lists the known problems and open
-questions. Statements are about the code at commit `1be89ed` on `main` unless dated otherwise.
+questions. Statements are about the code at commit `1be89ed` on `main` unless dated otherwise;
+section 4 (the map) and the rows and issues that touch it were updated on 3 Nov 2026 for
+`095371a`.
 Where a detail lives in another document, the path is given; those documents are more precise.
 
 **How to use this document as an auditor:** read sections 1–3 for the picture, 4–7 for how it
@@ -66,7 +68,8 @@ matter inside events. Section 10 asks what the unifying hook should be.
 
 | Area | State | Notes |
 |---|---|---|
-| Open world (4 x 4 km) | **Playable** | Roads, terrain, town with 615 buildings, farms, forests. |
+| Open world (4 x 4 km) | **Playable** | 23 roads (~31 km), terrain, town and farms with 617 buildings, ~238k trees. Stored as a level file the game loads. |
+| World editor (dev) | **Working** | The engine's editor on the game binary: roads, buildings, event starts, trees, terrain; edits rebuild the world live. Needs the engine's `editor` branch. |
 | Free roam | **Playable** | Spawn in town, R recovers onto nearest road, no clock. |
 | Events (7) | **Playable** | 4 forest rallies, 2 gravel sprints, 1 ring lap; AI pace notes; records, ghosts, results. |
 | Traffic | **Playable** | 40 AI cars around the player; lanes, junction right-of-way; solid. Off during events. |
@@ -95,7 +98,9 @@ passing at `1be89ed`. Assets ~110 MB (`assets/`).
 
 ## 3. What the player does today
 
-1. **Main menu → Play** loads the open world (loading screen ~4.5 s on an M5 Pro).
+1. **Main menu → Play** loads the open world. The world itself is ready in under a second (read
+   from the level file); the loading screen then warms render pipelines and trees, ~10 s in
+   all on an M5 Pro (measured 2 Nov).
 2. The car starts on a town street. Drive anywhere: town grid, country roads, a highway ring,
    forest gravel roads. Traffic drives around you. Buildings, trees and boulders are solid.
 3. **Events:** glowing columns mark event starts (orange = rally, blue = sprint, purple = lap).
@@ -113,80 +118,136 @@ Controls: keyboard (W/S/A/D or arrows, Space handbrake, R recover, C camera) and
 
 ---
 
-## 4. The world (open world, `src/open/`)
+## 4. The map (open world, `src/open/`, `docs/OPENWORLD.md`)
 
-All generation is **pure, deterministic Rust** from one seed (`open::SEED`), using `libm` for
-transcendental functions so the same seed gives the same bits on every CPU (section 6.2).
+One 4 x 4 km region (−2,000 … +2,000 m in x and z). It was first generated from one seed
+(`open::SEED`) by pure, deterministic Rust (`libm` for transcendental functions, section 6.2).
+Since 3 Nov the generated world has been **baked into a level file**, and the level is now the
+source of truth: the game loads it, and the editor (section 4.7) changes it.
 
-### 4.1 Road network (`src/open/roads.rs`)
+### 4.1 Layout at a glance
 
-- Region: −2,000 … +2,000 m in x and z (16 km²). Terrain heightfield every 2 m (2001² samples).
-- **Town:** a street grid from −330 to +330 m, blocks 110 m, 14 streets 11 m wide (tarmac), on a
-  flat plateau (flat inside 400 m, blending out by 640 m).
-- **Highway ring:** a closed loop of mean radius 1,450 m with a noise-wobbled radius, 14 m wide.
-  Heights follow the land within a 6 % grade.
-- **Country roads (4):** from the ends of the town's middle streets out to the ring, along a
-  smooth noise-bent curve (straight at both ends), 8 m wide; two tarmac, two gravel. Heights
-  pinned to the town and the ring at their ends, ≤ 8 % grade between.
-- **Forest roads (4):** from the ring inward into the quadrants between the country roads, a
-  steered random walk (tightest radius ~38 m) that keeps 45 m clear of every other road and
-  inside a band between town and ring; gravel with mud patches, 5.4–6.6 m wide; dead ends.
-  These are the rally-style roads.
-- Junctions are recorded (town crossings, spoke ends, forest starts). ~30 km of road in total.
-- **Terrain** is the natural hills (warped fBm + ridges) flattened in town, then **shaped by
+```
+                         N (+z)
+┌───────────────────────────────────────────────┐ z = +2,000 m
+│                                               │
+│      ╭──────────── highway ring ───────────╮   │
+│      │  forest road      │    forest road  │   │
+│      │    (rally)     country    (rally)   │   │
+│      │                   │                 │   │
+│      ├── country ──── [ town ] ── country ─┤   │
+│      │                 farms               │   │
+│      │                   │                 │   │
+│      │  forest road   country  forest road │   │
+│      │    (rally)        │      (rally)    │   │
+│      ╰─────────────────────────────────────╯   │
+│   forest and hills everywhere off the roads   │
+│                                               │
+└───────────────────────────────────────────────┘ z = −2,000 m
+x = −2,000 m                         x = +2,000 m
+```
+
+(Not to scale: the town is 660 m across, the ring ~2.9 km across. Two country roads are
+tarmac, two gravel; the gravel ones are the sprint events, the ring is the lap event.)
+
+- **Town:** a street grid from −330 to +330 m (7 streets each way, 11 m wide, blocks 110 m,
+  tarmac) on a flat plateau (flat inside 400 m, blending out by 640 m). Home, where free roam
+  starts and a fatal crash respawns you, is on a town street.
+- **Highway ring:** a closed loop of mean radius ~1,450 m with a wobbled radius, 14 m wide,
+  9.1 km long, grades within 6 %.
+- **Country roads (4):** from the ends of the town's middle streets out to the ring, 8 m wide,
+  two tarmac and two gravel, ≤ 8 % grade, ~1.0–1.2 km each.
+- **Forest roads (4):** from the ring into the four quadrants between the country roads; a
+  steered random walk (tightest radius ~38 m) kept 45 m from every other road; gravel with mud
+  patches, 5.4–6.6 m wide, dead ends, 1.0–3.2 km. These are the rally roads.
+- In all: **23 roads, ~31 km**, with junctions where they meet (town crossings, spoke ends,
+  forest starts).
+
+### 4.2 Roads (`roads.rs`, `data.rs`, `junctions.rs`)
+
+- In the level, each road is an engine **`Spline`** (Catmull-Rom control points: 1,632 for
+  all 23 roads, more in bends, at most 40 m apart on straights) plus a `RoadSpline { kind,
+  speed limit }`. A control point carries width, bank (roll) and tags (surface + road kind).
+- Loading samples each spline every 2 m into a `stage::Road` (points with direction, curvature,
+  width, banking, surface, lookup grid), the same type the old stages use, so road meshes, pace
+  notes and records reuse stage code. Junctions are found again from where roads meet.
+- The bake keeps every 2 m station of the generated road within 10 cm sideways and 3 cm in
+  height of the curve (tested); one exception is noted in 9.3.
+- **Junctions** get their own meshes (`open/junctions.rs`, `art/junctions.rs`): kerbs with a
+  fillet radius in town, sidewalk corners, ribbons trimmed back to the junction mouths.
+- **Surfaces:** the road's own (per station), a 3 m verge, then grass in town or rough ground.
+
+### 4.3 Terrain
+
+- A 2001² heightfield at 2 m, stored with the level as `assets/levels/open/terrain.r16`
+  (16-bit, 1.4 mm steps over a 91 m height range) + `terrain.ron`.
+- It was generated as natural hills (warped fBm + ridges), flattened in town, then **shaped by
   the nearest road** with the old stage rules: road sunk into the land, a shoulder, fill no
-  steeper than 16 %, cut no steeper than 45 %, blending back to the hills 34–52 m out.
-- **Surfaces:** the road's own (per 2 m station), a 3 m verge, then grass in town or rough
-  ground outside.
+  steeper than 16 %, cut no steeper than 45 %, blending back 34–52 m out. In the editor it
+  can be sculpted and painted; moving a road re-shapes the ground around the part that moved.
+- Render: the engine's chunked, LOD'd terrain with a 4-layer splat material (`art/terrain.rs`).
 
-Each road is a `stage::Road` (points every 2 m with direction, curvature, width, banking,
-surface and a lookup grid), the same type the old stages use, so road meshes, pace notes and
-records reuse stage code.
+### 4.4 Buildings (`buildings.rs`, `level.rs`)
 
-### 4.2 Buildings (`src/open/buildings.rs`)
-
-- 615 buildings: downtown offices, shops, houses, a few apartment slabs and one tower in the 36
-  town blocks (1 plaza, 3 parks, 2 car parks have none); 15 farmhouses and 8 barns along the
-  country roads outside town. Taller towards the centre (5–8 storeys downtown, 2–4 outside).
-- Behind a 3 m sidewalk; flat roofs with parapets, gable or hip roofs on houses and barns.
-- Drawn as one merged mesh per block (51 meshes, ~249k triangles, ~24 MB GPU) with one shared
-  material: a procedural 1024² facade atlas and vertex colours (10 wall and 5 roof colours).
+- **617 buildings:** downtown offices, shops, houses, apartment slabs and one tower in the 36
+  town blocks (1 plaza, 3 parks and 2 car parks have none), plus farmhouses and barns along the
+  country roads. Taller towards the centre (5–8 storeys downtown, 2–4 outside).
+- Each is a **level entity** with a `Building` component (kind, footprint size, floors, storey
+  height, roof flat / gable / hip, pitch, street side, wall and roof colour, variant) placed by
+  its Transform. Each draws as its own mesh with one shared material (a procedural 1024²
+  facade atlas + vertex colours); sidewalks and lot paving are one mesh per block. The whole
+  town seen from above is 679 draws.
 - **Collision:** each wall is a row of solid cylinders (radius 1.2 m, ≤ 1.6 m apart), because
-  the car sim only knows vertical cylinders (section 5.1). 16,050 cylinders in a 10 m grid.
+  the car sim only knows vertical cylinders (section 5.1); ~16,000 in a 10 m grid.
+- Since the bake, buildings no longer re-lay themselves out when streets change.
 
-### 4.3 Traffic (`src/open/traffic.rs`)
+### 4.5 Trees, rocks and dressing
 
-- A **lane graph**: one lane each way on every road (right-hand traffic), curved junction paths
-  linking each incoming lane to each outgoing one, U-turns at forest dead ends (704 lanes, 61
-  junction nodes).
-- **Agents:** intelligent driver model (IDM) behind the car ahead (seen across junctions) and
-  behind the player; speed limits by road kind (40/70/100/50 km/h) and curvature; junction
-  paths reserved first-come-first-served, only with room on the far side (no gridlock).
-- **Spawning:** 40 cars within 600 m of the player, new ones appear 220 m+ away, removed past
-  800 m. ~6 µs per 60 Hz step for 60 cars.
-- **Drawing:** a simple generated low-poly car (7 paints), shared meshes/materials, interpolated.
-- **Collision:** three cylinders per car into the player's obstacle query; a car hit hard
-  stops for 4 s. Free roam only: events run without traffic so ghosts replay exactly.
-- Limits: no overtaking, one lane each way on the ring, junction paths ignore height.
+- Trees (pine / spruce / birch, near and far versions, ~238k in all), rocks, shrubs and ground
+  cover come from a `pcg-core` graph, kept off every road, building and the town. Two engine
+  PCG volumes: trees (whole map) and dressing (streamed near the camera).
+- **Every trunk and boulder is solid**, anywhere on the map: tiles of 128 m are evaluated in
+  parallel for the tiles the roads pass through at load, and around the car as it drives.
+- Hand edits (removed, moved or added trees, cleared or thinned areas) live in the level as
+  `PcgOverrides` on two entities, `Trees` and `Dressing`. The volumes and the car's colliders
+  apply the same edits. Trees follow sculpted ground (`PcgFollowTerrain`).
 
-### 4.4 Events (`src/open/events.rs`)
+### 4.6 Events, home and traffic on the map
 
-- Built from the network: a **rally** on each forest road (ids 100–103, 1.0–3.1 km), a
-  **sprint** on each gravel country road (town → ring), a **ring lap** (9.1 km).
-- A marker (translucent coloured cylinder) at each start. Stop within 9 m for 0.6 s to start.
-- Starting sets the world's active route (`StageWorld::road`) to the event route and computes
-  its corners and crests, so the existing stage machinery runs it: countdown, clock, progress,
-  finish, pace-note planner, records and ghosts keyed by event id, the results screen.
-- Dev commands: `events.list`, `events.start {id}`, `events.leave`.
+- **Events (7)**, each a stretch of one road: a **rally** on each forest road (ids 100–103,
+  1.0–3.1 km), a **sprint** on each gravel country road (town → ring), a **ring lap** (9.1 km).
+  A translucent coloured marker at each start; stop within 9 m for 0.6 s to start. In the
+  level, an event's start is an `EventStart` marker (move it and the route starts there); its
+  name, kind and finish are in the `WorldDoc`. Pace-note grades can be set by hand with
+  `GradeNote` markers.
+- Starting sets the world's active route (`StageWorld::road`) and computes its corners and
+  crests, so the stage machinery runs it: countdown, clock, progress, finish, pace notes,
+  records and ghosts keyed by event id and by the level's content, results screen.
+- **Traffic** (`traffic.rs`): a lane graph from the roads (one lane each way, curved junction
+  paths, U-turns at dead ends; 704 lanes, 61 nodes); 40 cars within 600 m of the player with an
+  intelligent-driver model, per-road speed limits, junction reservation. Solid; free roam only.
+- There is **no map or minimap** in the game: events are found by driving around (9.4).
 
-### 4.5 Scenery
+### 4.7 The level file and the editor
 
-- Trees (pine/spruce/birch foliage cards with near and far versions), rocks, shrubs and ground
-  cover from a `pcg-core` dressing graph; kept off every road and out of town. Trunks and
-  boulders within 30 m of a road are solid (evaluated on 128 m tiles along roads, in parallel,
-  ~0.9 s).
-- Road meshes per road (ribbons with verge blending; junction overlaps offset by mm).
-- One look for the world today (pine forest, afternoon, clear; weather/time pickers apply).
+| Level entity | What |
+|---|---|
+| `road 0 (Street)` … `road 22 (Forest)` | `Spline` + `RoadSpline` |
+| `open world` | `WorldDoc`: seed, town height, time of day, events, town lots, terrain folder |
+| `home`, `event start: …`, grade notes | `HomePoint`, `EventStart`, `GradeNote` (placeables) |
+| `house 0` … `barn 616` | `Building` |
+| `Trees`, `Dressing` | `PcgOverrides` (+ the game's PCG volume at run time) |
+
+- Files: `assets/levels/open.level.ron` (0.6 MB) + the terrain folder (8 MB). The game reads them
+  in 0.04 s; a missing or bad level logs an error and the world is generated from the seed.
+  `pacenote --bake-world <file>` re-bakes from the seed (throws away every edit).
+- **Editor:** `cargo run -- --editor --level assets/levels/open.level.ron` opens the game in the
+  engine's editor (Outliner, Details, tools for splines, sculpt, paint, foliage, place). Edits
+  rebuild the world ~0.7 s after the last change (`open/live.rs`): road meshes and junctions,
+  the ground around a moved road, buildings, event routes and markers, trees, traffic lanes,
+  colliders. Undo works the same way. **Play** runs the game on the edited level.
+- Parity: the baked world was compared with the generated one from 8 camera spots and by counts
+  (heights within 1 mm, trees within 31 of 238k, same events within 4 m).
 
 ---
 
@@ -273,7 +334,7 @@ after the Bevy 0.20 bump (revision 8) or for the open world (section 9.3).
 | Module | What |
 |---|---|
 | `lib.rs`, `main.rs` | App setup, plugins, CLI (`--open`, `--stage N`, `--metrics-window`...) |
-| `open/` | Open world: `roads`, `buildings`, `traffic`, `events`, `OpenWorld` (Ground) |
+| `open/` | Open world: `roads`, `junctions`, `buildings`, `traffic`, `events`, `forest` (tree colliders), `data` (world as data), `level` (bake, load, level entities), `live` (editor rebuild), `placeable`, `OpenWorld` (Ground) |
 | `world.rs` | `StageWorld` (the active world: road/route, heights, corners, obstacles, `open`, `event`), generation, terrain spawn, dressing graph |
 | `stage.rs` | Old stages, `Road` type, terrain shaping, corners/crests |
 | `vehicle.rs`, `handling_tests.rs` | Car sim and its test harness |
@@ -300,10 +361,11 @@ GPU is over budget).
 
 ### 6.5 Loading
 
-The world is generated on a worker thread (~1 s: roads, terrain 4M samples, buildings layout,
-obstacles), then built (terrain chunks, roads, buildings, PCG volume, trees), then render
-pipelines are warmed behind the loading screen, then it settles (stable frame times) before the
-player gets control. ~4.5 s total on an M5 Pro.
+The open world is read from its level file on a worker thread (0.04 s for the file and terrain;
+~0.8 s with the road network, buildings layout and the tree colliders along the roads), then
+built (terrain chunks, roads, buildings, PCG volumes, trees), then render pipelines are warmed
+behind the loading screen, then it settles (stable frame times) before the player gets
+control. ~10 s total on an M5 Pro (measured 2 Nov), almost all of it warming and settling.
 
 ### 6.6 Dev tooling
 
@@ -393,12 +455,17 @@ exists**. The open world keeps ~145k trees resident and ~2.4 GB at High.
 - Cross-CPU determinism (arm64 vs x86_64) **not re-verified** after the Bevy 0.20 / glam 0.33
   bump (sim revision 8), nor for the open world generator, buildings or events. Leaderboards
   and ghosts shared between Mac and Windows depend on it.
-- Ghosts in events replay against the world's obstacles; changing the world generator
-  (roads, buildings, trees) invalidates old ghosts and records silently unless the route hash
-  changes (it hashes the route road only, not obstacles).
-- Junctions are overlapping road ribbons (no real intersection geometry, no kerbs or
-  markings); the terrain is shaped by the nearest road only, so seams are possible where roads
-  meet at angles.
+- Event records and ghosts are keyed by the route and the level file's content (level +
+  terrain), so any edit to the level starts fresh boards, even one far from the route.
+- The terrain is shaped by the nearest road only, so seams are possible where roads meet at
+  angles; where roads join the ring they sit up to 18 cm off the ground (`open.check`).
+- The generated ring had a 0.6 m step in height where its ends meet; the baked curve smooths
+  it, so the baked ring differs from the generated one there.
+- Moving a road in the editor re-shapes the ground around it from the generator's hills,
+  which also undoes any sculpting there. Buildings don't move with a moved street (one left
+  overlapping a road only logs a warning).
+- Pacenote `main` builds against the engine's `editor` branch (level, spline, editor
+  features) until that branch reaches engine main; on engine main it doesn't build.
 - Building collision is approximated with cylinders (good to ~0.15 m; corners are rounded).
 
 ### 9.4 Gameplay limits
@@ -410,17 +477,22 @@ exists**. The open world keeps ~145k trees resident and ~2.4 GB at High.
 - The co-driver voice uses OS TTS: different voices per OS, ~0.3–1 s latency on Windows, not
   in the game's audio mix or volume settings.
 - Recover always places on the nearest road, which can be a different road at junctions.
+- No map or minimap: the only way to find events is to drive around. The level already holds
+  everything one needs (roads, buildings, event starts, home).
 
 ### 9.5 Performance and platforms
 
 - Base MacBook (8 GB) performance unmeasured; Windows build untested on real hardware since the
   pivot; the shipped demo build predates the open world.
-- Whole-map trees resident (~145k) and ~2.4 GB at High; no world streaming of scenery beyond
+- Whole-map trees resident (~238k) and ~2.4 GB at High; no world streaming of scenery beyond
   the existing PCG cells and tree near/far LOD; the engine's world streaming mode isn't used.
 - Car model is 124k triangles with 2048² textures; the GLB is 21 MB.
 
 ### 9.6 Tooling
 
+- Editor (engine `editor` branch, 3 Nov): after engine `3fa9765` the editor viewport stays on
+  one view and ignores camera moves (reported to the engine session); the build at `3fa9765`
+  works.
 - Metrics viewer: until engine `8ab2de8` (2 Nov) the per-second metrics lines carried the core
   frame/CPU/GPU/memory keys only once, so those panels froze; fixed, with a regression test.
 - Several Bevy 0.20 regressions were found only by running the game (blank window from a camera
@@ -452,9 +524,11 @@ exists**. The open world keeps ~145k trees resident and ~2.4 GB at High.
 
 ## 11. Roadmap (current intent)
 
-Phase 1 (compact world), done: road network and terrain, free roam, buildings, traffic, events.
-Remaining phase 1: performance pass on Low/Medium on a base Mac, a map/minimap, polish of
-junctions and town dressing (parks, street props, markings).
+Phase 1 (compact world), done: road network and terrain, free roam, buildings, traffic, events,
+the world as a level file with a working editor (roads, buildings, events, trees, terrain).
+Remaining phase 1: a map/minimap (from the level's roads, buildings and event starts),
+performance pass on Low/Medium on a base Mac, polish of town dressing (parks, street props,
+markings).
 
 Phase 2: radio voice chat and racing with friends in one world (multiplayer in the open world),
 drift zones, the larger ~10 x 10 km region, racing opponents (maybe), an original car.
