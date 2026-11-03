@@ -635,15 +635,19 @@ fn off_road(net: &RoadNet, p: Vec2) -> Surface {
     if net.land.zone(p) == Zone::Valley { Surface::Verge } else { Surface::Rough }
 }
 
-/// Where to start: on the B-road by the service park, heading east, 50 m clear of the junction
-/// there (a car parked in a junction holds the traffic up).
+/// Where to start: in the right-hand lane of the B-road by the service park, heading east, 50 m
+/// clear of the junction there (a car parked in a junction holds the traffic up).
 pub fn spawn(net: &RoadNet) -> (Vec3, Vec2) {
     let park = net.places().park;
     let r = &net.roads[0].road;
     let i = r.nearest(park, 400.0).map_or(r.len() / 2, |p| p.i);
     let i = (i + (50.0 / STEP) as usize).min(r.len() - 1);
-    let p = r.pts[i];
-    (p, r.dir[i])
+    // In the right-hand lane (on the centreline it blocks traffic both ways).
+    let lat = -super::traffic::lane_offset(RoadKind::BRoad);
+    let at = RoadPos { i: i.min(r.len() - 2), t: 0.0, s: i as f32 * STEP, lateral: lat };
+    let right = r.dir[i].perp();
+    let q = Vec2::new(r.pts[i].x, r.pts[i].z) + right * -lat;
+    (Vec3::new(q.x, r.height_at(&at), q.y), r.dir[i])
 }
 
 #[cfg(test)]

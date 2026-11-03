@@ -27785,7 +27785,7 @@
               town_y: 92.9415,
               time: Afternoon,
               home: (
-                pos: (324.1995, 89.76947, -1180.0),
+                pos: (324.1995, 89.82197, -1178.375),
                 dir: (1.0, 0.0),
               ),
               roads: [],
@@ -27888,7 +27888,7 @@
           "bevy_camera::visibility::Visibility": Inherited,
           "bevy_ecs::name::Name": "home",
           "bevy_transform::components::transform::Transform": (
-            translation: (324.1995, 89.76947, -1180.0),
+            translation: (324.1995, 89.82197, -1178.375),
             rotation: (0.0, -0.70710677, 0.0, 0.70710677),
             scale: (1.0, 1.0, 1.0),
           ),
