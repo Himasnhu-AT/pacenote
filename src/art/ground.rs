@@ -199,7 +199,26 @@ pub(super) fn majority(v: &[Surface]) -> Surface {
 
 /// One road's ribbons, verges and patches over `runs` (station lists, in order; a closed
 /// road's may wrap past its last station).
+/// Brake and scuff marks: how much darker the wheel tracks are at each station, building up over
+/// the 45 m before a tight corner (hairpin to 3) where everyone brakes and turns in.
+pub(super) fn brake_wear(road: &Road) -> Vec<f32> {
+    let mut wear = vec![0.0f32; road.len()];
+    for c in stage::corners(road) {
+        if c.grade > 3 {
+            continue;
+        }
+        let strength = if c.grade <= 1 { 0.3 } else { 0.2 };
+        let (a, b) = (road.station(c.start - 45.0), road.station(c.start + 6.0));
+        for (k, w) in wear[a..=b].iter_mut().enumerate() {
+            let t = k as f32 / (b - a).max(1) as f32;
+            *w = w.max(strength * t * t);
+        }
+    }
+    wear
+}
+
 fn spawn_one_road(world: &mut World, s: &StageWorld, mats: &mut Mats, road: &Road, main: Surface, runs: &[Vec<usize>]) {
+    let wear = if s.open.is_some() { brake_wear(road) } else { Vec::new() };
     let (main_set, verge_set) = surface_sets(main, s.def.biome);
     let main_mat = mats.surface(world, main_set, false);
     let vmat = mats.verge(world, verge_set);
@@ -213,7 +232,7 @@ fn spawn_one_road(world: &mut World, s: &StageWorld, mats: &mut Mats, road: &Roa
             let d = (c + CHUNK).min(n - 1);
             let part = &run[c..=d];
             let p0 = st0 + c as f32 * stage::STEP;
-            let (center, mesh) = ribbon(road, part, p0, main, 0.04, |_, _, _| 1.0);
+            let (center, mesh) = ribbon(road, part, p0, main, 0.04, &wear, |_, _, _| 1.0);
             let (h, aabb) = add_mesh(world, mesh);
             let id = world.spawn((Name::new("road"), Mesh3d(h), MeshMaterial3d(main_mat.clone()), Transform::from_translation(center), Scenery, KeepDetail)).id();
             bounds(world, id, aabb);
@@ -249,7 +268,7 @@ fn spawn_one_road(world: &mut World, s: &StageWorld, mats: &mut Mats, road: &Roa
                 let mut k = a;
                 while k < b {
                     let l = (k + CHUNK).min(b);
-                    let (center, mesh) = ribbon(road, &run[k..=l], st0 + k as f32 * stage::STEP, surf, 0.055, |st, lat, at| fade(st, lat, road.width[at].min(9.0) * 0.5 + 0.4));
+                    let (center, mesh) = ribbon(road, &run[k..=l], st0 + k as f32 * stage::STEP, surf, 0.055, &wear, |st, lat, at| fade(st, lat, road.width[at].min(9.0) * 0.5 + 0.4));
                     let (h, aabb) = add_mesh(world, mesh);
                     let id = world.spawn((Name::new("road patch"), Mesh3d(h), MeshMaterial3d(pm.clone()), Transform::from_translation(center), Scenery, KeepDetail, NotShadowCaster)).id();
                     bounds(world, id, aabb);
@@ -275,7 +294,7 @@ pub(super) fn left(road: &Road, i: usize) -> Vec3 {
 /// unwrapped), `lift` above the road, positioned around its centre (so distance-based detail and
 /// transparency sorting see where it is), vertex alpha from `alpha(s, lateral, station)`.
 /// Returns (centre, mesh).
-fn ribbon(road: &Road, stations: &[usize], st0: f32, surf: Surface, lift: f32, alpha: impl Fn(f32, f32, usize) -> f32) -> (Vec3, Mesh) {
+fn ribbon(road: &Road, stations: &[usize], st0: f32, surf: Surface, lift: f32, wear: &[f32], alpha: impl Fn(f32, f32, usize) -> f32) -> (Vec3, Mesh) {
     let (a, b) = (stations[0], stations[stations.len() - 1]);
     let center = (road.pts[a] + road.pts[b]) * 0.5;
     let (mut pos, mut uv, mut col, mut idx) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -293,7 +312,14 @@ fn ribbon(road: &Road, stations: &[usize], st0: f32, surf: Surface, lift: f32, a
             let q = Vec3::new(p.x, y, p.z) + l * lat;
             pos.push((q - center).to_array());
             uv.push([lat / 4.0, st / 4.0]);
-            let k = brightness(surf, lat - w);
+            let mut k = brightness(surf, lat - w);
+            // Brake marks in the wheel tracks before tight corners.
+            if let Some(&wr) = wear.get(i)
+                && wr > 0.0
+            {
+                let d = ((lat - w).abs() - stage::TRACK_LINE) / (stage::TRACK_HALF * 1.4);
+                k *= 1.0 - wr * (1.0 - d * d).max(0.0);
+            }
             col.push([k, k, k, alpha(st, lat, i)]);
         }
     }
@@ -439,7 +465,7 @@ mod tests {
             let s = crate::world::generate(&def);
             let n = s.road.len().min(120);
             let st: Vec<usize> = (0..n).collect();
-            let (_, m) = ribbon(&s.road, &st, 0.0, def.surface, 0.04, |_, _, _| 1.0);
+            let (_, m) = ribbon(&s.road, &st, 0.0, def.surface, 0.04, &[], |_, _, _| 1.0);
             assert!(m.count_vertices() > 100);
             for side in [-1.0, 1.0] {
                 let (_, v) = verge(&s, &s.road, &st, 0.0, side);

@@ -414,6 +414,70 @@ pub fn reset(world: &mut World) {
     world.remove_resource::<Events>();
 }
 
+/// Where an event's boards stand: (position, facing yaw, kind) — a yellow board each side
+/// 100 m before the finish, then at the line a red finish board and a marshal post.
+pub fn board_spots(e: &EventDef) -> Vec<(Vec2, f32, Board)> {
+    let r = &e.route;
+    let mut out = Vec::new();
+    let put = |out: &mut Vec<_>, s: f32, side: f32, gap: f32, kind: Board| {
+        let i = r.station(s);
+        let d = r.dir[i];
+        let left = Vec2::new(d.y, -d.x);
+        let p = Vec2::new(r.pts[i].x, r.pts[i].z) + left * side * (r.width[i] * 0.5 + gap);
+        // Facing the cars coming.
+        out.push((p, libm::atan2f(-d.x, -d.y), kind));
+    };
+    let end = r.length();
+    for side in [1.0, -1.0] {
+        put(&mut out, end - 100.0, side, 1.6, Board::Hundred);
+        put(&mut out, end, side, 1.6, Board::Finish);
+    }
+    put(&mut out, end + 4.0, -1.0, 4.0, Board::Marshal);
+    out
+}
+
+/// An event board.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Board {
+    /// Yellow: 100 m to the finish.
+    Hundred,
+    /// Red: the flying finish line.
+    Finish,
+    /// The timing marshal's post at the line.
+    Marshal,
+}
+
+/// Puts up every event's boards (static, all the time: the course is marked out).
+fn boards(world: &mut World, open: &super::OpenWorld, events: &[EventDef]) {
+    let (post, board, hut) = {
+        let mut m = world.resource_mut::<Assets<Mesh>>();
+        (m.add(Cylinder::new(0.05, 1.6)), m.add(Cuboid::new(0.8, 0.8, 0.04)), m.add(Cuboid::new(1.4, 2.1, 1.4)))
+    };
+    let (white, yellow, red, orange) = {
+        let mut m = world.resource_mut::<Assets<StandardMaterial>>();
+        let mut mat = |c: Color| m.add(StandardMaterial { base_color: c, perceptual_roughness: 0.6, ..default() });
+        (mat(Color::srgb(0.92, 0.92, 0.9)), mat(Color::srgb(0.98, 0.8, 0.05)), mat(Color::srgb(0.82, 0.08, 0.06)), mat(Color::srgb(0.95, 0.45, 0.08)))
+    };
+    for e in events {
+        for (p, yaw, kind) in board_spots(e) {
+            let y = open.ground_height(p.x, p.y);
+            let rot = Quat::from_rotation_y(yaw);
+            let base = Vec3::new(p.x, y, p.y);
+            let put = |w: &mut World, mesh: &Handle<Mesh>, m: &Handle<StandardMaterial>, t: Transform| {
+                w.spawn((Name::new(format!("event board: {}", e.name)), Marker, Mesh3d(mesh.clone()), MeshMaterial3d(m.clone()), t, DespawnOnExit(AppState::InGame)));
+            };
+            match kind {
+                Board::Hundred | Board::Finish => {
+                    put(world, &post, &white, Transform::from_translation(base + Vec3::Y * 0.8));
+                    let m = if kind == Board::Hundred { &yellow } else { &red };
+                    put(world, &board, m, Transform::from_translation(base + Vec3::Y * 1.9).with_rotation(rot));
+                }
+                Board::Marshal => put(world, &hut, &orange, Transform::from_translation(base + Vec3::Y * 1.05).with_rotation(rot)),
+            }
+        }
+    }
+}
+
 /// Once per world: the event list and a marker at each start.
 fn setup(world: &mut World) {
     let Some(stage) = world.get_resource::<StageWorld>() else { return };
@@ -450,6 +514,7 @@ fn setup(world: &mut World) {
                 DespawnOnExit(AppState::InGame),
             ));
         }
+        boards(world, &open, &events);
     }
     info!("open world: {} events", events.len());
     world.insert_resource(Events(events));

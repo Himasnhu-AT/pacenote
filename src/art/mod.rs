@@ -15,6 +15,7 @@ pub mod junctions;
 pub mod look;
 pub mod meshfile;
 pub mod props;
+pub mod roadside;
 pub mod spray;
 pub mod terrain;
 pub mod trees;

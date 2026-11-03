@@ -17,6 +17,9 @@ use super::land::{HALF, Land, Zone};
 use super::roads::{RoadKind, RoadNet};
 use crate::stage::{Rng, fbm, noise};
 
+/// Most clear-cuts on the map.
+pub const CLEARCUTS: usize = 9;
+
 /// Mask cell (m).
 const CELL: f32 = 40.0;
 
@@ -87,7 +90,7 @@ pub fn clearcuts(net: &RoadNet, count: usize) -> Vec<Rect> {
 /// The three masks: (alpine, fields, clear-cuts).
 pub fn masks(net: &RoadNet) -> (Vec<Rect>, Vec<Rect>, Vec<Rect>) {
     let land = &net.land;
-    (cells("alpine", |p| alpine(land, p)), cells("fields", |p| field(land, p)), clearcuts(net, 9))
+    (cells("alpine", |p| alpine(land, p)), cells("fields", |p| field(land, p)), clearcuts(net, CLEARCUTS))
 }
 
 #[cfg(test)]

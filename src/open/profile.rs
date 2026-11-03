@@ -91,6 +91,37 @@ pub fn dress(net: &mut RoadNet) {
                 }
             }
         }
+        // Bridges: over the river (no ditches there).
+        nr.bridge = (0..n).map(|i| land.river_distance(Vec2::new(road.pts[i].x, road.pts[i].z)) < super::roads::BRIDGE).collect();
+        for (d, b) in ditch.iter_mut().zip(&nr.bridge) {
+            if *b {
+                *d = [0.0, 0.0];
+            }
+        }
+        // Culverts (or a rock) in the inside ditch of tight corners, at most one per 150 m: cut
+        // the corner there and the car hits it, so the corner's note gets "don't cut".
+        nr.culverts.clear();
+        if matches!(nr.kind, RoadKind::Gravel | RoadKind::Forest) {
+            let mut last = f32::MIN;
+            for c in crate::stage::corners(road) {
+                if c.grade > 3 || c.start - last < 150.0 {
+                    continue;
+                }
+                let (a, b) = (road.station(c.start), road.station(c.end));
+                let apex = (a..=b).max_by(|&x, &y| road.curv[x].abs().total_cmp(&road.curv[y].abs())).unwrap_or(a);
+                // The inside: a left turn's inside is its left (lateral +).
+                let side = if road.curv[apex] > 0.0 { 0 } else { 1 };
+                if ditch[apex][side] < 0.2 {
+                    continue;
+                }
+                let lat = if side == 0 { 1.0 } else { -1.0 } * (road.width[apex] * 0.5 + SHOULDER + DITCH_W * 0.5);
+                nr.culverts.push((apex, lat));
+                for i in a..=b {
+                    road.dont_cut[i] = true;
+                }
+                last = c.start;
+            }
+        }
         nr.ditch = ditch;
         // Dusty tarmac near a junction with a gravel or forest road.
         nr.dusty = vec![false; n];
@@ -202,6 +233,40 @@ const STEEP_FILL: f32 = 0.9;
 const CUT_GRADE: f32 = 0.7;
 /// Lateral distances (m) between which the shaped ground blends back into the land.
 pub const REACH: (f32, f32) = (30.0, 46.0);
+
+/// Parapet height (m) above a bridge's deck, and its half thickness.
+pub const PARAPET: (f32, f32) = (0.8, 0.25);
+
+/// What the car hits beside the roads: bridge parapets (stone walls along each side of a deck)
+/// and culvert headwalls in the ditches.
+pub fn walls(net: &RoadNet) -> Vec<crate::vehicle::Wall> {
+    use crate::vehicle::Wall;
+    let mut out = Vec::new();
+    for nr in &net.roads {
+        let road = &nr.road;
+        let left = |i: usize| -road.dir[i].perp();
+        let at = |i: usize, lat: f32| Vec2::new(road.pts[i].x, road.pts[i].z) + left(i) * lat;
+        // Parapets: a segment every 2 stations along each edge of a bridge.
+        let mut i = 0;
+        while i + 2 < nr.bridge.len() {
+            if nr.bridge[i] && nr.bridge[i + 2] {
+                for side in [1.0f32, -1.0] {
+                    let lat = |k: usize| side * (road.width[k] * 0.5 + PARAPET.1);
+                    let top = road.pts[i].y.max(road.pts[i + 2].y) + PARAPET.0;
+                    out.push(Wall::new(at(i, lat(i)), at(i + 2, lat(i + 2)), PARAPET.1, top));
+                }
+            }
+            i += 2;
+        }
+        // Culverts: a 1 m concrete headwall across the ditch.
+        for &(i, lat) in &nr.culverts {
+            let c = at(i, lat);
+            let d = road.dir[i] * 0.5;
+            out.push(Wall::new(c - d, c + d, 0.3, road.pts[i].y + 0.2));
+        }
+    }
+    out
+}
 
 #[cfg(test)]
 mod tests {
@@ -323,5 +388,47 @@ mod drive {
         eprintln!("after 2 s coasting from 40 km/h: road {:.1} km/h, ditch {:.1} km/h ({wheels} wheel-steps in it)", on_road * 3.6, in_ditch * 3.6);
         assert!(wheels > 100, "wheels in the ditch: {wheels}");
         assert!(in_ditch < on_road - 1.0, "the ditch drags: {in_ditch} vs {on_road}");
+    }
+}
+
+#[cfg(test)]
+mod hazards {
+    use bevy::math::Vec2;
+
+    use crate::open::roads::{BRIDGE_W, RoadKind};
+    use crate::stage;
+
+    #[test]
+    fn bridges_and_culverts() {
+        let net = crate::open::roads::generate(crate::open::SEED);
+        // The southern loop crosses the river twice: two bridges, narrow, with parapets.
+        let south = net.roads.iter().find(|r| r.kind == RoadKind::Gravel && r.bridge.iter().any(|b| *b)).expect("a bridge");
+        let spans = south.bridge.windows(2).filter(|w| !w[0] && w[1]).count();
+        assert_eq!(spans, 2, "bridges on the southern loop");
+        let i = south.bridge.iter().position(|b| *b).unwrap() + 3;
+        assert!((south.road.width[i] - BRIDGE_W).abs() < 0.3, "deck {}", south.road.width[i]);
+        let walls = super::walls(&net);
+        let p = Vec2::new(south.road.pts[i].x, south.road.pts[i].z);
+        let near: Vec<_> = walls.iter().filter(|w| w.distance(p) < BRIDGE_W).collect();
+        assert!(near.len() >= 2, "parapets each side: {}", near.len());
+        assert!(near.iter().all(|w| w.distance(p) > BRIDGE_W * 0.5 - 0.05), "parapet on the deck");
+        // The pace notes call the narrowing onto a bridge.
+        assert!(stage::corners(&south.road).iter().any(|c| c.narrows) || {
+            // (Or on a straight approach: the width drops by more than a metre.)
+            let w0 = south.road.width[i.saturating_sub(15)];
+            w0 - south.road.width[i] > 1.0
+        });
+        // Culverts: on gravel / forest corners with a ditch inside, and their notes say so.
+        let mut culverts = 0;
+        for r in net.roads.iter().filter(|r| !r.culverts.is_empty()) {
+            culverts += r.culverts.len();
+            let calls = stage::corners(&r.road);
+            for &(apex, _) in &r.culverts {
+                let s = apex as f32 * stage::STEP;
+                assert!(calls.iter().any(|c| c.dont_cut && c.start <= s && s <= c.end), "culvert at station {apex} without a don't-cut call");
+            }
+        }
+        eprintln!("{culverts} culverts, {} parapet / headwall pieces", walls.len());
+        assert!(culverts >= 10, "{culverts} culverts");
     }
 }

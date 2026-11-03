@@ -56,6 +56,10 @@ pub struct NetRoad {
     pub ditch: Vec<[f32; 2]>,
     /// Tarmac dirtied by a gravel road joining (per station; empty before dressing).
     pub dusty: Vec<bool>,
+    /// Over the river: a bridge with parapets (per station; empty before dressing).
+    pub bridge: Vec<bool>,
+    /// Culverts in the inside ditch: (apex station, lateral offset m).
+    pub culverts: Vec<(usize, f32)>,
     /// Bounding box (XZ) grown by the widest reach anyone asks for, for quick rejects.
     lo: Vec2,
     hi: Vec2,
@@ -96,7 +100,7 @@ impl NetRoad {
             lo = lo.min(Vec2::new(p.x, p.z));
             hi = hi.max(Vec2::new(p.x, p.z));
         }
-        NetRoad { kind, road, closed, limit: None, ditch: Vec::new(), dusty: Vec::new(), lo: lo - REACH, hi: hi + REACH }
+        NetRoad { kind, road, closed, limit: None, ditch: Vec::new(), dusty: Vec::new(), bridge: Vec::new(), culverts: Vec::new(), lo: lo - REACH, hi: hi + REACH }
     }
 }
 
@@ -249,6 +253,38 @@ fn road_heights(land: &Land, pts: &[Vec2], grade: f32, start: Option<f32>, end: 
         }
     }
     y
+}
+
+/// Where a road is over the river (m from its line): a bridge.
+pub const BRIDGE: f32 = 16.0;
+/// A bridge's deck width (m): narrower than the road (the co-driver calls "narrows").
+pub const BRIDGE_W: f32 = 3.5;
+
+/// Stone bridges where the road crosses the river: a level deck from bank to bank (not down
+/// into the river bed), narrower than the road, easing in over 10 m each side.
+fn bridges(land: &Land, pts: &[Vec2], y: &mut [f32], width: &mut [f32]) {
+    let n = pts.len();
+    let over: Vec<bool> = pts.iter().map(|p| land.river_distance(*p) < BRIDGE).collect();
+    let ease = (10.0 / STEP) as usize;
+    let mut i = 0;
+    while i < n {
+        if !over[i] {
+            i += 1;
+            continue;
+        }
+        let a = i;
+        while i < n && over[i] {
+            i += 1;
+        }
+        let (a, b) = (a.saturating_sub(ease), (i + ease).min(n - 1));
+        let (ya, yb) = (y[a], y[b]);
+        for k in a..=b {
+            let t = (k - a) as f32 / (b - a).max(1) as f32;
+            y[k] = ya + (yb - ya) * t;
+            let edge = (k - a).min(b - k) as f32 / ease as f32;
+            width[k] = width[k] + (BRIDGE_W - width[k]) * edge.min(1.0);
+        }
+    }
 }
 
 /// Small rises and dips (25-35 m apart, up to ~0.2 m, and a 12 m ripple) so the suspension
@@ -467,7 +503,11 @@ impl Builder<'_> {
             undulate(&mut y, rules.max_grade, sseed);
         }
         let n = pts.len();
-        let mut road = Road::from_centreline(&pts, &y, widths(kind, n, sseed), surfaces(kind, &pts, self.land, sseed));
+        let mut width = widths(kind, n, sseed);
+        if rules.bridge {
+            bridges(self.land, &pts, &mut y, &mut width);
+        }
+        let mut road = Road::from_centreline(&pts, &y, width, surfaces(kind, &pts, self.land, sseed));
         road.bank = banking(&road, kind, sseed);
         self.planner.take(&pts, 40.0);
         self.roads.push(NetRoad::new(kind, road, false));

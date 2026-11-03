@@ -214,13 +214,21 @@ x = −2,000 m                                             x = +2,000 m
 
 ### 4.5 Trees, rocks and dressing
 
-- Trees (pine / spruce / birch, near and far versions, ~238k in all), rocks, shrubs and ground
-  cover come from a `pcg-core` graph, kept off every road, building and the town. Two engine
-  PCG volumes: trees (whole map) and dressing (streamed near the camera).
-- **Every trunk and boulder is solid**, anywhere on the map: tiles of 128 m are evaluated in
-  parallel for the tiles the roads pass through at load, and around the car as it drives.
+- Trees (pine / spruce / birch, near and far versions), rocks, shrubs and ground cover come from a
+  `pcg-core` graph, kept off every road, building and the village. **Ecology** (`open/ecology.rs`):
+  none above the **treeline** (~410 m: stunted trees and scree on the plateau), on the flat
+  **valley fields** (single trees), or in **7 clear-cuts** beside the gravel and forest roads
+  (stumps, a timber pile; long views open up). Two engine PCG volumes: trees (whole map) and
+  dressing (streamed near the camera).
+- **Solid:** every trunk, boulder and **stump** (0.3 m), anywhere on the map (128 m tiles built
+  in parallel along the roads at load and around the car as it drives), building walls, **bridge
+  parapets**, **culvert headwalls** and timber piles (line-segment walls).
+- **Road dressing** (`art/roadside.rs`): stone bridges where the southern loop crosses the river
+  (narrow deck, parapets), culverts in the inside ditch of tight corners ("don't cut"), snow
+  poles along the plateau roads, chevron boards on deceptive corners, event boards (100 m to the
+  finish, the finish, a marshal post), brake marks before tight corners.
 - Hand edits (removed, moved or added trees, cleared or thinned areas) live in the level as
-  `PcgOverrides` on two entities, `Trees` and `Dressing`. The volumes and the car's colliders
+  `PcgOverrides` on two entities, `Trees` and `Dressing`; the volumes and the car's colliders
   apply the same edits. Trees follow sculpted ground (`PcgFollowTerrain`).
 
 ### 4.6 Events, home and traffic on the map

@@ -529,6 +529,7 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     }
     crate::art::spawn_stage(world, s);
     if let Some(o) = &s.open {
+        crate::art::roadside::spawn(world, o);
         let hf = o.heights.clone();
         for e in crate::open::buildings::spawn(world, &o.buildings, &move |x, z| hf.height_at(x, z)) {
             if let Ok(mut e) = world.get_entity_mut(e) {

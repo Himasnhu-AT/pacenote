@@ -307,6 +307,7 @@ pub fn refresh(world: &mut World, boxes: &[(Vec2, Vec2)], town: bool) -> Result<
     for e in spawned(world, |w| crate::art::ground::spawn_road(w, &s)) {
         world.entity_mut(e).insert((LiveRoadMesh, engine::level::GeneratedBy("pacenote::roads")));
     }
+    crate::art::roadside::spawn(world, &open);
     // Buildings.
     if town {
         let old_b: Vec<Entity> = world.query_filtered::<Entity, With<LiveBuilding>>().iter(world).collect();

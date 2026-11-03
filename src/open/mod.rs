@@ -139,7 +139,14 @@ impl OpenWorld {
         };
         let layout = buildings::layout_baked(&net, &data.lots, &data.buildings);
         // Every straight wall the car can hit: facades now; parapets and barriers go here too.
-        let walls = walls::WallGrid::new(&buildings::walls(&layout), 10.0);
+        let mut all_walls = buildings::walls(&layout);
+        all_walls.extend(profile::walls(&net));
+        {
+            let cuts = ecology::clearcuts(&net, ecology::CLEARCUTS);
+            let hf = &heights;
+            all_walls.extend(crate::art::roadside::walls(&crate::art::roadside::items(&net, &cuts), &|p| hf.height_at(p.x, p.y)));
+        }
+        let walls = walls::WallGrid::new(&all_walls, 10.0);
         Ok(OpenWorld {
             data: Arc::new(data),
             net: Arc::new(net),

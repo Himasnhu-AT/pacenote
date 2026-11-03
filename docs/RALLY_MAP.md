@@ -90,13 +90,13 @@ Ticked as each step lands on main (commit in brackets).
 - [x] 5.4 Tape and marshal barriers across unused junction branches during an event
 
 ### Phase 6: ecology and road dressing
-- [ ] 6.1 Biomes by elevation, slope and moisture (valley farmland/hedges/stone walls, plantations, alpine rock/heather)
-- [ ] 6.2 Clear-cuts 150-300 m: stumps (0.3 m solids), timber piles, sightlines
-- [ ] 6.3 Snow poles on the alpine edge
-- [ ] 6.4 Chevrons on deceptive corners, marshal posts, 100 m finish boards
-- [ ] 6.5 Culverts / rocks in inside ditches, setting don't-cut
-- [ ] 6.6 Brake and scuff marks before grade 1-3 corners
-- [ ] 6.7 Bridges with stone parapets (wall segments) at river crossings
+- [x] 6.1 Biomes by elevation, slope and moisture (valley farmland/hedges/stone walls, plantations, alpine rock/heather)
+- [x] 6.2 Clear-cuts 150-300 m: stumps (0.3 m solids), timber piles, sightlines
+- [x] 6.3 Snow poles on the alpine edge
+- [x] 6.4 Chevrons on deceptive corners, marshal posts, 100 m finish boards
+- [x] 6.5 Culverts / rocks in inside ditches, setting don't-cut
+- [x] 6.6 Brake and scuff marks before grade 1-3 corners
+- [x] 6.7 Bridges with stone parapets (wall segments) at river crossings
 
 ## Status
 
@@ -135,3 +135,15 @@ Ticked as each step lands on main (commit in brackets).
   (5.2 km, tarmac and gravel), River crossings (2.8 km, two river crossings), Hillclimb
   (5.2 km tarmac). While one runs, red and white tape closes every junction branch the route
   doesn't take (`events::closed_arms`); it goes when you leave. Visual only (no collision).
+- Phase 6: done. `open::ecology` masks the land for the dressing graph: no trees above the
+  treeline (~410 m, or high and steep: 3 km², stunted trees and scree instead), on the flat
+  valley fields (2.5 km², single trees) or in 7 clear-cuts (110-200 x 150-300 m, beside gravel
+  and forest roads, full of solid 0.3 m stumps, a timber pile at the road edge). Bridges where
+  the southern loop crosses the river: level deck, 3.5 m wide (the notes say "narrows"), stone
+  parapets (walls). Culverts in the inside ditch of tight corners (47; their notes say "don't
+  cut"; solid). Snow poles every 25 m on the plateau roads (228), chevron boards on the outside
+  of tight corners after a fast run or over a crest (78), 100 m and finish boards and a marshal
+  post at every event's finish, brake marks in the wheel tracks before hairpin-to-3 corners
+  (`art::roadside`, `art::ground::brake_wear`).
+  Not done: species by zone (birch in the valley, plantation rows), hedgerows and stone walls,
+  breakable snow poles (they're drawn, not solid).
