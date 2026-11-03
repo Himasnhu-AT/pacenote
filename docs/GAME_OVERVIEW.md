@@ -118,88 +118,93 @@ Controls: keyboard (W/S/A/D or arrows, Space handbrake, R recover, C camera) and
 
 ---
 
-## 4. The map (open world, `src/open/`, `docs/OPENWORLD.md`)
+## 4. The map (open world, `src/open/`, `docs/OPENWORLD.md`, `docs/RALLY_MAP.md`)
 
-One 4 x 4 km region (−2,000 … +2,000 m in x and z). It was first generated from one seed
-(`open::SEED`) by pure, deterministic Rust (`libm` for transcendental functions, section 6.2).
-Since 3 Nov the generated world has been **baked into a level file**, and the level is now the
-source of truth: the game loads it, and the editor (section 4.7) changes it.
+One 4 x 4 km region (−2,000 … +2,000 m in x and z), rebuilt on 3 Nov 2026 **terrain first** for
+a sim-rally feel (`docs/RALLY_MAP.md` has the plan and checklist). It is generated from one seed
+(`open::SEED`) by pure, deterministic Rust (`libm`, section 6.2) and **baked into a level
+file**, which is the source of truth: the game loads it and the editor (4.7) changes it.
 
 ### 4.1 Layout at a glance
 
 ```
-                         N (+z)
-┌───────────────────────────────────────────────┐ z = +2,000 m
-│                                               │
-│      ╭──────────── highway ring ───────────╮   │
-│      │  forest road      │    forest road  │   │
-│      │    (rally)     country    (rally)   │   │
-│      │                   │                 │   │
-│      ├── country ──── [ town ] ── country ─┤   │
-│      │                 farms               │   │
-│      │                   │                 │   │
-│      │  forest road   country  forest road │   │
-│      │    (rally)        │      (rally)    │   │
-│      ╰─────────────────────────────────────╯   │
-│   forest and hills everywhere off the roads   │
-│                                               │
-└───────────────────────────────────────────────┘ z = −2,000 m
-x = −2,000 m                         x = +2,000 m
+                           N (+z)
+┌─────────────────────────────────────────────────────────┐ z = +2,000 m
+│ ALPINE PLATEAU (380-490 m)   radio tower                │
+│  hillclimb top ●──── mountain pass (forest) ────● basin │
+│  │                    │                         │  road │
+│  │ tarmac      FORESTRY ESCARPMENT      FAST GRAVEL     │
+│  │ hillclimb   (180-380 m)   │   gully  BASIN (140-240) │
+│  │ (switch-    camp ● logging│   stream   quarry ●      │
+│  │  backs)     track─┘       │     │         │          │
+│  │                           │     gully road│          │
+│  ●══ valley B-road ═ VILLAGE ═╧═ SERVICE PARK ═════════●  │
+│      (tarmac)    ~~~~~~~~~ river ~~~~~~~~~~~~~          │
+│        ╰──── southern gravel loop (2 crossings) ────╯   │
+└─────────────────────────────────────────────────────────┘ z = −2,000 m
+x = −2,000 m                                             x = +2,000 m
 ```
 
-(Not to scale: the town is 660 m across, the ring ~2.9 km across. Two country roads are
-tarmac, two gravel; the gravel ones are the sprint events, the ring is the lap event.)
+- **Land** (`land.rs`): zones from a warped macro shape (valley floor 80-120 m, basin, an
+  escarpment, a plateau up to ~490 m: **405 m of relief**, was 91), domain-warped ridged noise,
+  then **600k droplets of hydraulic erosion** on a 4 m grid (gullies, spurs, fans) and a
+  moisture map from where the water ran (mud on forest roads; ecology next).
+- **Roads solve the land** (`plan.rs`): an anisotropic A* on a 10 m grid in 16 headings; each
+  step costs its length times grade above a target (4-5 %, soft limit 11-14 %), cross-slope and
+  turning. On steep ground the cheapest path traverses and **switches back**; the turn limit per
+  step gives **hairpins of ~8-10 m radius** (tightest on the map: 8.1 m). Paths are smoothed
+  (Chaikin), untangled (no road crosses itself), and approach every junction straight.
+- **9 roads, ~29.5 km, 15 junctions, no dead ends** (every road ends on another):
+  - valley **B-road** (6.5 m tarmac, 3.7 km) through the village and service park;
+  - **tarmac hillclimb** (6.5 m, 5.2 km) up the west side to the plateau;
+  - **mountain pass** (forest, 3.4 m, 3.7 km) over the plateau by the radio tower;
+  - **basin gravel** (4.6 m, 5.6 km) past the quarry and up the east wall;
+  - **forestry road** (3.4 m, 5.9 km) from the village up the escarpment past the logging camp
+    to the pass, and a **logging track** (0.7 km) from the camp to the hillclimb;
+  - **gully road** (gravel, 1.9 km) from the service park to the basin road;
+  - **southern loop** (gravel, 2.2 km) over the river twice;
+  - a **village lane** (5 m, 0.5 km).
+- Widths are rally widths: B-road 6.5 m, fast gravel 4.2-5.0 m, forest 3.0-3.8 m (were 14 / 11 /
+  8 / 5.4-6.6 m).
 
-- **Town:** a street grid from −330 to +330 m (7 streets each way, 11 m wide, blocks 110 m,
-  tarmac) on a flat plateau (flat inside 400 m, blending out by 640 m). Home, where free roam
-  starts and a fatal crash respawns you, is on a town street.
-- **Highway ring:** a closed loop of mean radius ~1,450 m with a wobbled radius, 14 m wide,
-  9.1 km long, grades within 6 %.
-- **Country roads (4):** from the ends of the town's middle streets out to the ring, 8 m wide,
-  two tarmac and two gravel, ≤ 8 % grade, ~1.0–1.2 km each.
-- **Forest roads (4):** from the ring into the four quadrants between the country roads; a
-  steered random walk (tightest radius ~38 m) kept 45 m from every other road; gravel with mud
-  patches, 5.4–6.6 m wide, dead ends, 1.0–3.2 km. These are the rally roads.
-- In all: **23 roads, ~31 km**, with junctions where they meet (town crossings, spoke ends,
-  forest starts).
+### 4.2 Roads (`roads.rs`, `plan.rs`, `data.rs`, `junctions.rs`)
 
-### 4.2 Roads (`roads.rs`, `data.rs`, `junctions.rs`)
-
-- In the level, each road is an engine **`Spline`** (Catmull-Rom control points: 1,632 for
-  all 23 roads, more in bends, at most 40 m apart on straights) plus a `RoadSpline { kind,
-  speed limit }`. A control point carries width, bank (roll) and tags (surface + road kind).
-- Loading samples each spline every 2 m into a `stage::Road` (points with direction, curvature,
-  width, banking, surface, lookup grid), the same type the old stages use, so road meshes, pace
-  notes and records reuse stage code. Junctions are found again from where roads meet.
-- The bake keeps every 2 m station of the generated road within 10 cm sideways and 3 cm in
-  height of the curve (tested); one exception is noted in 9.3.
-- **Junctions** get their own meshes (`open/junctions.rs`, `art/junctions.rs`): kerbs with a
-  fillet radius in town, sidewalk corners, ribbons trimmed back to the junction mouths.
-- **Surfaces:** the road's own (per station), a 3 m verge, then grass in town or rough ground.
+- In the level, each road is an engine **`Spline`** (Catmull-Rom; 4,186 control points for the 9
+  roads, about one per 7 m since the hill roads bend and climb all the time) plus a
+  `RoadSpline { kind, speed limit }`. Kinds: `Street`, `BRoad`, `Gravel`, `Forest` (old files'
+  `Highway` / `Country` still read).
+- Loading samples each spline every 2 m into a `stage::Road` (direction, curvature, width,
+  banking, surface, lookup grid), so road meshes, pace notes and records reuse stage code.
+  Junctions are found again from where roads meet.
+- Road heights follow the land, held to the grade (14 % forest, 13 % gravel, 11 % tarmac; up to
+  ~17 % for a few metres where a road meets another), crests kept.
+- **Junctions** get their own meshes (`open/junctions.rs`, `art/junctions.rs`), ribbons trimmed
+  back to the mouths. No town kerbs or zebras any more.
+- **Surfaces:** tarmac / gravel / mud (where the moisture map is wet) per station, a 3 m verge,
+  then grass on the valley floor or rough ground elsewhere. Crown, ditches and grip across the
+  road come in phase 4 of `RALLY_MAP.md`.
 
 ### 4.3 Terrain
 
-- A 2001² heightfield at 2 m, stored with the level as `assets/levels/open/terrain.r16`
-  (16-bit, 1.4 mm steps over a 91 m height range) + `terrain.ron`.
-- It was generated as natural hills (warped fBm + ridges), flattened in town, then **shaped by
-  the nearest road** with the old stage rules: road sunk into the land, a shoulder, fill no
-  steeper than 16 %, cut no steeper than 45 %, blending back 34–52 m out. In the editor it
-  can be sculpted and painted; moving a road re-shapes the ground around the part that moved.
+- A 2001² heightfield at 2 m, stored with the level as `assets/levels/open/terrain.r16` (16-bit,
+  ~6 mm steps over the 405 m range) + `terrain.ron`.
+- It is the eroded land **shaped by the nearest road** with the stage rules (road sunk in, a
+  shoulder, fill ≤ 16 %, cut ≤ 45 %, blending back 34-52 m out). In the editor it can be
+  sculpted and painted; moving a road re-shapes the ground around the part that moved (from the
+  land, rebuilt from the seed).
 - Render: the engine's chunked, LOD'd terrain with a 4-layer splat material (`art/terrain.rs`).
 
 ### 4.4 Buildings (`buildings.rs`, `level.rs`)
 
-- **617 buildings:** downtown offices, shops, houses, apartment slabs and one tower in the 36
-  town blocks (1 plaza, 3 parks and 2 car parks have none), plus farmhouses and barns along the
-  country roads. Taller towards the centre (5–8 storeys downtown, 2–4 outside).
-- Each is a **level entity** with a `Building` component (kind, footprint size, floors, storey
-  height, roof flat / gable / hip, pitch, street side, wall and roof colour, variant) placed by
-  its Transform. Each draws as its own mesh with one shared material (a procedural 1024²
-  facade atlas + vertex colours); sidewalks and lot paving are one mesh per block. The whole
-  town seen from above is 679 draws.
-- **Collision:** each wall is a row of solid cylinders (radius 1.2 m, ≤ 1.6 m apart), because
-  the car sim only knows vertical cylinders (section 5.1); ~16,000 in a 10 m grid.
-- Since the bake, buildings no longer re-lay themselves out when streets change.
+- **110 buildings** (were 617): a **valley village** of houses and, near its middle, shops on
+  both sides of the B-road and the lane (about 90), big sheds at the **service park**, and
+  farmhouses with barns along the low gravel roads. Each faces its road, sits on its own ground
+  (no town plateau any more) and is kept clear of every road.
+- Each is a **level entity** with a `Building` component placed by its Transform, drawn as its
+  own mesh with one shared material (a procedural facade atlas + vertex colours).
+- **Collision:** each facade is a **line-segment wall** (`vehicle::Wall`, `open::walls`), so a car
+  scrapes along it instead of snagging (a 4° brush at 110 km/h keeps 97 % of its speed; the old
+  rows of 1.2 m cylinders spun it in).
 
 ### 4.5 Trees, rocks and dressing
 
@@ -214,32 +219,34 @@ tarmac, two gravel; the gravel ones are the sprint events, the ring is the lap e
 
 ### 4.6 Events, home and traffic on the map
 
-- **Events (7)**, each a stretch of one road: a **rally** on each forest road (ids 100–103,
-  1.0–3.1 km), a **sprint** on each gravel country road (town → ring), a **ring lap** (9.1 km).
-  A translucent coloured marker at each start; stop within 9 m for 0.6 s to start. In the
-  level, an event's start is an `EventStart` marker (move it and the route starts there); its
-  name, kind and finish are in the `WorldDoc`. Pace-note grades can be set by hand with
-  `GradeNote` markers.
+- **Events (6)**, each a stretch of one road (chains across junctions come in phase 5): a
+  **rally** on the mountain pass and on the forestry road, a **sprint** on each gravel road,
+  and the **hillclimb**. A translucent coloured marker at each start; stop within 9 m for 0.6 s
+  to start. In the level, an event's start is an `EventStart` marker; name, kind and finish are
+  in the `WorldDoc`. Pace-note grades can be set by hand with `GradeNote` markers.
 - Starting sets the world's active route (`StageWorld::road`) and computes its corners and
-  crests, so the stage machinery runs it: countdown, clock, progress, finish, pace notes,
-  records and ghosts keyed by event id and by the level's content, results screen.
-- **Traffic** (`traffic.rs`): a lane graph from the roads (one lane each way, curved junction
-  paths, U-turns at dead ends; 704 lanes, 61 nodes); 40 cars within 600 m of the player with an
-  intelligent-driver model, per-road speed limits, junction reservation. Solid; free roam only.
+  crests, so the stage machinery runs it: countdown, clock, pace notes (hairpin / square / 2-6,
+  tightens, opens, over crest, crest into, narrows, off camber), records and ghosts keyed by
+  event id and the level's content, results screen.
+- **Home** is on the B-road by the service park.
+- **Traffic** (`traffic.rs`) drives **only the tarmac** (B-road and village lane: the gravel and
+  forest tracks are single-car rally roads); cars turn round where the tarmac ends. Intelligent-
+  driver model, speed limits, junction reservation. Solid; free roam only.
 - There is **no map or minimap** in the game: events are found by driving around (9.4).
 
 ### 4.7 The level file and the editor
 
 | Level entity | What |
 |---|---|
-| `road 0 (Street)` … `road 22 (Forest)` | `Spline` + `RoadSpline` |
-| `open world` | `WorldDoc`: seed, town height, time of day, events, town lots, terrain folder |
+| `road 0 (BRoad)` … `road 8 (Street)` | `Spline` + `RoadSpline` |
+| `open world` | `WorldDoc`: seed, village height, time of day, events, terrain folder |
 | `home`, `event start: …`, grade notes | `HomePoint`, `EventStart`, `GradeNote` (placeables) |
-| `house 0` … `barn 616` | `Building` |
+| `house 0` … (110) | `Building` |
 | `Trees`, `Dressing` | `PcgOverrides` (+ the game's PCG volume at run time) |
 
-- Files: `assets/levels/open.level.ron` (0.6 MB) + the terrain folder (8 MB). The game reads them
-  in 0.04 s; a missing or bad level logs an error and the world is generated from the seed.
+- Files: `assets/levels/open.level.ron` (1.0 MB) + the terrain folder (8 MB). A missing or bad
+  level logs an error and the world is generated from the seed (the land takes ~3 s to erode,
+  the roads ~2 s); a test loads every committed level.
   `pacenote --bake-world <file>` re-bakes from the seed (throws away every edit).
 - **Editor:** `cargo run -- --editor --level assets/levels/open.level.ron` opens the game in the
   engine's editor (Outliner, Details, tools for splines, sculpt, paint, foliage, place). Edits

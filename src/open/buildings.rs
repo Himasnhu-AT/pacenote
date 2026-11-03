@@ -1333,8 +1333,6 @@ mod tests {
         let (a, b) = (layout(&n), layout(&n));
         assert_eq!(a.buildings, b.buildings);
         assert_eq!(walls(&a), walls(&b));
-        let town = a.blocks.iter().filter(|b| b.cell.is_some()).count();
-        assert_eq!(town, 36);
         let count = |u| a.buildings.iter().filter(|b| b.use_ == u).count();
         eprintln!(
             "buildings {} (downtown {}, shop {}, house {}, apartment {}, tower {}, farmhouse {}, barn {})",
@@ -1347,12 +1345,9 @@ mod tests {
             count(Use::FarmHouse),
             count(Use::Barn)
         );
-        assert!(a.buildings.len() > 250, "{}", a.buildings.len());
-        for u in [Use::Downtown, Use::Shop, Use::House, Use::Apartment, Use::Tower] {
+        assert!((80..=200).contains(&a.buildings.len()), "{}", a.buildings.len());
+        for u in [Use::Shop, Use::House, Use::Barn] {
             assert!(count(u) > 0, "{u:?}");
-        }
-        for k in [LotKind::Park, LotKind::Parking, LotKind::Plaza] {
-            assert!(a.blocks.iter().any(|b| b.kind == k), "{k:?}");
         }
         // Another seed gives another town.
         let mut other = n.clone();
@@ -1420,8 +1415,7 @@ mod tests {
         // Four sides a building, less the facades joined in rows.
         let joined = 4 * l.buildings.len() - ws.len();
         eprintln!("walls: {} for {} buildings ({joined} facades joined onto a neighbour's)", ws.len(), l.buildings.len());
-        assert!(ws.len() > 1_000, "{}", ws.len());
-        assert!(joined > 100, "rows of shops joined into one wall");
+        assert!(ws.len() >= 3 * l.buildings.len(), "{}", ws.len());
         let grid = WallGrid::new(&ws, 10.0);
         assert_eq!(grid.len(), ws.len());
         let mut near = Vec::new();
@@ -1488,12 +1482,11 @@ mod tests {
     }
 
     #[test]
-    fn a_car_scrapes_along_a_row_of_shops() {
+    fn a_car_scrapes_along_a_facade() {
         use crate::vehicle::{Car, Input, Spec, step};
         let n = net();
         let l = layout(&n);
         let ws = walls(&l);
-        let g = Town(n.town_y, WallGrid::new(&ws, 10.0));
         let spec = Spec::default();
         // The longest joined facade with open street in front of it.
         let mut best: Option<(Wall, Vec2)> = None;
@@ -1513,13 +1506,16 @@ mod tests {
         let (w, out) = best.unwrap();
         let d = (w.b - w.a).normalize();
         eprintln!("facade {:.0} m", w.a.distance(w.b));
-        assert!(w.a.distance(w.b) > 40.0);
+        assert!(w.a.distance(w.b) > 15.0);
+        // Flat ground at the building's floor.
+        let floor = l.buildings.iter().find(|b| b.contains((w.a + w.b) * 0.5, 1.0)).unwrap().ground;
+        let g = Town(floor, WallGrid::new(&ws, 10.0));
         // 110 km/h at 4° toward it, from 1.5 m off the plaster, 5 m along it.
         let ang = 4f32.to_radians();
         let dir = d * libm::cosf(ang) - out * libm::sinf(ang);
         let start = w.a + d * 5.0 + out * (w.radius + 1.5);
         let heading = libm::atan2f(dir.x, dir.y);
-        let mut car = Car::new(Vec3::new(start.x, n.town_y + 0.6, start.y), heading);
+        let mut car = Car::new(Vec3::new(start.x, floor + 0.6, start.y), heading);
         assert!(Vec2::new(car.forward().x, car.forward().z).dot(dir) > 0.999, "heading");
         let v = 110.0 / 3.6;
         car.vel = car.forward() * v;
@@ -1546,15 +1542,18 @@ mod tests {
         use crate::vehicle::{Car, Input, Spec, step};
         let n = net();
         let l = layout(&n);
-        let g = Town(n.town_y, WallGrid::new(&walls(&l), 10.0));
         let spec = Spec::default();
-        // Head on and at 35° into a shop facing −z (the car at heading 0 drives towards +z),
-        // from the middle of the street in front of it.
-        let b = l.buildings.iter().find(|b| b.use_ == Use::Shop && b.front == 3 && b.half.x > 5.0).unwrap();
-        let street_z = b.centre.y - b.half.y - SIDEWALK - RoadKind::Street.width() * 0.5;
-        for (kmh, heading) in [(60.0f32, 0.0f32), (110.0, 0.0), (90.0, 0.6), (90.0, -0.6)] {
-            let start = Vec3::new(b.centre.x - libm::sinf(heading) * 20.0, n.town_y + 0.6, street_z - 12.0);
-            let mut car = Car::new(start, heading);
+        // Head on and at 35° into the biggest shed's front, from 14 m out.
+        let b = l.buildings.iter().filter(|b| b.use_ == Use::Barn).max_by(|x, y| x.half.x.total_cmp(&y.half.x)).unwrap();
+        let g = Town(b.ground, WallGrid::new(&walls(&l), 10.0));
+        let face = b.at(Vec2::new(0.0, if b.front == 1 { b.half.y } else { -b.half.y }));
+        let out = (face - b.centre).normalize();
+        let h0 = libm::atan2f(-out.x, -out.y);
+        for (kmh, turn) in [(60.0f32, 0.0f32), (110.0, 0.0), (90.0, 0.6), (90.0, -0.6)] {
+            let heading = h0 + turn;
+            let fwd = Vec2::new(libm::sinf(heading), libm::cosf(heading));
+            let start = face - fwd * 14.0;
+            let mut car = Car::new(Vec3::new(start.x, b.ground + 0.6, start.y), heading);
             car.vel = car.forward() * kmh / 3.6;
             for w in &mut car.wheels {
                 w.spin = kmh / 3.6 / spec.wheel_radius;
@@ -1562,11 +1561,11 @@ mod tests {
             let mut deepest = f32::MIN;
             for _ in 0..240 {
                 step(&mut car, &spec, Input { throttle: 1.0, ..Default::default() }, &g, 1.0 / 60.0);
-                deepest = deepest.max(car.pos.z - (b.centre.y - b.half.y));
+                deepest = deepest.max((Vec2::new(car.pos.x, car.pos.z) - face).dot(-out));
             }
-            assert!(car.impacts > 0.0, "{kmh} km/h at {heading}: no hit");
+            assert!(car.impacts > 0.0, "{kmh} km/h at {turn}: no hit");
             // The car's centre stays a good metre outside the wall (it's ~2 m to its nose).
-            assert!(deepest < -1.2, "{kmh} km/h at {heading}: centre {deepest:.2} m from the wall");
+            assert!(deepest < -1.2, "{kmh} km/h at {turn}: centre {deepest:.2} m from the wall");
         }
     }
 
@@ -1575,7 +1574,8 @@ mod tests {
         let l = layout(&net());
         let (meshes, tris, verts) = render::triangles(&l);
         eprintln!("meshes {meshes}, triangles {tris}, vertices {verts}");
-        assert!((30..=80).contains(&meshes));
+        // One mesh a building (no town blocks any more).
+        assert!(meshes <= 250, "{meshes} meshes");
         assert!(tris < 600_000, "{tris} triangles");
     }
 }

@@ -326,3 +326,50 @@ pub fn chaikin(pts: &[Vec2], rounds: usize) -> Vec<Vec2> {
     }
     v
 }
+
+/// Whether segments `a0-a1` and `b0-b1` cross.
+fn cross(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> bool {
+    let d = |p: Vec2, q: Vec2, r: Vec2| (q - p).perp_dot(r - p);
+    let (d1, d2) = (d(b0, b1, a0), d(b0, b1, a1));
+    let (d3, d4) = (d(a0, a1, b0), d(a0, a1, b1));
+    d1 * d2 < 0.0 && d3 * d4 < 0.0
+}
+
+/// The path with any loop it makes cut out: where it crosses itself or comes back to a point it
+/// passed, it goes straight on from there (a road never runs over itself).
+pub fn untangle(pts: &[Vec2]) -> Vec<Vec2> {
+    let mut v = pts.to_vec();
+    let mut i = 0;
+    while i + 3 < v.len() {
+        let mut cut = None;
+        for j in (i + 2..v.len() - 1).rev() {
+            // Crossing, or back on the same spot (out and back along itself).
+            if cross(v[i], v[i + 1], v[j], v[j + 1]) || (j >= i + 3 && v[j].distance(v[i]) < 4.0) {
+                cut = Some(j);
+                break;
+            }
+        }
+        if let Some(j) = cut {
+            v.drain(i + 1..=j);
+        } else {
+            i += 1;
+        }
+    }
+    v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn untangle_cuts_loops() {
+        // Along x, a loop up and back across, then on.
+        let p: Vec<Vec2> = [(0.0, 0.0), (10.0, 0.0), (20.0, 10.0), (15.0, 15.0), (12.0, -5.0), (30.0, -5.0)].iter().map(|&(x, y)| Vec2::new(x, y)).collect();
+        let u = untangle(&p);
+        assert_eq!(u, vec![p[0], p[1], p[4], p[5]]);
+        // A hairpin that doesn't cross stays.
+        let h: Vec<Vec2> = [(0.0, 0.0), (10.0, 0.0), (15.0, 5.0), (10.0, 10.0), (0.0, 10.0)].iter().map(|&(x, y)| Vec2::new(x, y)).collect();
+        assert_eq!(untangle(&h), h);
+    }
+}

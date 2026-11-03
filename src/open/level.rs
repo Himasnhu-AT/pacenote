@@ -664,19 +664,21 @@ mod tests {
                 let on = rb.road.pts[i].lerp(rb.road.pts[(i + 1).min(rb.road.len() - 1)], at.t);
                 worst_xz = worst_xz.max(Vec2::new(on.x, on.z).distance(q));
                 worst_y = worst_y.max((on.y - p.y).abs());
-                assert!(Vec2::new(on.x, on.z).distance(q) < 0.12, "road {k}: {q} moved {}", Vec2::new(on.x, on.z).distance(q));
-                assert!((on.y - p.y).abs() < 0.08, "road {k}: {q} height {} vs {}", on.y, p.y);
+                // (Within the fit's 10 cm, plus the chords of an 8 m hairpin sampled 2 m apart.)
+                assert!(Vec2::new(on.x, on.z).distance(q) < 0.17, "road {k}: {q} moved {}", Vec2::new(on.x, on.z).distance(q));
+                assert!((on.y - p.y).abs() < 0.08, "road {k}: {q} height {} vs {} (station {} of {}, matched {i} t {} of {}, lateral {})", on.y, p.y, ra.road.pts.iter().position(|x| x == p).unwrap(), ra.road.len(), at.t, rb.road.len(), at.lateral);
             }
         }
         eprintln!("{controls} control points for {stations} stations; worst move {worst_xz:.3} m, height {worst_y:.3} m");
-        assert!(controls * 4 < stations, "{controls} control points for {stations} stations");
+        // Hill roads bend and climb all the time: about one control point per 7 m.
+        assert!(controls * 3 < stations, "{controls} control points for {stations} stations");
         assert_eq!(a.junctions.len(), b.junctions.len());
         let (ea, eb) = (super::super::events::build(&a, &data.events), super::super::events::build(&b, &baked.events));
         assert_eq!(ea.len(), eb.len());
         for (x, y) in ea.iter().zip(&eb) {
             // Start and finish each snap to the nearest new station (up to a station apart); the
-            // curve measures a little shorter than the generated polyline (0.15 % on the ring).
-            assert!((x.route.length() - y.route.length()).abs() <= (2.0 * STEP + 1.0).max(0.002 * x.route.length()), "{}: {} vs {}", x.name, x.route.length(), y.route.length());
+            // curve measures a little shorter than the generated polyline (0.2 % with hairpins).
+            assert!((x.route.length() - y.route.length()).abs() <= (2.0 * STEP + 1.0).max(0.004 * x.route.length()), "{}: {} vs {}", x.name, x.route.length(), y.route.length());
         }
     }
 
@@ -714,5 +716,22 @@ mod tests {
         }
         assert_eq!((back.seed, back.town_y, back.time), (data.seed, data.town_y, data.time));
         assert!(back.home.pos.distance(data.home.pos) < 1e-3);
+    }
+
+    /// Every level shipped in assets/levels loads (a bad one would fall back to the generator
+    /// at start, silently).
+    #[test]
+    fn committed_levels_load() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/levels");
+        let mut n = 0;
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.to_string_lossy().ends_with(".level.ron") {
+                let l = load(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+                assert!(!l.data.roads.is_empty(), "{}", p.display());
+                n += 1;
+            }
+        }
+        assert!(n >= 1);
     }
 }

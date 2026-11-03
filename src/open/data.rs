@@ -371,15 +371,15 @@ mod tests {
             ("event backwards", Box::new(|d| d.events[0].from = d.events[0].to)),
             ("lap on an open road", Box::new(|d| {
                 let open = d.roads.iter().position(|r| !r.closed).unwrap() as u32;
-                let lap = d.events.iter_mut().find(|e| e.kind == events::EventKind::Lap).unwrap();
-                lap.road = open;
+                d.events[0].kind = events::EventKind::Lap;
+                d.events[0].road = open;
             })),
             ("duplicate event id", Box::new(|d| d.events[1].id = d.events[0].id)),
             ("grade 9", Box::new(|d| d.grades.push(GradeOverride { road: 0, station: 1, grade: 9 }))),
             ("grade off the road", Box::new(|d| d.grades.push(GradeOverride { road: 0, station: 99_999, grade: 2 }))),
             ("speed limit NaN", Box::new(|d| d.roads[0].speed_kmh = Some(f32::NAN))),
             ("home NaN", Box::new(|d| d.home.pos.y = f32::NAN)),
-            ("lot outside the town", Box::new(|d| d.lots.push(LotData { i: 40, j: 0, kind: buildings::LotKind::Park }))),
+            ("too many lots", Box::new(|d| d.lots.extend(std::iter::repeat_n(LotData { i: 0, j: 0, kind: buildings::LotKind::Park }, 1_001)))),
             ("future version", Box::new(|d| d.version = VERSION + 1)),
         ];
         for (what, f) in bad {

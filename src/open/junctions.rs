@@ -638,24 +638,26 @@ mod tests {
         let geoms = build(&n);
         assert_eq!(geoms.len(), nodes.len(), "every node gets a junction mesh");
         for g in &geoms {
-            assert!(g.area() > 50.0, "junction at {} area {}", g.pos, g.area());
+            // Two 3.4 m forest tracks meeting make a small one.
+            assert!(g.area() > 25.0, "junction at {} area {}", g.pos, g.area());
             assert!(is_simple(&g.outline), "junction at {} self-intersects", g.pos);
             assert!(g.outline.iter().all(|p| p.is_finite()));
             // Everything within reach of the centre.
             assert!(g.outline.iter().all(|p| p.distance(g.pos) < 90.0), "junction at {} sprawls", g.pos);
         }
-        // Counts by type: 49 town crossings (4 shared with the country roads' starts), 4
-        // country roads on the ring, the forest roads' starts.
-        let town = geoms.iter().filter(|g| g.town()).count();
-        assert_eq!(town, 49);
-        let ring = geoms.iter().filter(|g| !g.town()).count();
-        assert!(ring >= 7, "ring junctions {ring}");
+        // The village lanes meet the B-road (and a forest road crosses one).
+        let village = geoms.iter().filter(|g| g.town()).count();
+        assert!((2..=4).contains(&village), "village junctions {village}");
+        assert!(geoms.len() >= 12, "{} junctions", geoms.len());
     }
 
     /// `cargo test --lib open::junctions::tests::summary -- --nocapture`: where they are.
     #[test]
     fn summary() {
         let n = net();
+        for (p, arms) in nodes(&n) {
+            println!("node ({:.0}, {:.0}) {:?}", p.x, p.y, arms);
+        }
         for g in build(&n) {
             let kinds: Vec<String> = g.arms.iter().map(|a| format!("{:?}{}{}", a.kind, if a.ends { "·end" } else { "" }, a.steps)).collect();
             let r: Vec<String> = g.corners.iter().map(|c| format!("{:.1}{}", c.radius, if c.concave { "" } else { "v" })).collect();
@@ -667,27 +669,6 @@ mod tests {
     fn deterministic() {
         let (a, b) = (build(&net()), build(&net()));
         assert_eq!(a, b);
-    }
-
-    #[test]
-    fn town_corners_have_the_kerb_radius() {
-        let n = net();
-        let g = build(&n).into_iter().find(|g| g.pos == Vec2::ZERO).unwrap();
-        assert_eq!(g.arms.len(), 4);
-        for c in &g.corners {
-            assert!(c.concave);
-            assert!((c.radius - (TOWN_KERB_R - OVERHANG)).abs() < 1e-3, "{}", c.radius);
-            // The arc's centre sits on the kerb fillet's: every point of it at the drawn edge's
-            // radius from (±(5.5 + 7), ±(5.5 + 7)).
-            let mid = c.pts[c.pts.len() / 2];
-            let k = RoadKind::Street.width() * 0.5 + TOWN_KERB_R;
-            let centre = Vec2::new(k * mid.x.signum(), k * mid.y.signum());
-            for p in &c.pts[1..c.pts.len() - 1] {
-                assert!((p.distance(centre) - c.radius).abs() < 0.05, "{p} {}", p.distance(centre));
-            }
-        }
-        // Mouths just past the fillet's tangent (5.5 + 7 = 12.5 m → 14 m).
-        assert!(g.arms.iter().all(|a| a.steps == 7), "{:?}", g.arms.iter().map(|a| a.steps).collect::<Vec<_>>());
     }
 
     #[test]

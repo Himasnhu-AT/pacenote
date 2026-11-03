@@ -113,7 +113,7 @@ pub fn specs(net: &RoadNet) -> Vec<EventData> {
         id += 1;
     };
     // Rallies: each forest road, end to end (phase 5 chains them across junctions).
-    for (k, (ri, r)) in net.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::Forest).enumerate() {
+    for (k, (ri, r)) in net.roads.iter().enumerate().filter(|(_, r)| r.kind == RoadKind::Forest && r.road.length() > 1_500.0).enumerate() {
         let from = (16.0 / STEP) as usize;
         push(format!("{} rally", RALLY_NAMES[k % RALLY_NAMES.len()]), EventKind::Rally, ri, from, r.road.len() - 1 - from);
     }
@@ -380,8 +380,8 @@ mod tests {
     fn events_from_the_network() {
         let net = super::super::roads::generate(super::super::SEED);
         let ev = list(&net);
-        assert!(ev.iter().filter(|e| e.kind == EventKind::Rally).count() >= 3);
-        assert_eq!(ev.iter().filter(|e| e.kind == EventKind::Lap).count(), 1);
+        assert!(ev.iter().filter(|e| e.kind == EventKind::Rally).count() >= 2);
+        assert!(ev.iter().any(|e| e.name == "Hillclimb"), "a tarmac hillclimb");
         for (k, e) in ev.iter().enumerate() {
             assert_eq!(e.id, FIRST_ID + k as u32, "ids in order");
             assert!(e.route.length() > 800.0, "{} is {} m", e.name, e.route.length());
@@ -390,8 +390,6 @@ mod tests {
                 assert!(net.nearest(Vec2::new(p.x, p.z), 1.0).is_some(), "{} leaves the roads at {p}", e.name);
             }
         }
-        let lap = ev.iter().find(|e| e.kind == EventKind::Lap).unwrap();
-        assert!(lap.route.pts[0].distance(*lap.route.pts.last().unwrap()) < 0.1, "a lap ends where it starts");
         assert!(!stage::corners(&ev[0].route).is_empty(), "a rally has corners for the pace notes");
         // Deterministic.
         let again = list(&net);

@@ -63,16 +63,16 @@ Ticked as each step lands on main (commit in brackets).
 - [x] 2.4 Tests: 110 km/h 4° brush keeps speed, 90° hit stops, end = post, above = passes
 
 ### Phase 3: terrain and road network
-- [ ] 3.1 Terrain: zones (valley 80-120 m, basin 140-240, escarpment 180-380, plateau 380-480), river valley, domain-warped ridges
-- [ ] 3.2 Droplet hydraulic erosion (bake time, deterministic) + moisture map
-- [ ] 3.3 Points of interest: village, service park, logging camp, quarry, radio tower, river crossings
-- [ ] 3.4 Anisotropic A* (10 m grid, headings; grade 4% target / 14% max, cross-slope, turning) with switchbacks
-- [ ] 3.5 Path to centreline: smoothing that keeps 7-12 m hairpins; road heights from the land with grade limit, crests kept
-- [ ] 3.6 Road kinds and widths: village lane, B-road 6-7 m, fast gravel 4.2-5 m, forest 3.0-3.8 m; no dead ends (turnaround loops)
-- [ ] 3.7 Network: B-road along the river, tarmac hillclimb, gravel basin loop, forestry escarpment, mountain pass, logging loops
-- [ ] 3.8 Valley village (80-120 buildings along the roads) and service park yard
-- [ ] 3.9 Traffic on the new kinds (B-road and village only), spawn in the service park
-- [ ] 3.10 Re-bake the level, editor live-edit still works (base terrain kept for reshaping), docs
+- [x] 3.1 Terrain: zones (valley 80-120 m, basin 140-240, escarpment 180-380, plateau 380-480), river valley, domain-warped ridges
+- [x] 3.2 Droplet hydraulic erosion (bake time, deterministic) + moisture map
+- [x] 3.3 Points of interest: village, service park, logging camp, quarry, radio tower, river crossings
+- [x] 3.4 Anisotropic A* (10 m grid, headings; grade 4% target / 14% max, cross-slope, turning) with switchbacks
+- [x] 3.5 Path to centreline: smoothing that keeps 7-12 m hairpins; road heights from the land with grade limit, crests kept
+- [x] 3.6 Road kinds and widths: village lane, B-road 6-7 m, fast gravel 4.2-5 m, forest 3.0-3.8 m; no dead ends (turnaround loops)
+- [x] 3.7 Network: B-road along the river, tarmac hillclimb, gravel basin loop, forestry escarpment, mountain pass, logging loops
+- [x] 3.8 Valley village (80-120 buildings along the roads) and service park yard
+- [x] 3.9 Traffic on the new kinds (B-road and village only), spawn in the service park
+- [x] 3.10 Re-bake the level, editor live-edit still works (base terrain kept for reshaping), docs
 
 ### Phase 4: cross-section and grip
 - [ ] 4.1 Crown (+6-10 cm) in the road profile, mesh and car ground
@@ -110,4 +110,9 @@ Ticked as each step lands on main (commit in brackets).
   Fixed on the way: `Road::from_centreline` had its curvature sign backwards (+ was right), so
   open-world calls were mirrored and its default banking leaned out of corners.
 - Phase 2: done for buildings. `vehicle::Wall` segments (`Ground::walls`, `open::walls::WallGrid`); facades are one wall per side, rows of shops joined. A 4° brush at 110 km/h keeps 97 % of its speed. Parapets and barriers still to add.
-- Phase 3: in progress.
+- Phase 3: done. `open::land` (zones, river, gully, ridged noise, 600k-droplet erosion, moisture),
+  `open::plan` (places, anisotropic A* with soft grade limit, arrival heading, untangling),
+  `open::roads` rewritten (kinds `Street`/`BRoad`/`Gravel`/`Forest`, 9 roads, ~29.5 km, no dead
+  ends, tightest hairpin 8.1 m), valley village + service park (110 buildings), traffic on the
+  tarmac only, level re-baked. The logging *loop* became a camp-to-hillclimb track (a loop on
+  the escarpment kept crossing its own road).

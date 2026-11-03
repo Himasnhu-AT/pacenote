@@ -57,10 +57,10 @@ What the level holds (`src/open/level.rs`):
 
 | Entity | Components | Is |
 |---|---|---|
-| `road N (kind)` | `Spline`, `RoadSpline { kind, speed_kmh }` | a road. Control points where needed (every station within 10 cm sideways, 3 cm in height of the curve); `tags` = surface + kind (`data::tags`), `bank` = roll in radians. Loading samples it every 2 m. Roads are numbered in stable-id order (events and grades use the number). |
+| `road N (kind)` | `Spline`, `RoadSpline { kind, speed_kmh }` (kinds `Street`, `BRoad`, `Gravel`, `Forest`) | a road. Control points where needed (every station within 10 cm sideways, 3 cm in height of the curve); `tags` = surface + kind (`data::tags`), `bank` = roll in radians. Loading samples it every 2 m. Roads are numbered in stable-id order (events and grades use the number). |
 | `open world` | `WorldDoc { data, terrain }` | seed, town height, time of day, events (road, start/finish station), town lots; the terrain folder |
 | `home`, `event start: …`, grade notes | `HomePoint`, `EventStart`, `GradeNote` | the placeables (`placeable.rs`): moved in the editor, snapped to the road on load |
-| `house 12`, `shop 40`, … | `Building` | one building each (617): kind, size, floors, storey height, roof, colours; its Transform places it. The game builds its mesh as a child |
+| `house 12`, `shop 40`, … | `Building` | one building each (110): kind, size, floors, storey height, roof, colours; its Transform places it. The game builds its mesh as a child |
 | `Trees`, `Dressing` | `Foliage`, `PcgOverrides`, `PcgFollowTerrain` | hand edits of the trees and of the rocks / bushes; the game puts the `PcgVolume` on them |
 
 Edit it with the game's own binary: `cargo run -- --editor --level assets/levels/open.level.ron`
@@ -83,6 +83,14 @@ terrain), so an edited level starts fresh boards. Dev command `open.check` lists
 than 5 cm off the live ground.
 
 Re-bake (throws away every edit): `cargo run -- --bake-world assets/levels/open.level.ron`.
+
+## Since 3 Nov 2026: terrain first
+
+The world described above (town grid, ring, spokes) was replaced by a terrain-first sim-rally
+map: eroded land with a river valley, escarpment, basin and plateau, roads planned across it by
+an anisotropic A* (switchbacks, 8-10 m hairpins, rally widths), a valley village and service
+park, traffic on the tarmac only. See `docs/RALLY_MAP.md` (plan, checklist) and section 4 of
+`docs/GAME_OVERVIEW.md` (the map as it is).
 
 ## Phases
 

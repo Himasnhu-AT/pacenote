@@ -82,6 +82,12 @@ pub fn limit(kind: RoadKind) -> f32 {
     }
 }
 
+/// Traffic drives the tarmac (the B-road and the village lanes); the gravel and forest roads
+/// are single-track rally roads with no room for two lanes.
+pub fn carries_traffic(kind: RoadKind) -> bool {
+    matches!(kind, RoadKind::BRoad | RoadKind::Street)
+}
+
 /// Lane centre's distance from the road's centreline (m).
 pub fn lane_offset(kind: RoadKind) -> f32 {
     match kind {
@@ -244,6 +250,12 @@ impl LaneGraph {
         type Raw = (Vec2, Vec<(usize, usize)>, bool);
         let mut nodes: Vec<Raw> = Vec::new();
         for j in &net.junctions {
+            let arms: Vec<(usize, usize)> = j.roads.iter().copied().filter(|(r, _)| carries_traffic(net.roads[*r].kind)).collect();
+            // Where only one traffic road is left: nothing to stop for mid-road; at its end the
+            // dead-end pass below turns cars round.
+            if arms.len() < 2 {
+                continue;
+            }
             let k = match nodes.iter().position(|(p, _, _)| p.distance(j.pos) < MERGE) {
                 Some(k) => k,
                 None => {
@@ -251,7 +263,7 @@ impl LaneGraph {
                     nodes.len() - 1
                 }
             };
-            for rs in &j.roads {
+            for rs in &arms {
                 if !nodes[k].1.contains(rs) {
                     nodes[k].1.push(*rs);
                 }
@@ -265,7 +277,7 @@ impl LaneGraph {
             }
         }
         for (r, nr) in net.roads.iter().enumerate() {
-            if nr.closed {
+            if nr.closed || !carries_traffic(nr.kind) {
                 continue;
             }
             let last = nr.road.len() - 1;
@@ -296,6 +308,9 @@ impl LaneGraph {
         let mut lanes: Vec<Lane> = Vec::new();
         let mut arms: Vec<Vec<Arm>> = vec![Vec::new(); nodes.len()];
         for (r, nr) in net.roads.iter().enumerate() {
+            if !carries_traffic(nr.kind) {
+                continue;
+            }
             let road = &nr.road;
             let n = road.len();
             let st = &stops[r];
@@ -1435,7 +1450,8 @@ mod tests {
     fn every_lane_goes_somewhere() {
         let (net, g) = world();
         let roads = g.lanes.iter().filter(|l| !l.is_turn()).count();
-        assert!(roads >= 2 * net.roads.len(), "{roads} road lanes for {} roads", net.roads.len());
+        let busy = net.roads.iter().filter(|r| carries_traffic(r.kind)).count();
+        assert!(roads >= 2 * busy, "{roads} road lanes for {busy} roads with traffic");
         for (i, l) in g.lanes.iter().enumerate() {
             assert!(!l.next.is_empty(), "lane {i} ({:?}) is a dead end", l.kind);
             assert!(l.length() > 1.0, "lane {i} is {} m", l.length());
@@ -1447,8 +1463,9 @@ mod tests {
         }
         // Dead ends turn round; junctions don't.
         let dead = g.nodes.iter().filter(|n| n.dead_end).count();
-        let forest = net.roads.iter().filter(|r| r.kind == RoadKind::Forest).count();
-        assert_eq!(dead, forest, "one dead end per forest road");
+        // Tarmac ends where gravel starts: the hillclimb's top (the mountain pass) and the
+        // valley road's east end (the basin road). Cars turn round there.
+        assert_eq!(dead, 2, "dead ends where the tarmac stops");
         for l in &g.lanes {
             if let LaneKind::Turn { node, turn, .. } = l.kind {
                 assert_eq!(turn == Turn::UTurn, g.nodes[node as usize].dead_end, "U-turns only at dead ends");
@@ -1479,15 +1496,14 @@ mod tests {
         for (i, l) in g.lanes.iter().enumerate() {
             assert!(f[i] && b[i], "lane {i} ({:?}) is cut off", l.kind);
         }
-        // Junction types: town crossroads have straight, left and right.
-        let centre = g.nodes.iter().find(|n| n.pos.length() < 1.0).expect("a node at the town centre");
-        let kinds: Vec<Turn> = centre.turns.iter().map(|&t| match g.lanes[t as usize].kind {
+        // Junction types: a T on the B-road has straight, left and right.
+        let tee = g.nodes.iter().find(|n| n.turns.len() == 6).expect("a T junction");
+        let kinds: Vec<Turn> = tee.turns.iter().map(|&t| match g.lanes[t as usize].kind {
             LaneKind::Turn { turn, .. } => turn,
             _ => unreachable!(),
         }).collect();
-        assert_eq!(kinds.len(), 12);
         for t in [Turn::Straight, Turn::Left, Turn::Right] {
-            assert_eq!(kinds.iter().filter(|k| **k == t).count(), 4, "{t:?}");
+            assert_eq!(kinds.iter().filter(|k| **k == t).count(), 2, "{t:?}");
         }
     }
 
