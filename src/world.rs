@@ -467,7 +467,7 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     };
     // Editor sculpts of a level's terrain are saved back to its files with the level.
     let terrain_dir = s.open.as_ref().and_then(|o| o.terrain_dir.clone());
-    world.insert_resource(engine::world::TerrainSaveTarget { dir: terrain_dir, dirty: false });
+    world.insert_resource(engine::world::TerrainSaveTarget { dir: terrain_dir, heights_dirty: false, splat_dirty: false });
     if let Err(e) = engine::world::desc::spawn_world_with(world, desc, Some((*s.heights).clone())) {
         error!("terrain: {e}");
     }

@@ -413,8 +413,8 @@ fn hash_bytes(h: &mut crate::meta::board::Hasher, bytes: &[u8]) {
 }
 
 /// Reads the open world from the level at `path`: world data ([`from_level`]) and terrain
-/// heights. The terrain folder is looked for next to the level, then (for the editor's Play
-/// copy of a level, written elsewhere) next to the shipped level.
+/// heights. The terrain folder is looked for next to the level, then next to the level the
+/// editor's Play copied it from (`--level-origin`), then next to the shipped level.
 pub fn load(path: &Path) -> Result<Loaded, String> {
     let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
     if size > MAX_LEVEL_BYTES {
@@ -428,10 +428,15 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
     if name.is_empty() || name.contains("..") || Path::new(&name).is_absolute() {
         return Err(format!("terrain folder {name:?}"));
     }
-    let mut dir = terrain_dir(path, &name);
-    if !dir.join("terrain.ron").exists() {
-        dir = terrain_dir(&source_default(), &name);
-    }
+    // Next to the level; for the editor's Play copy (written elsewhere), next to the level it
+    // was copied from (`--level-origin`); else next to the shipped level.
+    let origin = engine::cli::arg_value("level-origin").or_else(|| std::env::var("EDITOR_LEVEL_ORIGIN").ok()).map(PathBuf::from);
+    let dir = [Some(path.to_path_buf()), origin, Some(source_default())]
+        .into_iter()
+        .flatten()
+        .map(|l| terrain_dir(&l, &name))
+        .find(|d| d.join("terrain.ron").exists())
+        .unwrap_or_else(|| terrain_dir(path, &name));
     let heights = TerrainData::load(&dir).and_then(|t| t.to_heightfield()).map_err(|e| format!("terrain {}: {e:?}", dir.display()))?;
     let mut overrides = |kind: Foliage| world.query::<(&Foliage, &PcgOverrides)>().iter(world).find(|(f, _)| **f == kind).map(|(_, o)| o.clone()).unwrap_or_default();
     let (trees, dressing) = (overrides(Foliage::Trees), overrides(Foliage::Dressing));

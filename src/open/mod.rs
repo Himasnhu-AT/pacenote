@@ -105,7 +105,8 @@ impl OpenWorld {
             })
         }) {
             Ok(o) => {
-                bevy::log::info!("open world: {} in {:.2} s", path.display(), t.elapsed().as_secs_f32());
+                let terrain = o.terrain_dir.as_deref().map(|d| d.display().to_string()).unwrap_or_default();
+                bevy::log::info!("open world: {} (terrain {terrain}) in {:.2} s", path.display(), t.elapsed().as_secs_f32());
                 o
             }
             Err(e) => {
