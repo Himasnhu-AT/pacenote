@@ -11,10 +11,14 @@ ABSENT; GDD UI requirements ABSENT (owner's brief used instead); `design/ux/inte
 ABSENT (no pattern library: every pattern below is new and listed in §7.5); `design/accessibility-requirements.md`
 ABSENT, so **no committed tier**. Assumed tier: Standard (focus order, contrast, no colour-only signals).
 
-**Names (ours, original).** The festival is the **Valley Gathering**. The hub is the **Service
-Park**. Money is **marks** (`Mk 12 400`). Points for driving with flair are **style**. A run of
-linked tricks is a **streak**. Profile level is the **driver grade** (Grade 1–30, earned with
-style). Activities score 1–3 **pips** (◆◆◇): diamond plates like the rally-plate yellow, filled
+> **Superseded names:** `DECISIONS.md` in this folder overrides this doc. Names below were
+> updated to the canonical ones (Notes, Rhythm, Valley Trials, Saker R5, stars); its rulings on
+> Rhythm scoring (S1), settings and file ownership win over §3.1, §5 and §7 here.
+
+**Names (ours, original).** The festival is the **Valley Trials**. The hub is the **Service
+Park**. Money is **Notes** (`12,400 N`). Points for driving with flair are **style**. A run of
+linked tricks is a **Rhythm**. Profile level is the **driver grade** (Grade 1–30, earned with
+style). Activities score 1–3 **stars** (★★☆): in rally-plate yellow, filled
 or hollow, so the shape tells you the result as well as the colour.
 
 **Look rules (all screens).** Keep the existing theme (`meta::screens::theme`): night-forest
@@ -29,14 +33,14 @@ afford." They arrive from boot (cold), from an event's results, or from "Quit to
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
-│ PACENOTE · VALLEY GATHERING           GRADE 7 ▰▰▰▰▰▱▱  2 340/4 000   Mk 48 250 │ top bar
+│ PACENOTE · VALLEY TRIALS           GRADE 7 ▰▰▰▰▰▱▱  2 340/4 000   48,250 N  │ top bar
 │───────────────────────────────────────────────────────────────────────────────│
 │  DRIVE ───────────                                                            │
 │  ▌CONTINUE              Free roam · Mill Lane                                 │
-│   EVENTS                12 / 31 ◆                [ live 3D: Talus on a gravel │
+│   EVENTS                12 / 31 ★                [ live 3D: Saker R5 on a gravel │
 │   DRIVE TOGETHER                                   plinth, floodlit service   │
 │  CAR ─────────────                                 tent, slow 40 s orbit ]    │
-│   GARAGE                Talus #27                                             │
+│   GARAGE                Saker R5 #27                                             │
 │   UPGRADES              2 parts affordable                                    │
 │   DEALERSHIP            1 new car                                             │
 │  YOU ─────────────                       ┌ ROUTE CARD (focused item) ───────┐ │
@@ -57,9 +61,9 @@ afford." They arrive from boot (cold), from an event's results, or from "Quit to
 - **Right-hand meta** per item (muted, SIZE_BODY): the item's most useful number. It is never
   blank: when the source is absent it shows nothing rather than "0".
 - **Route card** (bottom right; replaces `crew_card`): what the focused item does and the next step
-  ("Upgrades: Gravel dampers Mk 6 000, you have Mk 48 250"). Rebuilt on focus change.
+  ("Upgrades: Gravel dampers 6,000 N, you have 48,250 N"). Rebuilt on focus change.
 - **Top bar**: festival name left; grade with a 7-segment bar (filled vs hollow) and the xp as
-  numbers; marks right. When marks change since the last visit, the number counts up over 0.6 s
+  numbers; Notes right. When Notes change since the last visit, the number counts up over 0.6 s
   (instant with reduce motion).
 - **Background: live 3D showroom, not a world flyover.** Decision: the open world takes a full
   loading screen to build (§2), so a flyover behind the menu would put that load on every boot. A
@@ -68,13 +72,13 @@ afford." They arrive from boot (cold), from an event's results, or from "Quit to
   camera orbiting at 9°/s, 6 m out, 1.1 m high. The same scene serves Garage, Upgrades and
   Dealership with different camera framings. The menu first draws with the current 2D contour
   backdrop, and the diorama fades in over 0.5 s once the scene is ready and two frames are drawn
-  (pipelines compile behind the 2D backdrop, so the macOS first-draw stall is never shown).
+  (starelines compile behind the 2D backdrop, so the macOS first-draw stall is never shown).
   Reduce motion: the orbit stops at a 3/4 front view.
 - **Navigation.** Keyboard: ↑/↓ (W/S) move focus and wrap; Enter selects; Esc does nothing on the
   hub (Quit is an item). Gamepad: d-pad or stick, Ⓐ, Ⓑ. Q/E or LB/RB jump to the next or previous
   section's first item. Mouse: hover focuses, click selects. Focus order: Continue → … → Quit →
   Credits. On return from a sub-screen, focus goes back to the item that opened it.
-- **Quit** opens a confirm ("Quit to desktop?", focus on **Stay**). Nothing is unsaved: marks and
+- **Quit** opens a confirm ("Quit to desktop?", focus on **Stay**). Nothing is unsaved: Notes and
   progress are saved when they change.
 - **Transitions.** Hub ↔ sub-screen: the list slides 24 px and fades over 160 ms, and the showroom
   camera eases to the screen's framing over 0.6 s (cubic in-out). Reduce motion: the list cuts
@@ -82,7 +86,7 @@ afford." They arrive from boot (cold), from an event's results, or from "Quit to
 
 ### 1.1 Events screen
 A list grouped by kind (Rallies, Sprints, Laps, Races vs AI, Activities). Each row: glyph, name,
-length, best time or score, pips ◆◆◇, reward. A filter by kind is Q/E. A details panel (right)
+length, best time or score, stars ★★☆, reward. A filter by kind is Q/E. A details panel (right)
 shows the route map preview (`StageCatalog::preview`), conditions and the leaderboard top 3.
 Enter = **Drive there**: loads free roam with the car at the event start and the route set.
 Tab = leaderboard (existing "boards"). Empty state (no events known yet): "Events appear as you
@@ -99,9 +103,9 @@ Keep the current structure (map bleeding off the right edge, text column left) a
 │ Moor · gravel 81%, tarmac 19% · 11.4 km                 │   accent, start ●   │
 │                                                         │   finish ▣, fades   │
 │ ┌ BRIEFING ──────────────────────┐                      │   in when ready     │
-│ │ Your best  6:42.31   ◆◆◇        │                      │                     │
+│ │ Your best  6:42.31   ★★☆        │                      │                     │
 │ │ Leader     6:30.05  (Moss&Kit)  │                      │                     │
-│ │ Reward     Mk 2 500 · +600 xp   │                      │                     │
+│ │ Reward     2,500 N  · +600 xp   │                      │                     │
 │ │ Opponents  5 AI · you start P6  │ (races only)         │                     │
 │ └─────────────────────────────────┘                      │                     │
 │ TIP 2/6  The handbrake helps the car rotate into hairpins.    ‹ ›            │
@@ -111,9 +115,9 @@ Keep the current structure (map bleeding off the right edge, text column left) a
 ```
 
 - **Content.** Kicker with kind glyph and conditions; event name (display, existing sizes);
-  facts line (exists); briefing card (best, leader, reward, opponents, pips); the route map (the
+  facts line (exists); briefing card (best, leader, reward, opponents, stars); the route map (the
   worker-drawn contour map exists; draw the event route on it in accent). Free roam: the card
-  shows grade, marks, "Parked at Mill Lane", and 3 nearest unfinished activities.
+  shows grade, Notes, "Parked at Mill Lane", and 3 nearest unfinished activities.
 - **Progress uses the real phases** from `loading.rs`: Generate "Surveying the roads", Build
   "Building terrain and road", Warm "Preparing scenery and shaders", Settle "Final checks", shown
   as `n/4`. The bar keeps its rule that it only rises; Warm's share follows `pcg_progress` and
@@ -137,12 +141,12 @@ events are quieter than free roam.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
-│ P2/6  ▲1        ┌ SPEED ZONE · Kiln Straight ─┐               Mk 48 250 (+750) │
-│ ▲ Rook  +1.4    │ AVG 128 km/h  ◆140 ◆155 ◆170│               [damage panel]   │
+│ P2/6  ▲1        ┌ SPEED ZONE · Kiln Straight ─┐               48,250 N  (+750) │
+│ ▲ Rook  +1.4    │ AVG 128 km/h  ★140 ★155 ★170│               [damage panel]   │
 │ ▼ Vale  −0.8    │ ██████████░░░░░░  0.6 km    │                                │
 │ LAP 2/3         └─────────────────────────────┘                                │
 │                         (central 50% × 50%: no HUD)                             │
-│                                                          ┌ STREAK ×3 ──────┐   │
+│                                                          ┌ RHYTHM ×3 ──────┐   │
 │                                                          │ 2 480           │   │
 │                                                          │ DRIFT    +1 120 │   │
 │                                                          │ AIR 1.4s   +640 │   │
@@ -152,34 +156,34 @@ events are quieter than free roam.
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.1 Style streak (bottom right, above the speedo plate)
+### 3.1 Style Rhythm (bottom right, above the speedo plate)
 - **Tricks and base points:** Drift (angle > 15° at > 40 km/h, points per second ∝ angle × speed),
   Air (airtime > 0.4 s; bonus for a level landing), Speed (> 150 km/h held, per second), Near miss
   (traffic or AI within 1.2 m at > 80 km/h), Clean landing, Overtake (races), Clearing (snapping a
-  marker post or sign; small, capped at 5 per streak). The sim emits them; the HUD only shows them.
+  marker post or sign; small, capped at 5 per Rhythm). The sim emits them; the HUD only shows them.
 - **Stacking:** up to 4 lines, newest on top; a repeat of the same trick updates its line in place
   (`DRIFT +1 120` keeps counting) instead of adding one. Older lines past 4 collapse into the
   total. Each new line slides in from the right 12 px over 120 ms.
-- **Multiplier:** ×1 at the start; +1 for each *different* trick in the streak, up to ×5. Shown in
-  the header (`STREAK ×3`), 1.0 → 1.15 → 1.0 scale bump on change (none with reduce motion).
+- **Multiplier:** ×1 at the start; +1 for each *different* trick in the Rhythm, up to ×5. Shown in
+  the header (`RHYTHM ×3`), 1.0 → 1.15 → 1.0 scale bump on change (none with reduce motion).
 - **Bank timer:** the bar under the lines empties over 2.5 s; any trick refills it. When it runs
-  out the streak **banks**: the header becomes `BANKED ✓ 7 440` in `good` for 0.8 s, then the
-  panel fades and the number flies to the top-right marks/xp chip (0.4 s; just fades with reduce
+  out the Rhythm **banks**: the header becomes `BANKED ✓ 7 440` in `good` for 0.8 s, then the
+  panel fades and the number flies to the top-right Notes/xp chip (0.4 s; just fades with reduce
   motion). A hit over the damage threshold, a recover, or 3 s standing still **loses** it:
   `LOST ✕` in `bad`, the total struck through, shake 4 px for 0.2 s (none with reduce motion).
   Glyph and word always go with colour.
-- **Conversion:** banked style → xp 1:1; marks = style ÷ 10 (rounded to 10). In timed events
+- **Conversion:** banked style → xp 1:1; Notes = style ÷ 10 (rounded to 10). In timed events
   style still banks, but the panel is **compact**: only the header line, no trick lines.
 
 ### 3.2 Activities (top centre)
-- **Approach card** (within 200 m, ahead ±45°): `⊢ SPEED TRAP · Mill Lane · best 142 ◆◆◇ ·
-  next ◆ 155` for 4 s or until entered. One at a time; the nearest wins. Activities start by
+- **Approach card** (within 200 m, ahead ±45°): `⊢ SPEED TRAP · Mill Lane · best 142 ★★☆ ·
+  next ★ 155` for 4 s or until entered. One at a time; the nearest wins. Activities start by
   driving through; there is no stop-to-start (that stays for events, `coach` prompt).
-- **Live readout:** trap = speed at the gate; zone = average speed with pip ticks on the bar; drift
-  zone = zone score with ticks; jump = distance shown on landing. Ticks are notches with the pip
+- **Live readout:** trap = speed at the gate; zone = average speed with star ticks on the bar; drift
+  zone = zone score with ticks; jump = distance shown on landing. Ticks are notches with the star
   value printed, so position as well as colour shows the target.
-- **Result card** (same slot, 3.5 s): the value large, pips filling left to right 150 ms apart,
-  `NEW BEST` tag (text, accent outline), reward `+Mk 400`. Not modal; driving continues.
+- **Result card** (same slot, 3.5 s): the value large, stars filling left to right 150 ms apart,
+  `NEW BEST` tag (text, accent outline), reward `+400 N`. Not modal; driving continues.
 
 ### 3.3 Races vs AI (top left)
 `P2/6` in display 64, then ▲/▼ with the change since the last checkpoint, then the car ahead and
@@ -187,8 +191,8 @@ behind with name and gap in seconds (updated at each split, not every frame), `L
 The event clock stays in the bottom-left plate. The controls card (top left) is never shown in a
 race. Finish: the results screen gets a positions table (exists for times; add AI rows).
 
-### 3.4 Marks, damage, toasts (top right)
-Marks chip shows in free roam only: for 4 s after any change, then hides. Damage panel moves
+### 3.4 Notes, damage, toasts (top right)
+Notes chip shows in free roam only: for 4 s after any change, then hides. Damage panel moves
 below it when both show. Grade up, car bought and part fitted use the engine `Toast` (top right,
 3 s). Big moments are never centre-screen pop-ups.
 
@@ -199,13 +203,13 @@ accent → white at the shift point (2 Hz, off with reduce motion) as well as th
 ### 3.6 HUD states and priority
 | Context | Shown | Hidden |
 |---|---|---|
-| Free roam | speedo, minimap, streak, activity cards, marks chip (on change), damage | stage plate |
-| Timed event | speedo, stage plate, compact streak, damage | minimap, activity cards, marks chip |
+| Free roam | speedo, minimap, Rhythm, activity cards, Notes chip (on change), damage | stage plate |
+| Timed event | speedo, stage plate, compact Rhythm, damage | minimap, activity cards, Notes chip |
 | Race | as timed event + position block | controls card |
 | Paused / map / menus | nothing (`hide_under_screens`) | all |
 
-Priority: MUST KEEP speedo, clock, position; SHOULD KEEP damage, minimap; CAN HIDE streak,
-activity cards, marks (each has a HUD setting, §5). Budget: at most 6 groups on screen, ≤ 18% of
+Priority: MUST KEEP speedo, clock, position; SHOULD KEEP damage, minimap; CAN HIDE Rhythm,
+activity cards, Notes (each has a HUD setting, §5). Budget: at most 6 groups on screen, ≤ 18% of
 the screen area.
 
 ### 3.7 Colour, size, contrast, safe area
@@ -222,13 +226,13 @@ All three: list left (focusable rows, scrolls via `ScrollList`), car in the show
 stats panel right, footer hints. Back returns to the hub item that opened it.
 
 ```
-┌ UPGRADES · Talus #27 ─────────────────────────────────────── Mk 48 250 ┐
-│ ENGINE     ▸ Street ✓  Gravel ✓  Works  Mk 14 000        POWER   ▰▰▰▰▰▰▱▱ (+1) │
-│ GEARBOX      Street ✓  Gravel    Mk 6 000                GRIP    ▰▰▰▰▰▱▱▱       │
-│ DAMPERS      Street ✓  Gravel    Mk 6 000   [3D car]     BRAKES  ▰▰▰▰▱▱▱▱       │
+┌ UPGRADES · Saker R5 #27 ─────────────────────────────────────── 48,250 N  ┐
+│ ENGINE     ▸ Street ✓  Gravel ✓  Works  14,000 N         POWER   ▰▰▰▰▰▰▱▱ (+1) │
+│ GEARBOX      Street ✓  Gravel    6,000 N                 GRIP    ▰▰▰▰▰▱▱▱       │
+│ DAMPERS      Street ✓  Gravel    6,000 N    [3D car]     BRAKES  ▰▰▰▰▱▱▱▱       │
 │ TYRES        Street ✓  Gravel ✓  Works ✓                 WEIGHT  1 230 kg (−40) │
-│ BRAKES       Street ✓  Gravel    Mk 5 500                CLASS   B 512 → B 540  │
-│ WEIGHT       Street    Mk 4 000                                                 │
+│ BRAKES       Street ✓  Gravel    5,500 N                 CLASS   B 512 → B 540  │
+│ WEIGHT       Street    4,000 N                                                  │
 │ Times on upgraded cars go on the class's own leaderboard.                       │
 │ ⏎/Ⓐ Fit   ←/→ Level   Esc/Ⓑ Back                                               │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -239,12 +243,12 @@ stats panel right, footer hints. Back returns to the hub item that opened it.
 - **Garage:** owned cars, Drive (sets the active car), Paint (6 swatches: runtime tint of the
   paint material; full livery changes need the offline build, so out of scope), number 1–99.
 - **Dealership:** cars with price, class, the three stats. Not-yet-built cars show as a dimmed
-  silhouette marked "Coming". Empty state (only Talus exists today): one row "More cars arrive
-  as the Gathering grows" and Talus marked Owned.
+  silhouette marked "Coming". Empty state (only Saker R5 exists today): one row "More cars arrive
+  as the Valley Trials grows" and Saker R5 marked Owned.
 - **Confirm purchase** (modal, scrim 0.6):
-  `Buy Gravel dampers?  Mk 6 000 · balance after Mk 42 250   [ Buy ] [ Cancel ]`. Focus starts
-  on **Buy** (it is a deliberate second press). Not enough marks: Buy is disabled and the line
-  reads "Need Mk 3 200 more"; the row shows the price in `bad` with a lock glyph. Save failure:
+  `Buy Gravel dampers?  6,000 N· balance after 42,250 N [ Buy ] [ Cancel ]`. Focus starts
+  on **Buy** (it is a deliberate second press). Not enough Notes: Buy is disabled and the line
+  reads "Need 3,200 N more"; the row shows the price in `bad` with a lock glyph. Save failure:
   toast "Couldn't save. Your purchase is undone." and the balance rolls back.
 - Showroom framings: Garage 3/4 front at 5 m; Upgrades low side at 4 m, the camera nudges toward
   the part (wheel for tyres, nose for engine); Dealership swaps the car on the plinth with a 0.3 s
@@ -261,8 +265,8 @@ stats panel right, footer hints. Back returns to the hub item that opened it.
 | Camera | Field of view | moved from Video (`fov_deg`) | same key |
 | Camera | Camera shake | moved from accessibility (`camera_shake`) | same key |
 | Video | Motion blur | Choice: Off / Low / High | Bevy `MotionBlur` on the 3D camera; Off by default |
-| HUD | Style streak | Choice: Full / Compact / Off | |
-| HUD | Activity cards / Race positions / Marks | Toggles | |
+| HUD | Style Rhythm | Choice: Full / Compact / Off | |
+| HUD | Activity cards / Race positions / Notes | Toggles | |
 | HUD | HUD safe area | Slider 0–5% | |
 | HUD | Units | exists (`units`) | km/h / mph; also used for zone targets |
 
@@ -273,7 +277,7 @@ framing at the chosen distance.
 - **Text size:** the engine's `text_scale` (RemSize) and UI scale both apply to all new screens;
   layouts are flex columns that grow, with long names wrapping to two lines, never clipped.
 - **Colourblind:** the engine's filter works on the whole frame; on top, no meaning by colour
-  alone: kinds = glyphs, pips = filled/hollow, bank/lose = ✓/✕ + word, position = ▲/▼, rev bar =
+  alone: kinds = glyphs, stars = filled/hollow, bank/lose = ✓/✕ + word, position = ▲/▼, rev bar =
   segment position, purchase lock = glyph.
 - **Reduce motion** (engine `reduce_motion`): no showroom orbit, no count-ups, no shakes or
   bumps, no slides; fades ≤ 150 ms stay. High contrast swaps the theme (engine) and HUD plates
@@ -299,14 +303,14 @@ panels. Missing: confirm modal, section jump, count-up text, a 3D showroom.
   event" (place the car at the event start, set the route).
 - `src/loading.rs`: briefing card, route line on the map, tip rotation (`TipCycle` resource
   driven in `draw` on real time), `n/4` phase index, "taking longer" line.
-- `src/hud.rs`: shift pulse; marks chip; damage panel offset; HUD safe-area inset.
+- `src/hud.rs`: shift pulse; Notes chip; damage panel offset; HUD safe-area inset.
 - `src/prefs.rs`: new `Prefs` fields and rows (§5), new tabs World and Camera in `layout`.
 - `src/meta/coach.rs`: suppress the controls card in races; the event prompt stays.
 
 ### 7.3 New modules
-- `src/career/` (state, no UI): `wallet.rs` (marks, `career.json` in `DataDir`, atomic save),
+- `src/career/` (state, no UI): `wallet.rs` (Notes, `career.json` in `DataDir`, atomic save),
   `grade.rs` (xp curve), `garage.rs` (owned cars, fitted upgrades, prices, handling deltas).
-- `src/style.rs` (sim side): detects tricks and emits `StyleEvent { kind, points }`; owns streak
+- `src/style.rs` (sim side): detects tricks and emits `StyleEvent { kind, points }`; owns Rhythm
   state (multiplier, timer, bank/lose) and pays the wallet on bank.
 - `src/hud_style.rs`, `src/hud_activity.rs`, `src/hud_race.rs`: read-only views of `style`,
   activities and race state.
@@ -322,21 +326,21 @@ activities and race modules; the UI only reads it and sends requests (`BuyPart`,
 
 ### 7.5 New patterns (for a future `design/ux/interaction-patterns.md`)
 Sectioned hub list with section jump; route card for the focused item; confirm modal (default
-action, disabled reason); count-up number; streak panel (stack, multiplier, bank/lose); approach
-card → live readout → result card; pip rating; stat bar with preview delta.
+action, disabled reason); count-up number; Rhythm panel (stack, multiplier, bank/lose); approach
+card → live readout → result card; star rating; stat bar with preview delta.
 
 ### 7.6 Data, updates, nulls
 | Element | Source (owner) | Updates | Null shows |
 |---|---|---|---|
-| Marks, grade, xp | `career::wallet/grade` | on change | `Mk 0`, Grade 1 |
-| Streak | `style` | per trick / per frame for counting lines | panel hidden |
+| Notes, grade, xp | `career::wallet/grade` | on change | `0 N `, Grade 1 |
+| Rhythm | `style` | per trick / per frame for counting lines | panel hidden |
 | Activity live value | activities module | per frame, text only on change | `—` |
 | Position, gaps | race module | position per frame; gaps per split | `P–/n` |
 | Best/leader in briefing | `Boards` | at screen spawn | "No time yet" |
 | Upgrade prices, stats | `career::garage` | on screen build / purchase | row hidden |
 
 ### 7.7 Localisation limits
-Hub item ≤ 18 chars; right meta ≤ 24; route card ≤ 140; streak trick label ≤ 12; activity name ≤
+Hub item ≤ 18 chars; right meta ≤ 24; route card ≤ 140; Rhythm trick label ≤ 12; activity name ≤
 22 (ellipsis); tip ≤ 120; all layouts allow 40% growth (flex, wrap in cards).
 
 ### 7.8 Acceptance criteria
@@ -346,9 +350,9 @@ Hub item ≤ 18 chars; right meta ≤ 24; route card ≤ 140; streak trick label
    Q/E and LB/RB jump sections; Back returns focus to the opening item.
 3. The loading screen shows the real phase name and `n/4`, the bar never goes down, tips change
    every 7 s, and ←/→ changes the tip.
-4. Drift then jump then near miss shows `STREAK ×3`; 2.5 s idle banks it (`BANKED ✓`, marks rise
-   by style ÷ 10); a heavy hit before that shows `LOST ✕` and no marks change.
-5. Buying with too few marks is impossible and says how many are missing; a purchase updates the
+4. Drift then jump then near miss shows `RHYTHM ×3`; 2.5 s idle banks it (`BANKED ✓`, Notes rise
+   by style ÷ 10); a heavy hit before that shows `LOST ✕` and no Notes change.
+5. Buying with too few Notes is impossible and says how many are missing; a purchase updates the
    top bar and survives a restart.
 6. At 1280×720, UI scale 100%: no HUD text under 15 px, no menu text under 12 px, nothing clipped.
 7. With reduce motion on: no orbit, slide, shake, bump or count-up anywhere.
@@ -360,8 +364,8 @@ Checklists used: 3A for §1, §2, §4, §5 (screens) and 3B for §3 (HUD), becau
 covers both.
 
 **First pass found, all fixed above:** (1) no error states → loading slow/timeout, purchase save
-rollback, empty Events/Dealership; (2) focus order and return focus → §1; (3) marks chip vs damage
-panel both top right → §3.4; (4) streak loss shown by red only → ✕, word, strike; (5) SIZE_TINY at
+rollback, empty Events/Dealership; (2) focus order and return focus → §1; (3) Notes chip vs damage
+panel both top right → §3.4; (4) Rhythm loss shown by red only → ✕, word, strike; (5) SIZE_TINY at
 720p renders at 9 px → minimum sizes in §3.7; (6) upgrades silently split leaderboards → note on the
 Upgrades screen; (7) diorama first-draw stall → fade in when ready; (8) data nulls and update rates →
 §7.6; (9) no localisation limits or acceptance criteria → §7.7–7.8; (10) controls card over the
