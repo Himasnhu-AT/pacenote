@@ -516,7 +516,8 @@ fn cockpit(
 /// roughness, clear coat as built), the tail lamps and the headlamp lenses (emissive as built).
 #[derive(Component, Default)]
 pub struct CarWear {
-    paint: Vec<(Handle<StandardMaterial>, Color, f32, f32)>,
+    /// (material, livery colour as built or as the garage paints it, roughness, clear coat).
+    pub paint: Vec<(Handle<StandardMaterial>, Color, f32, f32)>,
     tail: Vec<(Handle<StandardMaterial>, LinearRgba)>,
     lens: Vec<(Handle<StandardMaterial>, LinearRgba)>,
     /// What the lamps show now: (braking, lights on).

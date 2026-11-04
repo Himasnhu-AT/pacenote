@@ -78,12 +78,33 @@ pub fn ghost_file(stage: u32, team: &str, conditions: &str) -> String {
 /// Hash of everything besides the inputs that decides how a run plays out: the car spec.
 pub fn sim_hash(spec: &Spec, hz: u32) -> String {
     let mut h = Hasher::default();
-    h.str(&format!("{spec:?}"));
+    h.str(&legacy_debug(spec));
+    // Fields added after the hash was first written (DECISIONS E6): only when they differ
+    // from their default, so a stock car's hash (and its ghosts) stays the same.
+    if spec.grip != 1.0 {
+        h.str("grip");
+        h.u64(spec.grip.to_bits() as u64);
+    }
+    if spec.shift_time != vehicle::SHIFT_TIME {
+        h.str("shift_time");
+        h.u64(spec.shift_time.to_bits() as u64);
+    }
     h.u64(hz as u64);
     h.u64(vehicle::SUBSTEPS as u64);
     // Sim revisions that change how the same inputs drive (2: damage, 3: handling).
     h.u64(vehicle::REVISION);
     format!("{:016x}", h.0)
+}
+
+/// `{spec:?}` as it read before `grip` and `shift_time` existed (those two left out).
+fn legacy_debug(spec: &Spec) -> String {
+    let stock = Spec { grip: 1.0, shift_time: vehicle::SHIFT_TIME, ..spec.clone() };
+    let s = format!("{stock:?}");
+    let tail = format!(", grip: {:?}, shift_time: {:?} }}", 1.0f32, vehicle::SHIFT_TIME);
+    match s.strip_suffix(&tail) {
+        Some(head) => format!("{head} }}"),
+        None => s,
+    }
 }
 
 /// The car as `drive::spawn_car` places it on the start line.
@@ -230,6 +251,19 @@ mod tests {
     use crate::stage::Surface;
     use crate::vehicle::Flat;
 
+    #[test]
+    fn a_stock_cars_sim_hash_is_unchanged() {
+        // DECISIONS E6: `Spec.grip` / `Spec.shift_time` exist, but a stock Saker hashes as
+        // before them (this value was printed on main before the fields were added), so
+        // classic-stage ghosts survive.
+        assert_eq!(sim_hash(&Spec::default(), 60), "f9b6949e469cf025");
+        let grippy = Spec { grip: 1.03, ..Spec::default() };
+        let quick = Spec { shift_time: 0.1, ..Spec::default() };
+        assert_ne!(sim_hash(&grippy, 60), sim_hash(&Spec::default(), 60));
+        assert_ne!(sim_hash(&quick, 60), sim_hash(&Spec::default(), 60));
+        assert_ne!(sim_hash(&quick, 60), sim_hash(&grippy, 60));
+    }
+
     fn input_at(i: u32) -> Input {
         Input {
             steer: if (i / 40).is_multiple_of(3) { 0.0 } else { ((i as f32) * 0.031).sin() },
@@ -328,3 +362,4 @@ mod tests {
         assert_ne!(ghost_file(1, "a|b", ""), ghost_file(1, "a|b", "rain-dusk"));
     }
 }
+

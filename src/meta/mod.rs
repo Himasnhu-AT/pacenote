@@ -693,6 +693,10 @@ fn watch_finish(world: &mut World) {
         return;
     }
     world.resource_mut::<Finished>().0 = true;
+    // A Race (career::race_flow) records no board time or ghost; the race HUD shows its results.
+    if world.contains_resource::<crate::career::race_flow::RaceRun>() {
+        return;
+    }
     if netlink::role(world) == Role::Guide {
         return;
     }

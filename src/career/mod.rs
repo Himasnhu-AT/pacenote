@@ -11,9 +11,12 @@
 //! only ever *sends* [`CareerRequest`]s; only F mutates [`wallet::Wallet`] and
 //! [`garage::Garage`]. One save: `<DataDir>/`[`CAREER_FILE`].
 
+pub mod economy;
 pub mod garage;
 pub mod grade;
+pub mod race_flow;
 pub mod racers;
+pub mod save;
 pub mod style;
 pub mod wallet;
 
@@ -27,6 +30,19 @@ use racers::Difficulty;
 
 /// The career save, in the data dir (GAME_SYSTEMS §4.4 shape; settings stay in settings.json).
 pub const CAREER_FILE: &str = "career.json";
+
+/// "12,400": Notes with thousands commas (DECISIONS §1 number style). Add " N" or " Notes".
+pub fn notes(n: u32) -> String {
+    let d = n.to_string();
+    let mut out = String::with_capacity(d.len() + d.len() / 3);
+    for (i, ch) in d.chars().enumerate() {
+        if i > 0 && (d.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
 
 /// Why Notes moved (a ledger line). GAME_SYSTEMS §8 `PayReason`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +150,7 @@ impl Plugin for CareerPlugin {
             .add_message::<MoneyEarned>()
             .add_message::<CareerRequest>()
             .add_message::<style::StyleEvent>()
-            .add_message::<racers::RaceResult>();
+            .add_message::<racers::RaceResult>()
+            .add_plugins((economy::EconomyPlugin, racers::RacersPlugin));
     }
 }

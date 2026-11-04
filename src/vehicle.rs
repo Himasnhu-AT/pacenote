@@ -303,7 +303,18 @@ pub struct Spec {
     pub abs: bool,
     /// What hits do (Settings > Driving > Damage).
     pub damage: DamageMode,
+    /// Tyre grip multiplier on every surface's μ (roster cars and the Tyres upgrade; 1.0 is
+    /// today's tyre). `meta::ghost::sim_hash` hashes it only when it isn't 1.0.
+    pub grip: f32,
+    /// Seconds an upshift cuts the drive ([`SHIFT_TIME`] today; the Gearbox upgrade shortens
+    /// it). A downshift takes 5/6 of it. Hashed only when it isn't the default.
+    pub shift_time: f32,
 }
+
+/// Today's upshift time (s): `Spec::shift_time`'s default.
+pub const SHIFT_TIME: f32 = 0.12;
+/// Today's downshift time (s), used as is while `shift_time` is the default (bit-exact).
+const DOWNSHIFT_TIME: f32 = 0.1;
 
 /// What hits do to the car (Settings > Driving > Damage). Part of the spec, so a ghost
 /// replays with the mode it was driven in.
@@ -391,6 +402,8 @@ impl Default for Spec {
             lsd: 60.0,
             abs: true,
             damage: DamageMode::Simulation,
+            grip: 1.0,
+            shift_time: SHIFT_TIME,
         }
     }
 }
@@ -861,11 +874,11 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         let pulling = input.throttle > 0.3 || road_rpm(car.gear) > spec.redline;
         if (road_rpm(car.gear) > spec.redline - 400.0 && pulling || limiter) && car.gear < 5 {
             car.gear += 1;
-            car.shifting = 0.12;
+            car.shifting = spec.shift_time;
             car.in_gear = 0.0;
         } else if car.gear > 1 && road_rpm(car.gear) < 3200.0 && road_rpm(car.gear - 1) < spec.redline - 1500.0 {
             car.gear -= 1;
-            car.shifting = 0.1;
+            car.shifting = if spec.shift_time == SHIFT_TIME { DOWNSHIFT_TIME } else { spec.shift_time * (5.0 / 6.0) };
             car.in_gear = 0.0;
         }
     }
@@ -986,7 +999,7 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         let ty = tyre(surf);
         let loose = ty.loose;
         // Bent suspension: the tyres don't sit square, less grip.
-        let mu = ty.mu * (1.0 - 0.25 * dmg.suspension);
+        let mu = ty.mu * spec.grip * (1.0 - 0.25 * dmg.suspension);
         // Load sensitivity: grip per newton drops with load (~8 % per extra static load).
         let fz = fs.min(14_000.0);
         let nominal = spec.mass * 9.81 * 0.25;
