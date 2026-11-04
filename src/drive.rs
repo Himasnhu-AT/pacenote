@@ -43,6 +43,9 @@ pub struct StageRun {
     pub retired: bool,
     /// The car is out of action: wrecked (waiting for a recover) or the driver is dead.
     pub down: Option<Down>,
+    /// The crash in progress: (`Damage::total` before its first hit, seconds since its last
+    /// hit). Hits less than [`CRASH_GAP`] apart are one crash (a trunk, then the bank).
+    pub crash: Option<(f32, f32)>,
 }
 
 /// The driver's camera, cycled with the camera action: cockpit → bonnet → chase. The choice is
@@ -180,7 +183,7 @@ fn simulate(
         if let Some(mut l) = last {
             l.0 = input;
         }
-        let before = c.car.damage.worst();
+        let (before, hits) = (c.car.damage.total(), c.car.damage.hits);
         vehicle::step(&mut c.car, &spec.0, input, &*stage, dt);
         log.get_or_insert_with(CarLog::open).write(&c.car, input, actions.value("steer"), &stage);
         if run.countdown > 0.0 {
@@ -190,12 +193,19 @@ fn simulate(
         if run.finished.is_some() || run.retired {
             continue;
         }
-        // Damage (Simulation only): a single crash that takes half the car or more kills the
-        // driver (respawn at home, or the event restarts); a broken part stops the car until the
-        // player recovers it (back on the road where it is, repaired).
+        // Damage (Simulation only): a single crash that takes half the car or more (the mean
+        // of engine, steering and suspension) kills the driver (respawn at home, or the event
+        // restarts); a broken part stops the car until the player recovers it (back on the road
+        // where it is, repaired).
+        run.crash = match run.crash {
+            _ if c.car.damage.hits > hits => Some((run.crash.map_or(before, |(b, _)| b), 0.0)),
+            Some((b, t)) if t + dt < CRASH_GAP => Some((b, t + dt)),
+            _ => None,
+        };
         if spec.0.damage == DamageMode::Simulation && run.down.is_none() {
-            if c.car.damage.worst() - before >= DEATH_HIT {
-                info!("dead: one crash took {:.0} % ({:?})", (c.car.damage.worst() - before) * 100.0, c.car.damage);
+            let crash = run.crash.map_or(0.0, |(b, _)| c.car.damage.total() - b);
+            if crash >= DEATH_HIT {
+                info!("dead: one crash took {:.0} % of the car ({:?})", crash * 100.0, c.car.damage);
                 run.down = Some(Down::Dead(DEAD_SECS));
             } else if c.car.damage.wrecked() {
                 info!("not drivable at {:.0} m ({:?})", run.progress, c.car.damage);
@@ -362,8 +372,11 @@ pub enum Down {
     Dead(f32),
 }
 
-/// Damage from one crash (worst part, 0..1) that kills the driver.
+/// Damage from one crash ([`vehicle::Damage::total`], 0..1) that kills the driver: about a
+/// 115 km/h head-on into a trunk, ~100 km/h on a front corner. An 80 km/h tree costs ~0.2.
 pub const DEATH_HIT: f32 = 0.5;
+/// Hits closer together than this (s) are one crash.
+pub const CRASH_GAP: f32 = 0.5;
 /// How long "You're dead" shows before the respawn.
 pub const DEAD_SECS: f32 = 2.5;
 
