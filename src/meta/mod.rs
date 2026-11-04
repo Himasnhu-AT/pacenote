@@ -14,9 +14,13 @@
 
 pub mod board;
 pub mod coach;
+pub mod confirm;
+pub mod garage_ui;
 pub mod ghost;
+pub mod hub;
 pub mod netlink;
-pub(crate) mod screens;
+pub mod screens;
+pub mod showroom;
 pub mod stages;
 mod textfield;
 
@@ -82,6 +86,9 @@ pub struct Profile {
     /// The open world's events as last loaded, for the main menu's list (the world itself
     /// isn't loaded there).
     pub events: Vec<EventSeen>,
+    /// Where the car was last parked in free roam: x, y, z and heading (rad). Continue starts
+    /// there. (DECISIONS E8: F's career save will hold the same as `world.pos`.)
+    pub last_pose: Option<[f32; 4]>,
 }
 
 /// An open-world event as the menus list it.
@@ -128,6 +135,7 @@ impl Default for Profile {
             camera: 0,
             controls_hint_runs: 0,
             events: Vec::new(),
+            last_pose: None,
         }
     }
 }
@@ -260,6 +268,9 @@ impl Plugin for MetaPlugin {
             .init_resource::<Role>()
             .init_resource::<StageCatalog>()
             .add_plugins((textfield::TextFieldPlugin, screens::ScreensPlugin, coach::CoachPlugin))
+            .add_plugins((hub::HubPlugin, showroom::ShowroomPlugin, garage_ui::GarageUiPlugin))
+            .add_systems(Update, apply_pending_start.run_if(resource_exists::<PendingStart>).run_if(resource_exists::<StageWorld>))
+            .add_systems(Update, note_pose.run_if(resource_exists::<StageWorld>))
             .add_systems(Startup, (load_board, start_catalog, import_from_cli).chain())
             .add_systems(Update, poll_catalog)
             .add_systems(Update, (sync_camera, free_pointer))
@@ -267,9 +278,102 @@ impl Plugin for MetaPlugin {
             .add_systems(Update, (collect_menu, apply_menu).chain().after(engine::ui::UiSet::Screens))
             .add_systems(Update, (stage_ready, watch_finish, follow_ghost, dress_ghosts).chain().run_if(resource_exists::<StageWorld>))
             .add_systems(Update, restart_after_death.run_if(resource_exists::<StageRun>))
-            .add_systems(OnExit(AppState::InGame), teardown);
+            .add_systems(OnExit(AppState::InGame), (save_pose, teardown).chain());
         #[cfg(feature = "dev")]
         dev::register(app);
+    }
+}
+
+/// What to do once the open world has loaded (from the menus): put the car where it was
+/// parked (Continue), start an event on its line (Go now), or set the map route to it (Set
+/// route).
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub enum PendingStart {
+    Pose([f32; 4]),
+    Event(u32),
+    Route(u32),
+}
+
+/// Loads the open world from the menus, then does `then` (if anything).
+pub fn start_open(world: &mut World, then: Option<PendingStart>) {
+    match then {
+        Some(p) => world.insert_resource(p),
+        None => {
+            world.remove_resource::<PendingStart>();
+        }
+    }
+    start_stage(world, crate::open::ID, RunMode::Practice);
+}
+
+/// The open world is in (car spawned, events listed): apply the [`PendingStart`]. During the
+/// loading screen when there is one, so the scenery around the new spot loads first.
+fn apply_pending_start(world: &mut World) {
+    let Some(pending) = world.get_resource::<PendingStart>().copied() else { return };
+    let Some(stage) = world.get_resource::<StageWorld>().cloned() else { return };
+    if !stage.free_roam() && stage.event.is_none() && stage.open.is_none() {
+        // A classic stage loaded instead: forget it.
+        world.remove_resource::<PendingStart>();
+        return;
+    }
+    let car = world.query_filtered::<Entity, With<DrivenCar>>().iter(world).next();
+    let Some(car) = car else { return };
+    match pending {
+        PendingStart::Pose([x, _, z, heading]) => {
+            let half = stage.open.as_ref().map_or(0.0, |_| crate::open::roads::HALF - 20.0);
+            if x.abs() < half && z.abs() < half && heading.is_finite() {
+                let y = stage.heights.height_at(x, z);
+                let c = crate::vehicle::Car::new(Vec3::new(x, y + 0.9, z), heading);
+                let tf = Transform::from_translation(c.pos).with_rotation(c.rot);
+                if let Some(mut d) = world.get_mut::<DrivenCar>(car) {
+                    d.prev = (c.pos, c.rot);
+                    d.car = c;
+                }
+                if let Some(mut t) = world.get_mut::<Transform>(car) {
+                    *t = tf;
+                }
+                info!("continue: parked at ({x:.0}, {z:.0})");
+            }
+        }
+        PendingStart::Event(id) => {
+            if !world.contains_resource::<crate::open::events::Events>() {
+                return;
+            }
+            let loading = crate::loading::is_loading(world);
+            crate::open::events::start(world, id);
+            if loading {
+                // Still behind the loading screen: no pause until it's gone.
+                world.insert_resource(PauseAllowed(false));
+            }
+        }
+        PendingStart::Route(id) => {
+            if !world.contains_resource::<crate::open::events::Events>() {
+                return;
+            }
+            world.resource_mut::<crate::map::Waypoint>().set(Some(id));
+        }
+    }
+    world.remove_resource::<PendingStart>();
+}
+
+/// The car's pose in free roam (not in an event), noted every second for Continue.
+fn note_pose(time: Res<Time<Real>>, stage: Res<StageWorld>, cars: Query<&DrivenCar>, mut profile: ResMut<Profile>, mut next: Local<f32>, loading: Option<Res<crate::loading::Loading>>) {
+    let now = time.elapsed_secs();
+    if now < *next || !stage.free_roam() || stage.event.is_some() || stage.open.is_none() || loading.is_some() {
+        return;
+    }
+    *next = now + 1.0;
+    let Some(c) = cars.iter().next() else { return };
+    let f = c.car.forward();
+    let pose = [c.car.pos.x, c.car.pos.y, c.car.pos.z, f.x.atan2(f.z)];
+    if pose.iter().all(|v| v.is_finite()) && c.car.speed().abs() < 60.0 {
+        profile.bypass_change_detection().last_pose = Some(pose);
+    }
+}
+
+/// Leaving the game: keep the parked pose in the settings file.
+fn save_pose(mut save: MessageWriter<engine::settings::SaveSettings>, profile: Res<Profile>, stage: Option<Res<StageWorld>>) {
+    if stage.is_some_and(|s| s.open.is_some()) && profile.last_pose.is_some() {
+        save.write(engine::settings::SaveSettings);
     }
 }
 

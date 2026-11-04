@@ -3,7 +3,7 @@
 //! - [`Prefs`]: co-driver and HUD options (section `"prefs"` of settings.json). Camera view and
 //!   ghosts live in `meta::Profile`, voice chat in `voice::VoiceSettings`, the rest in the
 //!   engine's `CoreSettings` / accessibility settings.
-//! - [`layout`] (Startup): every row on a rally game's tabs, in order: Driving, Co-driver,
+//! - [`layout`] (Startup): every row on a rally game's tabs, in order: Driving, Camera, Co-driver,
 //!   HUD, Audio, Voice chat, Video, Interface, Controls. Engine rows are moved, renamed and
 //!   given rally wording by re-registering them (same key, same get/set); rows that do
 //!   nothing in Pacenote (mouse look, music, sprint toggle, generic subtitles) are hidden.
@@ -262,11 +262,17 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("traction_control", "Driving", None, None),
     ("abs", "Driving", None, None),
     ("damage", "Driving", None, None),
-    ("camera_view", "Driving", None, None),
-    ("fov_deg", "Driving", Some("Field of view"), Some("Wider shows more of the road; narrower makes the cockpit feel faster.")),
-    ("camera_shake", "Driving", Some("Camera shake"), Some("How much bumps, jumps and landings move the cockpit and bonnet views.")),
     ("ghost", "Driving", None, None),
     ("ghost_opacity", "Driving", None, None),
+    // Camera (festival: DECISIONS D3, UX_PASS §5): the view, then the chase camera's feel
+    // (stream D's `camera::CameraFeel` rows), field of view and shake.
+    ("camera_view", "Camera", None, None),
+    ("chase_distance", "Camera", None, None),
+    ("chase_stiffness", "Camera", None, None),
+    ("fov_deg", "Camera", Some("Field of view"), Some("Wider shows more of the road; narrower makes the cockpit feel faster.")),
+    ("camera_shake", "Camera", Some("Camera shake"), Some("How much bumps, jumps and landings move the cockpit and bonnet views.")),
+    ("landing_kick", "Camera", None, None),
+    ("motion_blur", "Camera", None, None),
     // Co-driver (Prefs rows keep their order).
     ("codriver_voice", "Co-driver", None, None),
     ("codriver_volume", "Co-driver", None, None),
@@ -284,6 +290,10 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("hud_clock", "HUD", None, None),
     ("hud_progress", "HUD", None, None),
     ("hud_damage", "HUD", None, None),
+    // Festival HUD rows (stream F's `career::CareerSettings`, DECISIONS S4 / U5).
+    ("style_hud", "HUD", None, None),
+    ("challenge_cards", "HUD", None, None),
+    ("race_positions", "HUD", None, None),
     // Audio.
     ("master_volume", "Audio", Some("Master"), Some("Everything at once.")),
     ("sfx_volume", "Audio", Some("Car"), Some("Engine, turbo, gearbox, tyres, gravel and impacts.")),
@@ -299,6 +309,12 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("window_mode", "Video", None, None),
     ("vsync", "Video", None, None),
     ("show_fps", "Video", Some("Show frame rate"), None),
+    // World (stream C's `daytime::DaySettings` rows): when free roam starts, whether the
+    // clock runs.
+    ("start", "World", None, None),
+    ("start_time", "World", None, None),
+    ("time_passes", "World", None, None),
+    ("clock_runs", "World", None, None),
     // Interface.
     ("language", "Interface", None, None),
     ("ui_scale", "Interface", Some("Menu and HUD size"), Some("Scales menus and the HUD as a whole.")),
@@ -578,8 +594,8 @@ mod tests {
             .add_systems(Update, layout);
         app.update();
         let reg = app.world().resource::<SettingsRegistry>();
-        assert_eq!(reg.tabs, vec!["Driving", "Co-driver", "HUD", "Audio", "Video", "Extras", "Controls"]);
-        assert_eq!(reg.tab_fields("Driving").map(|f| f.key).collect::<Vec<_>>(), vec!["camera_view", "fov_deg"]);
+        assert_eq!(reg.tabs, vec!["Camera", "Co-driver", "HUD", "Audio", "Video", "Extras", "Controls"]);
+        assert_eq!(reg.tab_fields("Camera").map(|f| f.key).collect::<Vec<_>>(), vec!["camera_view", "fov_deg"], "the camera rows moved to Camera");
         assert_eq!(reg.field("sensitivity").unwrap().tab, "Co-driver", "mouse look: the guide's head in the car");
         assert_eq!(reg.field("master_volume").unwrap().label, "Master");
     }
