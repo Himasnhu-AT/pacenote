@@ -92,6 +92,9 @@ pub struct StageWorld {
     pub event: Option<crate::open::events::EventRef>,
     /// The open world's trunks and boulders, everywhere (built by tile, `open::forest`).
     pub forest: Option<Arc<crate::open::forest::ForestSolids>>,
+    /// The rivals' cars in a Race run (`career::racers`, stream F): solid for the player.
+    /// `None` outside races.
+    pub racers: Option<Arc<crate::career::racers::RacerSolids>>,
 }
 
 const OBS_CELL: f32 = 8.0;
@@ -154,7 +157,7 @@ impl Ground for StageWorld {
     }
     fn surface(&self, x: f32, z: f32) -> Surface {
         match &self.open {
-            Some(o) => crate::open::roads::surface(&o.net, x, z),
+            Some(o) => o.surface_at(x, z),
             None => stage::surface_at(x, z, &self.road),
         }
     }
@@ -177,6 +180,10 @@ impl Ground for StageWorld {
             if self.event.is_none() && o.traffic_solid.load(std::sync::atomic::Ordering::Relaxed) {
                 o.traffic.obstacles(p, r, out);
             }
+        }
+        // Rivals, in Race runs only (never in Time Trials, so ghosts replay exactly).
+        if let Some(racers) = &self.racers {
+            racers.obstacles(p, r, out);
         }
     }
     fn walls(&self, p: Vec2, r: f32, out: &mut Vec<Wall>) {
@@ -210,6 +217,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
         open: None,
         event: None,
         forest: None,
+        racers: None,
     };
     // Collision for the car: the same points the dressing spawns, evaluated in a band along
     // the road (the trees far away can't be reached).
@@ -285,6 +293,7 @@ fn generate_open(def: &StageDef) -> StageWorld {
         open: Some(Arc::new(open)),
         event: None,
         forest: None,
+        racers: None,
     };
     let (graph, inputs) = dressing(&world);
     let net = world.open.as_ref().unwrap().net.clone();

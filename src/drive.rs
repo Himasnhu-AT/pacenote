@@ -634,7 +634,7 @@ pub fn speed_fov(speed: f32) -> f32 {
 fn surface_buzz(s: crate::stage::Surface) -> f32 {
     use crate::stage::Surface::*;
     match s {
-        Tarmac => 0.15,
+        Tarmac | Wet => 0.15,
         Dusty => 0.3,
         Snow => 0.6,
         Gravel | Mud => 1.0,

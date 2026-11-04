@@ -1196,7 +1196,9 @@ fn idm(v: f32, v0: f32, lead: Option<(f32, f32)>) -> f32 {
     (free - inter).clamp(-B_MAX, A_MAX)
 }
 
-fn push_solids(pose: (Vec3, Vec3), p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
+/// Collision cylinders of one car at `pose` (position, forward) within `r` of `p`: three
+/// circles along it. Shared with the rivals (`career::racers::RacerSolids`).
+pub fn push_solids(pose: (Vec3, Vec3), p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
     let c = xz(pose.0);
     if c.distance_squared(p) > (r + 3.0) * (r + 3.0) {
         return;

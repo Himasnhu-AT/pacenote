@@ -201,7 +201,7 @@ Each line: what disagreed → the ruling (decision id).
 44. Condition rendering: decals (ART) vs mesh patches (TECH) → mesh patches (W5).
 45. Wet grip: (0.72, 0.10) (TECH) vs μ 0.85 / 0.10 (WORLD_PASS) vs 0.6-0.75 (ART) → both TECH and WORLD_PASS, in different functions (W6).
 46. Budgets measured on a base M2 (ART) vs M5 Pro × 3 (TECH) → TECH (§2.9).
-47. "Exhaustive Surface matches" (TECH §3.0 lists 6): only 4 are exhaustive (`stage.rs`, `vehicle.rs`, `meta/screens.rs`, `audio/mod.rs`); `art/spray.rs` and `open/roads.rs` have wildcards. Wet was added to the 4; spray's wet splash is D's.
+47. "Exhaustive Surface matches" (TECH §3.0 lists 6): the exhaustive ones are `stage.rs`, `vehicle.rs`, `meta/screens.rs`, `audio/mod.rs` and `drive.rs` (`surface_buzz`, not in TECH's list); `art/spray.rs` and `open/roads.rs` have wildcards. Wave 0 added Wet to the 5; spray's wet splash is D's.
 48. `StageWorld::surface` calls `roads::surface` directly, bypassing `OpenWorld::surface` (TECH's hook would miss the player car) → wave 0 routes both through `OpenWorld::surface_at`.
 49. WORLD_PASS's corridor docs vs code (cut 70 % / 30-46 m in code, 45 % / 34-52 m in `GAME_OVERVIEW.md`) → A fixes the docs (WORLD_PASS §1.7 already says so).
 

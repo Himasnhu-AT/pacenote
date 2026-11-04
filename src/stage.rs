@@ -62,6 +62,8 @@ pub enum Surface {
     Ditch,
     /// Tarmac dirtied with gravel dragged out of a junction with a gravel road.
     Dusty,
+    /// Wet tarmac (puddles in a low spot): road conditions (`open::furniture`, stream B).
+    Wet,
 }
 
 impl Surface {
@@ -78,6 +80,7 @@ impl Surface {
             Surface::Loose => (0.66, 0.75),
             Surface::Ditch => (0.5, 1.0),
             Surface::Dusty => (0.88, 0.2),
+            Surface::Wet => (0.72, 0.1),
         }
     }
 }

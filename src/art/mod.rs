@@ -8,15 +8,20 @@
 //! `tools/art/render_cards.py`. Credits: `assets/credits.txt`.
 
 pub mod car;
+pub mod conditions;
 pub mod dressing;
+pub mod exhaust;
 pub mod ground;
 pub mod hands;
+pub mod headlights;
 pub mod junctions;
 pub mod look;
 pub mod meshfile;
 pub mod mirror;
 pub mod props;
 pub mod roadside;
+pub mod signs;
+pub mod sky;
 pub mod spray;
 pub mod terrain;
 pub mod traffic_car;
@@ -55,7 +60,9 @@ impl Plugin for ArtPlugin {
         app.add_systems(Update, (trees::ingest, trees::stream).chain())
             .add_systems(Update, dressing::tag_cover)
             .add_systems(Update, traffic_car::lamps_update.run_if(resource_exists::<crate::open::traffic::Traffic>))
-            .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin));
+            .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin))
+            // Festival streams (wave 0 stubs): C sky, D exhaust + headlights, B signs + conditions.
+            .add_plugins((sky::SkyPlugin, exhaust::ExhaustPlugin, headlights::HeadlightsPlugin, signs::SignsPlugin, conditions::ConditionsPlugin));
     }
 }
 

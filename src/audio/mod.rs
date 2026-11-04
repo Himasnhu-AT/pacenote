@@ -18,6 +18,8 @@ pub mod ambience;
 pub mod body;
 pub mod car;
 pub mod dsp;
+pub mod festival;
+pub mod pops;
 pub mod powertrain;
 pub mod samples;
 #[cfg(test)]
@@ -25,6 +27,7 @@ mod scenes;
 pub mod stream;
 pub mod traffic;
 pub mod tyres;
+pub mod ui;
 pub mod voice;
 
 use std::sync::Arc;
@@ -56,6 +59,8 @@ impl Plugin for RallyAudioPlugin {
             .init_resource::<RemoteCarSound>()
             .register_type::<RallyAudioStats>()
             .insert_resource(Link { shared: Arc::new(Shared::default()), started: false, frame: Frame::default() })
+            // Festival streams (wave 0 stubs): D pops, F gameplay sounds, E menu sounds.
+            .add_plugins((pops::PopsPlugin, festival::FestivalAudioPlugin, ui::UiSoundPlugin))
             .add_systems(Startup, add_buses)
             .add_systems(PostUpdate, (start_output, net_car_sound, gather, capture).chain().after(SoundSet::Mix));
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
@@ -192,7 +197,7 @@ fn start_output(
 fn surface_class(s: Surface) -> usize {
     match s {
         Surface::Gravel | Surface::Loose => car::GRAVEL,
-        Surface::Tarmac | Surface::Dusty => car::TARMAC,
+        Surface::Tarmac | Surface::Dusty | Surface::Wet => car::TARMAC,
         Surface::Mud | Surface::Ditch => car::MUD,
         Surface::Snow => car::SNOW,
         Surface::Verge | Surface::Rough => car::OFFROAD,

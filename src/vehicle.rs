@@ -778,6 +778,9 @@ pub fn tyre(s: Surface) -> Tyre {
         Surface::Ditch => t(0.5, 13.0, 0.18, 0.84, 1.0),
         // Tarmac with gravel on it: 82 % of tarmac's grip.
         Surface::Dusty => t(0.94, 8.0, 0.11, 0.8, 0.15),
+        // Wet tarmac: ~74 % of dry tarmac's grip, and it falls away harder past the peak
+        // (docs/festival/DECISIONS.md W6).
+        Surface::Wet => t(0.85, 7.5, 0.10, 0.72, 0.1),
     }
 }
 

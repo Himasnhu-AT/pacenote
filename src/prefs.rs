@@ -105,7 +105,9 @@ impl Prefs {
 }
 
 /// The tabs, in order.
-pub const TABS: [&str; 9] = ["Driving", "Co-driver", "HUD", "Audio", "Voice chat", "Video", "Interface", "Privacy", "Controls"];
+/// "Camera" (stream D's `camera::CameraFeel` rows) and "World" (stream C's
+/// `daytime::DaySettings` rows) show once a row uses them.
+pub const TABS: [&str; 11] = ["Driving", "Camera", "Co-driver", "HUD", "Audio", "Voice chat", "Video", "World", "Interface", "Privacy", "Controls"];
 
 pub struct PrefsPlugin;
 
