@@ -196,6 +196,18 @@ pub struct LaneGraph {
 
 /// Fernhollow's speed limit on the B-road through the town (m/s): 50 km/h.
 pub const TOWN_LIMIT: f32 = 50.0 / 3.6;
+/// The posted speed limit (m/s) at station `i` of road `road`: the data's limit if set, else
+/// by kind, and 50 km/h on the B-road through Fernhollow's core (`town::in_core`). What the
+/// traffic lanes use; signs should show the same.
+pub fn posted_limit(net: &RoadNet, road: usize, i: usize) -> f32 {
+    let nr = &net.roads[road];
+    if let Some(l) = nr.limit {
+        return l;
+    }
+    let p = nr.road.pts[i.min(nr.road.len() - 1)];
+    if nr.kind == RoadKind::BRoad && super::town::in_core(Vec2::new(p.x, p.z)) { TOWN_LIMIT } else { limit(nr.kind) }
+}
+
 /// Relative chance a car starts on a town street rather than the B-road.
 pub const STREET_WEIGHT: f32 = 0.3;
 
@@ -330,7 +342,6 @@ impl LaneGraph {
                 segs.push((a.0, b.0 + n, a.1, b.1));
             }
             let off = lane_offset(nr.kind);
-            let lim = nr.limit.unwrap_or_else(|| limit(nr.kind));
             for (a, b, na, nb) in segs {
                 let ta = (trim[na] / STEP).ceil() as usize;
                 let tb = (trim[nb] / STEP).ceil() as usize;
@@ -353,7 +364,7 @@ impl LaneGraph {
                         pts.push(Vec3::new(p.x, y, p.y));
                         let k = road.curv[i].abs().max(1e-5);
                         // 50 through Fernhollow (unless the data sets a limit).
-                        let lim = if nr.limit.is_none() && nr.kind == RoadKind::BRoad && super::town::in_core(p) { lim.min(TOWN_LIMIT) } else { lim };
+                        let lim = posted_limit(net, r, i);
                         limits.push(lim.min((A_LAT / k).sqrt()).max(V_MIN));
                     }
                     if !forward {
