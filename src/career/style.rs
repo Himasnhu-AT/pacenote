@@ -1017,6 +1017,238 @@ impl Detector {
     }
 }
 
+// --- In the game -------------------------------------------------------------------------
+
+/// The scorer the game runs (one, for the player's car).
+#[derive(Resource, Default)]
+pub struct StyleState(pub Detector);
+
+/// Asks the scorer to act now (sent by `open::challenges`; the scorer applies it in `Update`).
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub enum StyleCommand {
+    /// Bank the Rhythm (a challenge gate opened).
+    Bank,
+}
+
+/// The scoring step in `FixedUpdate`, after the car moved (`drive::SimulateSet`). Challenges
+/// that read [`Rhythm`] order themselves after it.
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StyleSet;
+
+/// Registers the scorer. Called from `hud_style::StyleHudPlugin` (the wave-0 plugin F owns),
+/// so `career/mod.rs` keeps its list as is.
+pub fn register(app: &mut App) {
+    use crate::drive::SimulateSet;
+    app.init_resource::<StyleState>()
+        .init_resource::<Triggers>()
+        .add_message::<StyleCommand>()
+        .configure_sets(FixedUpdate, StyleSet.after(SimulateSet))
+        .add_systems(FixedUpdate, score.in_set(StyleSet).run_if(resource_exists::<crate::world::StageWorld>))
+        .add_systems(Update, triggers.run_if(resource_exists::<crate::world::StageWorld>))
+        .add_systems(OnExit(engine::flow::AppState::InGame), quit);
+    #[cfg(feature = "dev")]
+    dev::register(app);
+}
+
+/// The road nearest the car (any road of the open world, else the stage's).
+fn road_info(stage: &crate::world::StageWorld, p: Vec2) -> Option<RoadInfo> {
+    let (k, road, at) = match &stage.open {
+        Some(o) => {
+            let n = o.net.nearest(p, 30.0)?;
+            (n.road as u32, &o.net.roads[n.road].road, n.at)
+        }
+        None => {
+            let at = stage.road.nearest(p, 30.0)?;
+            (0, &*stage.road, at)
+        }
+    };
+    Some(RoadInfo { road: k, s: at.s, curv: road.curv[at.i.min(road.len() - 1)], half_width: road.half_width(&at), lateral: at.lateral })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn score(
+    time: Res<Time<Fixed>>,
+    stage: Res<crate::world::StageWorld>,
+    run: Res<crate::drive::StageRun>,
+    cars: Query<&crate::drive::DrivenCar>,
+    racers: Query<&super::racers::Racer>,
+    field: Option<Res<super::racers::RaceField>>,
+    others: Res<super::racers::OtherCars>,
+    (paused, loading, role): (Option<Res<engine::pause::Paused>>, Option<Res<crate::loading::Loading>>, Option<Res<crate::meta::Role>>),
+    mut state: ResMut<StyleState>,
+    mut rhythm: ResMut<Rhythm>,
+    (mut events, mut pay): (MessageWriter<StyleEvent>, MessageWriter<super::Payout>),
+    (mut buf, mut rivals, mut splits): (Local<Vec<StyleEvent>>, Local<Vec<(u32, f32)>>, Local<usize>),
+) {
+    if role.is_some_and(|r| *r == crate::meta::Role::Guide) {
+        return;
+    }
+    let Ok(c) = cars.single() else { return };
+    let car = &c.car;
+    let mut f = StyleFrame::of(car, time.delta_secs());
+    f.live = loading.is_none() && !paused.is_some_and(|p| p.0) && run.countdown <= 0.0 && run.finished.is_none() && !run.retired && run.down.is_none();
+    f.road = road_info(&stage, Vec2::new(car.pos.x, car.pos.z));
+    f.others = &others.0;
+    f.in_event = !stage.free_roam();
+    let n = run.splits.len() + run.finished.is_some() as usize;
+    f.split = n > *splits;
+    *splits = n;
+    rivals.clear();
+    if field.is_some() {
+        for r in &racers {
+            if let Some(at) = stage.road.nearest(Vec2::new(r.car.pos.x, r.car.pos.z), 40.0) {
+                rivals.push((r.slot as u32, at.s));
+            }
+        }
+        f.progress = Some(run.progress);
+        f.rivals = &rivals;
+    }
+    buf.clear();
+    state.0.step(&f, &mut buf);
+    publish(&mut state, &mut rhythm, &mut buf, &mut events, &mut pay);
+}
+
+/// Copies the live state out and sends what happened (a bank pays its Notes).
+fn publish(state: &mut StyleState, rhythm: &mut Rhythm, buf: &mut Vec<StyleEvent>, events: &mut MessageWriter<StyleEvent>, pay: &mut MessageWriter<super::Payout>) {
+    if *rhythm != state.0.rhythm {
+        *rhythm = state.0.rhythm.clone();
+    }
+    for e in buf.drain(..) {
+        if let StyleEvent::Bank { notes, .. } = e
+            && notes > 0
+        {
+            pay.write(super::Payout { amount: notes, reason: super::PayReason::Rhythm });
+        }
+        events.write(e);
+    }
+}
+
+/// What the trigger system saw last frame.
+#[derive(Resource, Default)]
+struct Triggers {
+    paused: bool,
+    marker: Option<u32>,
+    route: Option<u32>,
+    countdown: bool,
+    car: Option<usize>,
+}
+
+/// Banks and breaks that come from outside the car: the pause menu or map opening, driving into
+/// an event marker, a challenge gate (bank); an event start or restart, a car swap (break); a
+/// finished challenge (the Challenge skill).
+#[allow(clippy::too_many_arguments)]
+fn triggers(
+    stage: Res<crate::world::StageWorld>,
+    run: Res<crate::drive::StageRun>,
+    paused: Option<Res<engine::pause::Paused>>,
+    approach: Option<Res<crate::open::events::Approach>>,
+    garage: Option<Res<super::garage::Garage>>,
+    mut seen: ResMut<Triggers>,
+    mut commands: MessageReader<StyleCommand>,
+    mut results: MessageReader<crate::open::challenges::ChallengeResult>,
+    mut state: ResMut<StyleState>,
+    mut rhythm: ResMut<Rhythm>,
+    mut events: MessageWriter<StyleEvent>,
+    mut pay: MessageWriter<super::Payout>,
+    mut buf: Local<Vec<StyleEvent>>,
+) {
+    buf.clear();
+    let d = &mut state.0;
+    let paused = paused.is_some_and(|p| p.0);
+    if paused && !seen.paused {
+        d.bank(&mut buf);
+    }
+    seen.paused = paused;
+    let marker = approach.and_then(|a| a.inside);
+    if marker.is_some() && marker != seen.marker {
+        d.bank(&mut buf);
+    }
+    seen.marker = marker;
+    for c in commands.read() {
+        match c {
+            StyleCommand::Bank => d.bank(&mut buf),
+        }
+    }
+    for r in results.read() {
+        d.challenge(r.stars, &mut buf);
+    }
+    // A new route (an event started or left) or a restart (its countdown again): a fresh run.
+    let route = Some(stage.route_id());
+    let countdown = run.countdown > 0.0;
+    if (seen.route.is_some() && route != seen.route) || (countdown && !seen.countdown) {
+        d.lose(LostReason::EventStart, &mut buf);
+        d.clear();
+    }
+    seen.route = route;
+    seen.countdown = countdown;
+    let car = garage.map(|g| g.active);
+    if seen.car.is_some() && car != seen.car {
+        d.lose(LostReason::CarSwap, &mut buf);
+        d.clear();
+    }
+    seen.car = car;
+    publish(&mut state, &mut rhythm, &mut buf, &mut events, &mut pay);
+}
+
+/// Leaving the game drops the Rhythm (nothing banks).
+fn quit(mut state: ResMut<StyleState>, mut rhythm: ResMut<Rhythm>, mut seen: ResMut<Triggers>) {
+    state.0.clear();
+    *rhythm = Rhythm { slide_meter: rhythm.slide_meter, ..default() };
+    *seen = Triggers::default();
+}
+
+#[cfg(feature = "dev")]
+mod dev {
+    use engine::devtools::{AddControlCommand, params};
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    pub fn register(app: &mut App) {
+        app.add_control_command("style.state", "Style: the Rhythm (P, M, chain, timer, running skills)", params(&[]), |w, _| {
+            let r = w.get_resource::<Rhythm>().ok_or("no style scorer")?;
+            Ok(json!({
+                "open": r.open, "points": r.points, "mult": r.mult, "chain": r.chain, "timer": r.timer,
+                "last": r.last.map(|k| k.label()), "scuffs": r.scuffs, "slide_meter": r.slide_meter, "air": r.air,
+                "live": LIVE_KINDS.iter().zip(r.live).filter(|(_, p)| *p > 0).map(|(k, p)| json!({"skill": k.label(), "points": p})).collect::<Vec<_>>(),
+                "value": r.value(),
+            }))
+        })
+        .add_control_command(
+            "style.inject",
+            "Style: score a skill now (as if completed), or bank / break the Rhythm",
+            params(&[("skill", "string", "skill label (Slide, Air, Close Shave...) or bank / lose"), ("points", "integer", "points (default 500)")]),
+            |w, p: Value| {
+                let what = p.get("skill").and_then(Value::as_str).ok_or("`skill` is required")?.to_lowercase();
+                let points = p.get("points").and_then(Value::as_u64).unwrap_or(500) as u32;
+                let mut out = Vec::new();
+                {
+                    let mut st = w.get_resource_mut::<StyleState>().ok_or("no style scorer")?;
+                    match what.as_str() {
+                        "bank" => st.0.bank(&mut out),
+                        "lose" => st.0.lose(LostReason::Hit, &mut out),
+                        _ => {
+                            let kind = StyleKind::ALL.into_iter().find(|k| k.label().to_lowercase() == what).ok_or("unknown skill")?;
+                            st.0.inject(kind, points, &mut out);
+                        }
+                    }
+                }
+                let r = w.resource::<StyleState>().0.rhythm.clone();
+                *w.resource_mut::<Rhythm>() = r;
+                for e in &out {
+                    if let StyleEvent::Bank { notes, .. } = e
+                        && *notes > 0
+                    {
+                        w.write_message(crate::career::Payout { amount: *notes, reason: crate::career::PayReason::Rhythm });
+                    }
+                    w.write_message(*e);
+                }
+                Ok(json!({"events": out.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>()}))
+            },
+        );
+    }
+}
+
 #[cfg(test)]
 #[path = "style_tests.rs"]
 mod tests;
