@@ -18,6 +18,7 @@ pub mod live;
 pub mod placeable;
 pub mod roads;
 pub mod tour;
+pub mod town;
 pub mod traffic;
 pub mod walls;
 
@@ -248,5 +249,39 @@ mod timing {
         let t = std::time::Instant::now();
         let w = crate::world::generate(&super::def());
         eprintln!("world::generate {:.2} s, obstacles near spawn {}", t.elapsed().as_secs_f32(), w.obstacle_list().len());
+    }
+}
+
+#[cfg(test)]
+mod load_timing {
+    /// `PACENOTE_LEVEL=<file> cargo test --lib open::load_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn load_parts() {
+        let Ok(path) = std::env::var("PACENOTE_LEVEL") else { return };
+        let t = std::time::Instant::now();
+        let l = super::level::load(std::path::Path::new(&path)).unwrap();
+        eprintln!("level::load {:.2} s", t.elapsed().as_secs_f32());
+        let t = std::time::Instant::now();
+        let net = l.data.net();
+        eprintln!("net {:.2} s", t.elapsed().as_secs_f32());
+        let t = std::time::Instant::now();
+        let layout = super::buildings::layout_baked(&net, &l.data.lots, &l.data.buildings);
+        eprintln!("layout_baked {:.2} s ({} buildings)", t.elapsed().as_secs_f32(), layout.buildings.len());
+        let t = std::time::Instant::now();
+        let w = super::buildings::walls(&layout);
+        eprintln!("walls {:.2} s ({})", t.elapsed().as_secs_f32(), w.len());
+        let t = std::time::Instant::now();
+        let cuts = super::ecology::clearcuts(&net, super::ecology::CLEARCUTS);
+        let items = crate::art::roadside::items(&net, &cuts);
+        eprintln!("roadside {:.2} s", t.elapsed().as_secs_f32());
+        let t = std::time::Instant::now();
+        let f = super::furniture::build(&net, &l.heights);
+        eprintln!("furniture {:.2} s", t.elapsed().as_secs_f32());
+        let _ = (items, f);
+        let t = std::time::Instant::now();
+        let o = super::OpenWorld::from_data_with(l.data.clone(), Some(l.heights.clone())).unwrap();
+        eprintln!("from_data_with {:.2} s", t.elapsed().as_secs_f32());
+        let _ = o;
     }
 }

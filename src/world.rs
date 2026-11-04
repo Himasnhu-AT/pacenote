@@ -370,20 +370,22 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
             rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: libm::atan2f(d.x, d.y), y: mid.y, tag: "road".into() });
         }
     }
-    // The open world's village and service park: no forest, rocks or bushes (gardens go there);
-    // none through any building either.
+    // Fernhollow's core and the service park: no forest, rocks or bushes (back yards and the
+    // square go there); none through any building out in the country either.
     if let Some(o) = &w.open {
-        let pl = o.net.places();
-        for c in [pl.village, pl.park] {
-            rects.push(Rect { center: c, half: Vec2::splat(crate::open::buildings::VILLAGE_R * 0.7), yaw: 0.0, y: o.net.town_y, tag: "road".into() });
-        }
+        use crate::open::land::{TOWN_HI, TOWN_LO};
+        let core = Rect { center: (TOWN_LO + TOWN_HI) * 0.5, half: (TOWN_HI - TOWN_LO) * 0.5 + Vec2::splat(6.0), yaw: 0.0, y: o.net.town_y, tag: "road".into() };
+        rects.push(core);
+        rects.push(Rect { center: o.net.places().park, half: Vec2::splat(150.0), yaw: 0.0, y: o.net.town_y, tag: "road".into() });
         // Nothing grows in the river (`art::water` lays the water in its bed).
         let hf = &w.heights;
         for (c, h, yaw) in crate::art::water::channel(&o.net.land.river, |x, z| hf.height_at(x, z)) {
             rects.push(Rect { center: c, half: h, yaw, y: hf.height_at(c.x, c.y), tag: "road".into() });
         }
-        for b in &o.buildings.buildings {
-            rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(4.0), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
+        for b in o.buildings.buildings.iter().filter(|b| !crate::open::town::in_core(b.centre)) {
+            // Houses keep a garden round them.
+            let garden = if b.use_ == crate::open::buildings::Use::House { 7.0 } else { 4.0 };
+            rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(garden), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
         }
     }
     // The open world's ecology (`open::ecology`): above the treeline, valley fields, clear-cuts.

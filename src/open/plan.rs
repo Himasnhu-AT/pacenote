@@ -25,7 +25,8 @@ const DIRS: [(i32, i32); 16] = [(1, 0), (2, 1), (1, 1), (1, 2), (0, 1), (-1, 2),
 /// The places the roads connect.
 #[derive(Clone, Debug)]
 pub struct Places {
-    /// Valley village, on the river's north bank.
+    /// Fernhollow, on the river's north bank: where its spine (the forestry road) leaves Main
+    /// Street (the B-road).
     pub village: Vec2,
     /// Service park, east of the village on the valley floor.
     pub park: Vec2,
@@ -91,8 +92,8 @@ pub fn places(land: &Land) -> Places {
         let north = p.y > river_at(land, p.x).y;
         (d - want).abs() * 0.01 + if north { 0.0 } else { 10.0 }
     };
-    let v0 = north_bank(-350.0, 160.0);
-    let village = best(land, v0 - Vec2::new(250.0, 90.0), v0 + Vec2::new(250.0, 90.0), |p| valley(p, 160.0) + p.distance(v0) * 0.0005);
+    // Fernhollow: where its spine leaves Main Street (the town is laid out round it).
+    let village = Vec2::new(super::land::SPINE_X, super::land::MAIN_Z);
     let p0 = north_bank(420.0, 150.0);
     let park = best(land, p0 - Vec2::new(200.0, 80.0), p0 + Vec2::new(200.0, 80.0), |p| valley(p, 150.0));
     let west = north_bank(-1780.0, 190.0);

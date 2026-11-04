@@ -50,14 +50,21 @@ pub fn dress(net: &mut RoadNet) {
     let land = net.land.clone();
     let junctions = net.junctions.clone();
     let gravel = |k: RoadKind| matches!(k, RoadKind::Gravel | RoadKind::Forest);
-    let kinds: Vec<RoadKind> = net.roads.iter().map(|r| r.kind).collect();
+    // Junctions where a loose surface meets (dusty tarmac round them).
+    let loose: Vec<bool> = junctions.iter().map(|j| j.roads.iter().any(|&(r, i)| gravel(net.roads[r].kind) && net.roads[r].road.surface[i] != crate::stage::Surface::Tarmac)).collect();
     for (ri, nr) in net.roads.iter_mut().enumerate() {
         let n = nr.road.len();
         let (crown, rut) = crown_rut(nr.kind);
         let road = &mut nr.road;
         // Less crown in bends (the banking takes over), none on mud ruts deeper than gravel's.
         road.crown = (0..n).map(|i| crown * (1.0 - (road.curv[i].abs() * 60.0).min(1.0) * 0.7)).collect();
-        road.rut = (0..n).map(|i| if road.surface[i] == crate::stage::Surface::Mud { rut * 1.5 } else { rut }).collect();
+        road.rut = (0..n)
+            .map(|i| match road.surface[i] {
+                crate::stage::Surface::Mud => rut * 1.5,
+                crate::stage::Surface::Tarmac => 0.0,
+                _ => rut,
+            })
+            .collect();
         // Where junctions are on this road (station), to keep ditches out of them.
         let here: Vec<usize> = junctions.iter().flat_map(|j| j.roads.iter().filter(|r| r.0 == ri).map(|r| r.1)).collect();
         let clear = |i: usize| here.iter().map(|&s| (s as f32 - i as f32).abs() * STEP).fold(f32::MAX, f32::min);
@@ -146,10 +153,7 @@ pub fn dress(net: &mut RoadNet) {
         // Dusty tarmac near a junction with a gravel or forest road.
         nr.dusty = vec![false; n];
         if !gravel(nr.kind) {
-            for j in &junctions {
-                if !j.roads.iter().any(|r| gravel(kinds[r.0])) {
-                    continue;
-                }
+            for (j, _) in junctions.iter().zip(&loose).filter(|(_, l)| **l) {
                 for &(r, st) in &j.roads {
                     if r != ri {
                         continue;
@@ -456,7 +460,7 @@ mod hazards {
         let p = Vec2::new(south.road.pts[i].x, south.road.pts[i].z);
         let near: Vec<_> = walls.iter().filter(|w| w.distance(p) < BRIDGE_W).collect();
         assert!(near.len() >= 2, "parapets each side: {}", near.len());
-        assert!(near.iter().all(|w| w.distance(p) > BRIDGE_W * 0.5 - 0.05), "parapet on the deck");
+        assert!(near.iter().all(|w| w.distance(p) > BRIDGE_W * 0.5 - 0.05), "parapet on the deck: {:?} at {p}, widths {:?}, curv {:?}", near.iter().map(|w| (w.distance(p), w.a, w.b)).collect::<Vec<_>>(), &south.road.width[i - 4..i + 4], &south.road.curv[i - 4..i + 4]);
         // The pace notes call the narrowing onto a bridge.
         assert!(stage::corners(&south.road).iter().any(|c| c.narrows) || {
             // (Or on a straight approach: the width drops by more than a metre.)

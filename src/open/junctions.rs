@@ -645,9 +645,9 @@ mod tests {
             // Everything within reach of the centre.
             assert!(g.outline.iter().all(|p| p.distance(g.pos) < 90.0), "junction at {} sprawls", g.pos);
         }
-        // The village lanes meet the B-road (and a forest road crosses one).
-        let village = geoms.iter().filter(|g| g.town()).count();
-        assert!((2..=4).contains(&village), "village junctions {village}");
+        // Fernhollow's streets meet Main Street, the spine and each other.
+        let town = geoms.iter().filter(|g| g.town()).count();
+        assert!((20..=32).contains(&town), "town junctions {town}");
         assert!(geoms.len() >= 12, "{} junctions", geoms.len());
     }
 

@@ -13,6 +13,7 @@
 use bevy::log::warn;
 use bevy::math::{Vec2, Vec3};
 
+use super::land;
 use super::roads::{self, RoadKind, RoadNet};
 use crate::stage::{Rng, STEP};
 use crate::vehicle::Wall;
@@ -44,6 +45,12 @@ pub enum Use {
     /// Farmhouse and barn along a country road.
     FarmHouse,
     Barn,
+    /// Terraced houses: narrow units joined in rows, 2-4 storeys, pitched roofs.
+    Terrace,
+    /// The church (with its tower), the town hall, the mill (`bits & 7`: 1, 2, 4).
+    Civic,
+    /// A timber hut in the mountains: one storey, a gable.
+    Hut,
 }
 
 impl Use {
@@ -56,6 +63,9 @@ impl Use {
             Use::Tower => "tower",
             Use::FarmHouse => "farmhouse",
             Use::Barn => "barn",
+            Use::Terrace => "terrace",
+            Use::Civic => "civic",
+            Use::Hut => "hut",
         }
     }
 }
@@ -233,19 +243,27 @@ fn dress(rng: &mut Rng, use_: Use, ring: u32) -> (u32, f32, Roof, u8, u8) {
         Use::Downtown => (rng.range(5.0, 8.99) as u32, FLOOR, Roof::Flat, pick(rng, &[3, 8, 9, 0, 2, 5, 4]), 3),
         Use::Tower => (8, FLOOR, Roof::Flat, pick(rng, &[8, 3, 4]), 3),
         Use::Shop => {
-            let lo = if ring == 1 { 3.0 } else { 2.0 };
+            let lo = if ring == 0 { 3.0 } else { 2.0 };
             let roof = if rng.chance(0.25) { Roof::Gable } else { Roof::Flat };
             (rng.range(lo, lo + 1.99) as u32, FLOOR, roof, pick(rng, walls_town), if roof == Roof::Flat { 3 } else { pick(rng, &[0, 1, 2]) })
         }
-        Use::Apartment => {
-            let lo = if ring == 1 { 4.0 } else { 3.0 };
-            (rng.range(lo, lo + 2.99) as u32, FLOOR, Roof::Flat, pick(rng, &[0, 3, 5, 9, 4, 8]), 3)
-        }
+        Use::Apartment => (rng.range(3.0, 4.99) as u32, FLOOR, Roof::Flat, pick(rng, &[0, 3, 5, 9, 4, 8]), 3),
         Use::House | Use::FarmHouse => {
             let roof = if rng.chance(0.55) { Roof::Gable } else { Roof::Hip };
             (2, HOUSE_FLOOR, roof, pick(rng, &[0, 1, 2, 4, 5, 6, 7, 9]), pick(rng, &[0, 0, 1, 2]))
         }
         Use::Barn => (1, 5.2, Roof::Gable, pick(rng, &[2, 2, 8]), pick(rng, &[1, 4, 3])),
+        Use::Terrace => {
+            let floors = match ring {
+                0 => rng.range(3.0, 4.99) as u32,
+                1 => rng.range(2.0, 3.99) as u32,
+                _ => rng.range(2.0, 2.99) as u32,
+            };
+            let roof = if rng.chance(0.9) { Roof::Gable } else { Roof::Flat };
+            (floors, 3.0, roof, pick(rng, &[0, 1, 4, 5, 7, 9, 2]), if roof == Roof::Flat { 3 } else { pick(rng, &[0, 0, 1, 2]) })
+        }
+        Use::Civic => (rng.range(2.0, 3.99) as u32, 4.2, Roof::Hip, pick(rng, &[9, 3, 5]), 1),
+        Use::Hut => (1, 2.8, Roof::Gable, pick(rng, &[9, 8, 2]), pick(rng, &[1, 2])),
     }
 }
 
@@ -253,7 +271,7 @@ fn dress(rng: &mut Rng, use_: Use, ring: u32) -> (u32, f32, Roof, u8, u8) {
 fn building(rng: &mut Rng, use_: Use, ring: u32, centre: Vec2, axis: Vec2, half: Vec2, front: u8, ground: f32, base: f32) -> Building {
     let (floors, floor_h, roof, wall, roof_col) = dress(rng, use_, ring);
     let pitch = match use_ {
-        Use::Barn => rng.range(0.55, 0.75),
+        Use::Barn | Use::Hut => rng.range(0.55, 0.75),
         _ => rng.range(0.6, 0.85),
     };
     Building { centre, axis, half, front, floors, floor_h, ground, base, roof, pitch, use_, wall, roof_col, bits: bits(rng) }
@@ -265,7 +283,7 @@ pub fn layout(net: &RoadNet) -> Layout {
 }
 
 /// A town block's kind set in the world data (`open::data::WorldData::lots`): block (`i`,
-/// `j`) of the 6×6 grid, west to east and north to south.
+/// `j`) of the old 6×6 grid, west to east and north to south.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, bevy::reflect::Reflect)]
 pub struct LotData {
     pub i: u32,
@@ -273,23 +291,51 @@ pub struct LotData {
     pub kind: LotKind,
 }
 
-/// Lot kinds set in the world data. The valley village has no grid of blocks, so none are
-/// generated (kept for old level files: they're ignored with a warning).
+/// Lot kinds set in the world data. Fernhollow's blocks come from its plan (`open::town`),
+/// so none are generated (kept for old level files: they're ignored with a warning).
 pub fn town_lots(_seed: u64) -> Vec<LotData> {
     Vec::new()
 }
 
-/// The buildings of the world: the valley village along the B-road and its lanes, sheds round
-/// the service park, farms along the gravel roads. `lots` is ignored (no town grid any more).
+/// Where the outskirts' hamlets are (nominal; each is centred on the nearest road): Westbrook
+/// at the hillclimb's foot, Southford on the southern loop, Quarryside on the basin road.
+pub const HAMLETS: [(&str, Vec2); 3] = [("Westbrook", Vec2::new(-1700.0, -1180.0)), ("Southford", Vec2::new(0.0, -1640.0)), ("Quarryside", Vec2::new(1300.0, -900.0))];
+
+/// The buildings of the world (docs/festival/WORLD_PASS.md §3): Fernhollow's blocks (rows of
+/// shops and terraces, apartments, a church, a town hall, a mill), its outskirts (houses along
+/// the B-road and up the spine, three hamlets), sheds round the service park, farms on the low
+/// roads and a few huts in the mountains. `lots` is ignored (the town's blocks are its plan's).
 pub fn layout_with(net: &RoadNet, lots: &[LotData]) -> Layout {
     if !lots.is_empty() {
-        warn!("{} town lot kinds in the world data: the village has no blocks; ignored", lots.len());
+        warn!("{} town lot kinds in the world data: the town's blocks come from its plan; ignored", lots.len());
     }
     let mut blocks = Vec::new();
     let mut buildings = Vec::new();
-    village(net, &mut blocks, &mut buildings);
+    town(net, &mut blocks, &mut buildings);
+    service_park(net, &mut blocks, &mut buildings);
+    outskirts(net, &mut blocks, &mut buildings);
     farms(net, &mut blocks, &mut buildings);
+    huts(net, &mut blocks, &mut buildings);
     Layout { seed: net.seed, town_y: net.town_y, blocks, buildings }
+}
+
+/// A footprint at `centre` (axis `axis`, half extents `half`, front side `front`) that fits:
+/// on ground flat enough (under 2.5 m across it), `margin` m clear of every road's edge, clear
+/// of the river, overlapping no building by more than `-gap` m. Its floor and plinth heights.
+#[allow(clippy::too_many_arguments)]
+fn fits(net: &RoadNet, buildings: &[Building], use_: Use, centre: Vec2, axis: Vec2, half: Vec2, front: u8, margin: f32, gap: f32) -> Option<(f32, f32)> {
+    let probe = Building { centre, axis, half, front, floors: 1, floor_h: 3.0, ground: 0.0, base: 0.0, roof: Roof::Flat, pitch: 0.0, use_, wall: 0, roof_col: 0, bits: 0 };
+    let corners = probe.corners();
+    if corners.iter().any(|c| net.land.river_distance(*c) < 24.0) {
+        return None;
+    }
+    let reach = half.length() + gap.max(0.0) + 1.0;
+    if buildings.iter().any(|b| b.centre.distance(centre) < reach + b.half.length() && overlaps(b, &probe, gap)) {
+        return None;
+    }
+    let hs: Vec<f32> = corners.iter().chain(std::iter::once(&centre)).map(|q| roads::height(net, q.x, q.y)).collect();
+    let (lo, hi) = hs.iter().fold((f32::MAX, f32::MIN), |(a, b), &h| (a.min(h), b.max(h)));
+    (hi - lo < 2.5 && clear_of_roads(net, &probe, margin)).then_some((hi + 0.15, lo - 0.4))
 }
 
 /// A building of `use_` and `half` size beside road station `p` (direction `dir`), on the
@@ -299,57 +345,158 @@ pub fn layout_with(net: &RoadNet, lots: &[LotData]) -> Layout {
 fn frontage(net: &RoadNet, rng: &mut Rng, buildings: &[Building], use_: Use, ring: u32, p: Vec2, dir: Vec2, out: Vec2, reach: f32, half: Vec2) -> Option<Building> {
     let c = p + out * (reach + half.y);
     let front = if dir.perp().dot(-out) > 0.0 { 1 } else { 3 };
-    let probe = Building { centre: c, axis: dir, half, front, floors: 1, floor_h: 3.0, ground: 0.0, base: 0.0, roof: Roof::Flat, pitch: 0.0, use_, wall: 0, roof_col: 0, bits: 0 };
-    let hs: Vec<f32> = probe.corners().iter().chain(std::iter::once(&c)).map(|q| roads::height(net, q.x, q.y)).collect();
-    let (lo_h, hi_h) = hs.iter().fold((f32::MAX, f32::MIN), |(a, b), &h| (a.min(h), b.max(h)));
-    let fits = clear_of_roads(net, &probe, 3.0) && hi_h - lo_h < 2.5 && !buildings.iter().any(|b| overlaps(b, &probe, 2.5));
-    fits.then(|| building(rng, use_, ring, c, dir, half, front, hi_h + 0.15, lo_h - 0.4))
+    let (ground, base) = fits(net, buildings, use_, c, dir, half, front, 3.0, 2.5)?;
+    Some(building(rng, use_, ring, c, dir, half, front, ground, base))
 }
 
-/// The valley village: houses (and shops near the middle) on both sides of the B-road within
-/// [`VILLAGE_R`] of the village centre and along the lanes; sheds round the service park.
-fn village(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
-    let pl = net.places();
+/// How far from the town's centre (the market square) a point is, as a ring: 0 within 200 m,
+/// 1 within 420 m, 2 beyond.
+fn ring_of(p: Vec2) -> u32 {
+    let d = p.distance(Vec2::new(land::SPINE_X + 40.0, land::MAIN_Z + 40.0));
+    if d < 200.0 { 0 } else if d < 420.0 { 1 } else { 2 }
+}
+
+/// What a row is made of: unit use, frontage and depth ranges (m), set back from the lot's
+/// edge (m), row length before an alley (m).
+#[derive(Clone, Copy)]
+struct RowStyle {
+    use_: Use,
+    frontage: (f32, f32),
+    depth: (f32, f32),
+    setback: (f32, f32),
+    row: (f32, f32),
+    /// Chance the gap after a row is a 3-4 m alley, else a yard this wide (m).
+    alley: f32,
+    yard: (f32, f32),
+}
+
+const SHOPS: RowStyle = RowStyle { use_: Use::Shop, frontage: (7.0, 12.0), depth: (12.0, 16.0), setback: (0.0, 1.0), row: (30.0, 55.0), alley: 0.55, yard: (6.0, 14.0) };
+const TERRACES: RowStyle = RowStyle { use_: Use::Terrace, frontage: (5.5, 7.5), depth: (9.0, 12.0), setback: (0.0, 1.5), row: (20.0, 40.0), alley: 0.2, yard: (20.0, 40.0) };
+const APARTMENTS: RowStyle = RowStyle { use_: Use::Apartment, frontage: (18.0, 30.0), depth: (12.0, 14.0), setback: (4.0, 6.0), row: (18.0, 30.0), alley: 0.0, yard: (8.0, 16.0) };
+const SEMIS: RowStyle = RowStyle { use_: Use::House, frontage: (7.5, 9.0), depth: (8.5, 10.0), setback: (3.0, 5.0), row: (15.0, 18.0), alley: 0.0, yard: (14.0, 24.0) };
+
+/// Fernhollow: every block of its plan (`open::town`), rows of buildings along the edges that
+/// face a street, fronts on the sidewalk; the church, the town hall and the mill first.
+fn town(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
     let mut rng = Rng::new(net.seed ^ 0x7111_A6E5);
-    let near_junction = |p: Vec2| net.junctions.iter().any(|j| j.pos.distance(p) < 16.0);
-    let first = buildings.len();
-    for r in net.roads.iter().filter(|r| matches!(r.kind, RoadKind::Street | RoadKind::BRoad)) {
-        let road = &r.road;
-        let mut i = 0;
-        while i < road.len() {
-            let p = Vec2::new(road.pts[i].x, road.pts[i].z);
-            let dv = p.distance(pl.village);
-            let lane = r.kind == RoadKind::Street;
-            if (dv < VILLAGE_R || (lane && dv < VILLAGE_R * 1.6)) && !near_junction(p) {
-                let dir = road.dir[i];
-                for side in [1.0, -1.0] {
-                    if !rng.chance(if dv < VILLAGE_R * 0.5 { 0.9 } else { 0.7 }) {
-                        continue;
-                    }
-                    let shop = dv < 110.0 && !lane && rng.chance(0.55);
-                    let (use_, half, set) = if shop {
-                        (Use::Shop, Vec2::new(rng.range(5.0, 8.0), rng.range(5.0, 7.0)), rng.range(2.5, 4.0))
-                    } else {
-                        (Use::House, Vec2::new(rng.range(4.0, 6.0), rng.range(4.0, 5.5)), rng.range(5.0, 9.0))
-                    };
-                    let reach = road.width[i] * 0.5 + set;
-                    if let Some(b) = frontage(net, &mut rng, buildings, use_, if shop { 1 } else { 2 }, p, dir, dir.perp() * side, reach, half) {
-                        buildings.push(b);
-                    }
-                }
-                i += (rng.range(18.0, 26.0) / STEP) as usize;
-            } else {
-                i += (10.0 / STEP) as usize;
+    for (bi, pb) in super::town::blocks().iter().enumerate() {
+        let first = buildings.len();
+        // One roof colour for most of a block (towns grow in phases): terracotta, slate,
+        // brown.
+        let roof = pick(&mut rng, &[0u8, 0, 0, 1, 1, 2]);
+        match (pb.name, pb.kind) {
+            ("B-W2", _) => civic(net, &mut rng, buildings, Vec2::new(-372.0, pb.min.y + 14.0), Vec2::X, Vec2::new(7.5, 14.0), 3, 1),
+            ("A-E1", _) => civic(net, &mut rng, buildings, Vec2::new(pb.min.x + 8.0, pb.min.y + 22.0), Vec2::Y, Vec2::new(10.0, 8.0), 0, 2),
+            ("riverside", _) => civic(net, &mut rng, buildings, Vec2::new(pb.min.x + 16.0, pb.max.y - 8.0), Vec2::X, Vec2::new(13.0, 7.5), 1, 4),
+            _ => {}
+        }
+        if let LotKind::Rows(u) = pb.kind {
+            // Long edges first: the corners go to them.
+            let mut edges: Vec<usize> = (0..4).filter(|&e| pb.edges[e]).collect();
+            let len = |e: usize| if e < 2 { pb.max.y - pb.min.y } else { pb.max.x - pb.min.x };
+            edges.sort_by(|a, b| len(*b).total_cmp(&len(*a)).then(a.cmp(b)));
+            for e in edges {
+                // Main Street's frontage is shops; elsewhere the block's kind, shops near the
+                // spine on the cross streets.
+                let main = e == 2 && (pb.min.y - (land::MAIN_Z + super::town::MAIN_HALF + SIDEWALK)).abs() < 0.5 || pb.name == "riverside";
+                let style = match u {
+                    Use::Shop if main => SHOPS,
+                    Use::Shop => TERRACES,
+                    Use::Apartment => APARTMENTS,
+                    Use::House => SEMIS,
+                    _ => TERRACES,
+                };
+                row_edge(net, &mut rng, buildings, pb.min, pb.max, e, style, roof);
             }
         }
+        blocks.push(Block { cell: Some((bi as u32, 0)), min: pb.min, max: pb.max, kind: pb.kind, buildings: (first..buildings.len()).collect() });
     }
-    group(blocks, buildings, first, LotKind::Rows(Use::House));
-    // Service park: a row of big sheds set back on the far side of the B-road.
+}
+
+/// A civic building (`kind`: 1 church, with its tower at the street end; 2 town hall; 4 mill)
+/// at `c`, its local x along `axis`, front side `front`.
+#[allow(clippy::too_many_arguments)]
+fn civic(net: &RoadNet, rng: &mut Rng, buildings: &mut Vec<Building>, c: Vec2, axis: Vec2, half: Vec2, front: u8, kind: u32) {
+    if let Some((ground, base)) = fits(net, buildings, Use::Civic, c, axis, half, front, SIDEWALK - 0.02, 1.0) {
+        let mut b = building(rng, Use::Civic, 0, c, axis, half, front, ground, base);
+        b.bits = (b.bits & !7) | kind;
+        if kind == 4 {
+            // The mill: brick, a gable, three tall storeys.
+            (b.wall, b.roof, b.roof_col, b.floors) = (2, Roof::Gable, 1, 3);
+        }
+        buildings.push(b);
+    }
+}
+
+/// A row of buildings along edge `e` (0 west, 1 east, 2 south, 3 north) of the lot
+/// `min`..`max`, fronts facing out across the sidewalk to the street, in rows broken by alleys
+/// and yards.
+#[allow(clippy::too_many_arguments)]
+fn row_edge(net: &RoadNet, rng: &mut Rng, buildings: &mut Vec<Building>, min: Vec2, max: Vec2, e: usize, style: RowStyle, roof: u8) {
+    // Start of the edge, direction along it, and the outward normal (towards the street).
+    let (start, d, n) = match e {
+        0 => (Vec2::new(min.x, min.y), Vec2::Y, -Vec2::X),
+        1 => (Vec2::new(max.x, min.y), Vec2::Y, Vec2::X),
+        2 => (Vec2::new(min.x, min.y), Vec2::X, -Vec2::Y),
+        _ => (Vec2::new(min.x, max.y), Vec2::X, Vec2::Y),
+    };
+    let len = if e < 2 { max.y - min.y } else { max.x - min.x };
+    let front = if d.perp().dot(n) > 0.0 { 1 } else { 3 };
+    let inside = |b: &Building| b.corners().iter().all(|c| c.x >= min.x - 0.01 && c.x <= max.x + 0.01 && c.y >= min.y - 0.01 && c.y <= max.y + 0.01);
+    let mut t = 0.0;
+    let mut last_wall = u8::MAX;
+    while t < len - style.frontage.0 {
+        let row_end = (t + rng.range(style.row.0, style.row.1)).min(len);
+        let depth = rng.range(style.depth.0, style.depth.1);
+        let setback = rng.range(style.setback.0, style.setback.1);
+        let mut placed = 0;
+        while t < row_end - style.frontage.0 * 0.9 {
+            let mut w = rng.range(style.frontage.0, style.frontage.1);
+            if t + w > row_end {
+                w = row_end - t;
+            }
+            // Shops' depths vary unit by unit; a terrace's back line is the row's.
+            let dep = if style.use_ == Use::Shop { rng.range(style.depth.0, style.depth.1) } else { depth };
+            let half = Vec2::new(w * 0.5, dep * 0.5);
+            let c = start + d * (t + w * 0.5) - n * (setback + dep * 0.5);
+            let fit = fits(net, buildings, style.use_, c, d, half, front, SIDEWALK - 0.02, -0.005);
+            match fit {
+                Some((ground, base)) => {
+                    let mut b = building(rng, style.use_, ring_of(c), c, d, half, front, ground, base);
+                    if !inside(&b) {
+                        t += 1.0;
+                        continue;
+                    }
+                    // Most of a block under one roof colour; never two neighbours alike.
+                    if b.roof != Roof::Flat && rng.chance(0.75) {
+                        b.roof_col = roof;
+                    }
+                    while b.wall == last_wall {
+                        b.wall = pick(rng, &[0u8, 1, 4, 5, 6, 7, 9, 3]);
+                    }
+                    last_wall = b.wall;
+                    buildings.push(b);
+                    placed += 1;
+                    t += w;
+                }
+                None => t += 1.0,
+            }
+        }
+        let _ = placed;
+        last_wall = u8::MAX;
+        t += if rng.chance(style.alley) { rng.range(3.0, 4.0) } else { rng.range(style.yard.0, style.yard.1) };
+    }
+}
+
+/// Sheds round the service park: a row set back on the far side of the B-road.
+fn service_park(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
+    let pl = net.places();
+    let mut rng = Rng::new(net.seed ^ 0x5E7_1CE5);
     let first = buildings.len();
     let valley = &net.roads[0].road;
     if let Some(at) = valley.nearest(pl.park, 300.0) {
-        for k in -3i32..=3 {
-            let i = (at.i as i32 + k * 14).clamp(0, valley.len() as i32 - 1) as usize;
+        for k in -4i32..=4 {
+            let i = (at.i as i32 + k * 13).clamp(0, valley.len() as i32 - 1) as usize;
             let p = Vec2::new(valley.pts[i].x, valley.pts[i].z);
             let dir = valley.dir[i];
             let half = Vec2::new(rng.range(9.0, 13.0), rng.range(7.0, 10.0));
@@ -362,8 +509,114 @@ fn village(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>
     group(blocks, buildings, first, LotKind::Parking);
 }
 
-/// How far from the village centre (m) the B-road is built up.
-pub const VILLAGE_R: f32 = 300.0;
+/// Houses with gardens along `road` at the stations `keep` allows, one plot every 18-26 m on
+/// each side (filled `chance` of the time), at most `max`.
+#[allow(clippy::too_many_arguments)]
+fn ribbon(net: &RoadNet, rng: &mut Rng, buildings: &mut Vec<Building>, road: usize, keep: &dyn Fn(Vec2) -> bool, chance: f32, max: usize) -> usize {
+    let r = &net.roads[road].road;
+    let near_junction = |p: Vec2| net.junctions.iter().any(|j| j.pos.distance(p) < 22.0);
+    let mut made = 0;
+    let mut i = 0;
+    while i < r.len() && made < max {
+        let p = Vec2::new(r.pts[i].x, r.pts[i].z);
+        if !keep(p) || near_junction(p) {
+            i += (8.0 / STEP) as usize;
+            continue;
+        }
+        let dir = r.dir[i];
+        for side in [1.0, -1.0] {
+            if made >= max || !rng.chance(chance) {
+                continue;
+            }
+            let half = Vec2::new(rng.range(4.0, 6.0), rng.range(4.0, 5.0));
+            let reach = r.width[i] * 0.5 + rng.range(5.0, 9.0);
+            if let Some(b) = frontage(net, rng, buildings, Use::House, 2, p, dir, dir.perp() * side, reach, half) {
+                buildings.push(b);
+                made += 1;
+            }
+        }
+        i += (rng.range(18.0, 26.0) / STEP) as usize;
+    }
+    made
+}
+
+/// The outskirts: houses along the B-road west and east of the town, up the spine above
+/// Upper Road, and three hamlets of 8-14 houses.
+fn outskirts(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
+    let mut rng = Rng::new(net.seed ^ 0x0075_C127);
+    let first = buildings.len();
+    ribbon(net, &mut rng, buildings, 0, &|p| (-1300.0..super::town::WEST_X - 60.0).contains(&p.x), 0.55, 40);
+    ribbon(net, &mut rng, buildings, 0, &|p| (super::town::EAST_X + 60.0..220.0).contains(&p.x), 0.7, 14);
+    let top = super::town::UPPER.1;
+    ribbon(net, &mut rng, buildings, 4, &|p| p.y > top + 40.0 && p.y < top + 420.0, 0.7, 26);
+    group(blocks, buildings, first, LotKind::Rows(Use::House));
+    for (_, at) in HAMLETS {
+        let first = buildings.len();
+        // Centred on the nearest road.
+        let Some(c) = net.nearest(at, 400.0).map(|n| {
+            let r = &net.roads[n.road].road;
+            Vec2::new(r.pts[n.at.i].x, r.pts[n.at.i].z)
+        }) else {
+            continue;
+        };
+        let mut left = 14;
+        for k in 0..net.roads.len() {
+            if left == 0 {
+                break;
+            }
+            left -= ribbon(net, &mut rng, buildings, k, &|p| p.distance(c) < 150.0, 0.85, left);
+        }
+        group(blocks, buildings, first, LotKind::Rows(Use::House));
+    }
+}
+
+/// A hut (1 storey, timber) near station `s` (m) of `road`, the first spot that fits within
+/// 60 m of it either side, 8-20 m off the road.
+fn hut(net: &RoadNet, rng: &mut Rng, buildings: &mut Vec<Building>, road: usize, s: f32) -> bool {
+    let Some(r) = net.roads.get(road).map(|r| &r.road) else { return false };
+    for k in 0..20 {
+        let off = (k / 2) as f32 * 6.0 * if k % 2 == 0 { 1.0 } else { -1.0 };
+        let i = ((s + off) / STEP).clamp(5.0, r.len() as f32 - 6.0) as usize;
+        let p = Vec2::new(r.pts[i].x, r.pts[i].z);
+        let dir = r.dir[i];
+        for side in [1.0, -1.0] {
+            let half = Vec2::new(rng.range(2.0, 3.0), rng.range(2.5, 3.5));
+            let reach = r.width[i] * 0.5 + rng.range(8.0, 20.0);
+            if let Some(b) = frontage(net, rng, buildings, Use::Hut, 3, p, dir, dir.perp() * side, reach, half) {
+                buildings.push(b);
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Huts in the mountains, only at places of interest: three at the logging camp, the radio
+/// tower, a café at the top of the hillclimb, two shelters on the pass, the quarry office and
+/// two forest cabins on the forestry road.
+fn huts(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
+    let pl = net.places();
+    let mut rng = Rng::new(net.seed ^ 0x40_7500);
+    let at = |road: usize, p: Vec2| net.roads.get(road).and_then(|r| r.road.nearest(p, 600.0)).map_or(0.0, |n| n.s);
+    let len = |road: usize| net.roads.get(road).map_or(0.0, |r| r.road.length());
+    let spots = [
+        (4, at(4, pl.camp)),
+        (4, at(4, pl.camp) + 70.0),
+        (5, 60.0),
+        (3, at(3, pl.tower)),
+        (1, len(1) - 60.0),
+        (3, len(3) * 0.33),
+        (3, len(3) * 0.66),
+        (2, at(2, pl.quarry)),
+        (4, len(4) * 0.45),
+        (4, len(4) * 0.7),
+    ];
+    for (road, s) in spots {
+        let first = buildings.len();
+        hut(net, &mut rng, buildings, road, s);
+        group(blocks, buildings, first, LotKind::Farm);
+    }
+}
 
 /// A block (no lot drawn) holding `buildings[first..]`.
 fn group(blocks: &mut Vec<Block>, buildings: &[Building], first: usize, kind: LotKind) {
@@ -404,18 +657,27 @@ pub fn layout_baked(net: &RoadNet, lots: &[LotData], baked: &[Building]) -> Layo
     l
 }
 
-/// A farmhouse (and usually a barn behind it) every so often along the gravel roads below the
-/// plateau and away from the village, on ground flat enough, clear of every road.
+/// Farms: a farmhouse (and usually a barn behind it) every so often along the gravel roads
+/// below the plateau and the B-road out in the valley, away from the town, the park and the
+/// hamlets, on ground flat enough, clear of every road.
 fn farms(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
     let mut rng = Rng::new(net.seed ^ 0xFA53);
+    let pl = net.places();
     let every = (170.0 / STEP) as usize;
-    for r in net.roads.iter().filter(|r| r.kind == RoadKind::Gravel) {
+    let away = |p: Vec2| {
+        !super::town::in_core(p) && p.distance(super::land::TOWN_C) > 700.0 && p.distance(pl.park) > 260.0 && HAMLETS.iter().all(|(_, h)| p.distance(*h) > 300.0) && !(-1320.0..260.0).contains(&p.x)
+    };
+    for (k, r) in net.roads.iter().enumerate().filter(|(_, r)| matches!(r.kind, RoadKind::Gravel | RoadKind::BRoad)) {
+        // The B-road: only the valley one (not the hillclimb).
+        if r.kind == RoadKind::BRoad && k != 0 {
+            continue;
+        }
         let road = &r.road;
         let mut i = every / 2;
         while i < road.len() {
             let p = Vec2::new(road.pts[i].x, road.pts[i].z);
-            let low = road.pts[i].y < 260.0 && p.distance(net.places().village) > VILLAGE_R + 150.0;
-            if low && rng.chance(0.5) {
+            let low = road.pts[i].y < 260.0 && (r.kind == RoadKind::Gravel && p.distance(super::land::TOWN_C) > 600.0 || away(p));
+            if low && rng.chance(0.7) {
                 let dir = road.dir[i];
                 let side = if rng.chance(0.5) { 1.0 } else { -1.0 };
                 let out = dir.perp() * side;
@@ -431,34 +693,18 @@ fn farms(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) 
                     farm.push((Use::Barn, barn_c, barn_half, front));
                 }
                 let first = buildings.len();
-                let mut ok = Vec::new();
                 for (u, c, half, front) in farm {
-                    let probe = Building { centre: c, axis: dir, half, front, floors: 1, floor_h: 3.0, ground: 0.0, base: 0.0, roof: Roof::Flat, pitch: 0.0, use_: u, wall: 0, roof_col: 0, bits: 0 };
-                    let corners = probe.corners();
-                    let hs: Vec<f32> = corners.iter().chain(std::iter::once(&c)).map(|q| roads::height(net, q.x, q.y)).collect();
-                    let (lo_h, hi_h) = hs.iter().fold((f32::MAX, f32::MIN), |(a, b), &h| (a.min(h), b.max(h)));
-                    let clear = clear_of_roads(net, &probe, 6.0) && hi_h - lo_h < 2.5 && !buildings.iter().any(|b| overlaps(b, &probe, 3.0));
-                    if !clear {
+                    match fits(net, buildings, u, c, dir, half, front, 6.0, 3.0) {
+                        Some((ground, base)) => {
+                            let b = building(&mut rng, u, 3, c, dir, half, front, ground, base);
+                            buildings.push(b);
+                        }
                         // A barn that doesn't fit is dropped; so is a farm without its house.
-                        if u == Use::FarmHouse {
-                            break;
-                        }
-                        continue;
+                        None if u == Use::FarmHouse => break,
+                        None => {}
                     }
-                    let b = building(&mut rng, u, 3, c, dir, half, front, hi_h + 0.15, lo_h - 0.4);
-                    ok.push(b);
-                    buildings.push(b);
                 }
-                if !ok.is_empty() {
-                    let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
-                    for b in &ok {
-                        for q in b.corners() {
-                            lo = lo.min(q);
-                            hi = hi.max(q);
-                        }
-                    }
-                    blocks.push(Block { cell: None, min: lo, max: hi, kind: LotKind::Farm, buildings: (first..buildings.len()).collect() });
-                }
+                group(blocks, buildings, first, LotKind::Farm);
                 i += every;
             } else {
                 i += every / 2;
@@ -532,7 +778,7 @@ pub fn walls(layout: &Layout) -> Vec<Wall> {
 /// direction.
 type Line = ((i64, i64), f32, f32, Vec2);
 
-/// Joins walls on one line (to a mrad and 10 cm) whose ends meet (within their two radii and a
+/// Joins walls on one line (to a mrad and 1 cm) whose ends meet (within their two radii and a
 /// few cm): sorted by line then position along it, so the result is the same on every machine.
 fn join_in_line(walls: Vec<Wall>) -> Vec<Wall> {
     // Each wall as (line: direction angle in [0, π) and offset, quantised; start, end along
@@ -541,7 +787,7 @@ fn join_in_line(walls: Vec<Wall>) -> Vec<Wall> {
         let d = (w.b - w.a).normalize_or_zero();
         let d = if d.x < 0.0 || d.x == 0.0 && d.y < 0.0 { -d } else { d };
         let (s, e) = (w.a.dot(d), w.b.dot(d));
-        let key = ((libm::atan2f(d.y, d.x) * 1000.0).round() as i64, (d.perp().dot(w.a) * 10.0).round() as i64);
+        let key = ((libm::atan2f(d.y, d.x) * 1000.0).round() as i64, (d.perp().dot(w.a) * 100.0).round() as i64);
         (key, s.min(e), s.max(e), d)
     };
     let mut keyed: Vec<_> = walls.iter().filter(|w| w.a != w.b).map(|w| (line(w), *w)).collect();
@@ -801,11 +1047,49 @@ mod render {
             Use::Barn => {
                 if front && mid { Tile::BarnDoor } else { Tile::Planks }
             }
+            Use::Terrace => {
+                // A door on the ground floor's first bay, windows over it; the odd blind bay.
+                if j == 0 && front && i == 0 {
+                    Tile::HouseDoor
+                } else if side_wall || (!front && hash(b.bits, i + 3, j) < 0.3) {
+                    Tile::Plain
+                } else if j > 0 && b.bits & 16 != 0 && hash(b.bits, i, j) < 0.2 {
+                    Tile::WinBalcony
+                } else {
+                    Tile::WinHouse
+                }
+            }
+            Use::Civic => {
+                if j == 0 && front && mid {
+                    Tile::ShopDoor
+                } else if b.bits & 7 == 4 {
+                    // The mill: small windows in brick.
+                    if hash(b.bits, i, j) < 0.5 { Tile::WinHouse } else { Tile::Plain }
+                } else {
+                    Tile::WinOffice
+                }
+            }
+            Use::Hut => {
+                if front && mid && j == 0 {
+                    Tile::HouseDoor
+                } else if front || hash(b.bits, i, j) < 0.3 {
+                    Tile::WinHouse
+                } else {
+                    Tile::Planks
+                }
+            }
         }
     }
 
-    /// Adds a building's walls, roof and details.
+    /// Adds a building's walls, roof and details (and the church's tower).
     pub(super) fn add_building(buf: &mut Buf, b: &Building) {
+        add_body(buf, b);
+        if b.use_ == Use::Civic && b.bits & 7 == 1 {
+            add_tower(buf, b);
+        }
+    }
+
+    fn add_body(buf: &mut Buf, b: &Building) {
         let wall = WALLS[b.wall as usize];
         let roof_c = ROOFS[b.roof_col as usize];
         let ax = b.axis;
@@ -819,6 +1103,7 @@ mod render {
             Use::Downtown | Use::Tower => 2.7,
             Use::House | Use::FarmHouse => 3.3,
             Use::Barn => 3.6,
+            Use::Civic => 3.6,
             _ => 3.0,
         };
         let parapet = if b.roof == Roof::Flat { PARAPET.0 } else { 0.0 };
@@ -924,6 +1209,24 @@ mod render {
         }
     }
 
+    /// The church's tower: a square stone tower at the street end of the nave, its top well
+    /// over the roof, with a steep pyramid roof.
+    pub(super) fn add_tower(buf: &mut Buf, b: &Building) {
+        let side = b.half.x.min(b.half.y) * 0.75;
+        // The street end: the front face's middle, the tower just inside it.
+        let n = match b.front {
+            0 => b.axis,
+            1 => b.axis.perp(),
+            2 => -b.axis,
+            _ => -b.axis.perp(),
+        };
+        let reach = if b.front % 2 == 0 { b.half.x } else { b.half.y };
+        let c = b.centre + n * (reach - side * 0.5);
+        let height = b.top() - b.ground + 9.0;
+        let t = Building { centre: c, half: Vec2::splat(side * 0.5), floors: 1, floor_h: height, roof: Roof::Hip, pitch: 1.8, bits: b.bits & !7, ..*b };
+        add_building(buf, &t);
+    }
+
     fn rng_box(b: &Building, k: i32, lo: f32, hi: f32) -> f32 {
         lo + (hi - lo) * hash(b.bits, k, 911)
     }
@@ -953,10 +1256,10 @@ mod render {
         let (olo, ohi) = (lo - Vec2::splat(SIDEWALK), hi + Vec2::splat(SIDEWALK));
         let rect = |a: Vec2, b: Vec2| [Vec2::new(a.x, a.y), Vec2::new(b.x, a.y), Vec2::new(b.x, b.y), Vec2::new(a.x, b.y)];
         let lift = 0.05;
-        // Sidewalks sit up level with the kerb (`art::junctions`), their outer corners rounded
-        // to the kerb's fillet at the junctions.
-        let town_y = buf.origin.y;
-        let walk = |x: f32, z: f32| height(x, z).max(town_y + crate::open::junctions::SIDEWALK_TOP - lift);
+        // Sidewalks sit up level with the kerb (`art::junctions`) on the ground (the town slopes
+        // gently up from Main Street), their outer corners rounded to the kerb's fillet at the
+        // junctions.
+        let walk = |x: f32, z: f32| height(x, z) + crate::open::junctions::SIDEWALK_TOP - lift;
         let r = crate::open::junctions::TOWN_KERB_R;
         buf.draped(&walk, lift, &rect(Vec2::new(olo.x + r, olo.y), Vec2::new(ohi.x - r, lo.y)), Vec2::splat(2.0), paving);
         buf.draped(&walk, lift, &rect(Vec2::new(olo.x + r, hi.y), Vec2::new(ohi.x - r, ohi.y)), Vec2::splat(2.0), paving);
@@ -971,7 +1274,7 @@ mod render {
         }
         match blk.kind {
             LotKind::Plaza | LotKind::Tower => {
-                buf.draped(height, lift - 0.01, &rect(lo, hi), Vec2::splat(2.0), |i, j| (Tile::Paving, lin([0.9, 0.86, 0.78], 0.93 + 0.07 * hash(7, i, j))));
+                buf.draped(&walk, lift - 0.01, &rect(lo, hi), Vec2::splat(2.0), |i, j| (Tile::Paving, lin([0.9, 0.86, 0.78], 0.93 + 0.07 * hash(7, i, j))));
             }
             LotKind::Parking => {
                 // Rows of bays (5.5 m deep, 2.5 m wide), back to back, with aisles between.
@@ -1345,8 +1648,8 @@ mod tests {
             count(Use::FarmHouse),
             count(Use::Barn)
         );
-        assert!((80..=200).contains(&a.buildings.len()), "{}", a.buildings.len());
-        for u in [Use::Shop, Use::House, Use::Barn] {
+        assert!((560..=800).contains(&a.buildings.len()), "{}", a.buildings.len());
+        for u in [Use::Shop, Use::House, Use::Barn, Use::Terrace, Use::Apartment, Use::Civic, Use::Hut] {
             assert!(count(u) > 0, "{u:?}");
         }
         // Another seed gives another town.
@@ -1375,15 +1678,28 @@ mod tests {
         }
     }
 
+    /// WORLD_PASS §3's counts: a dense core, sparse outskirts and hamlets, farms on the low
+    /// roads, rare huts in the mountains; every building on its ground.
     #[test]
-    fn a_valley_village() {
+    fn fernhollow_and_its_country() {
         let n = net();
         let l = layout(&n);
-        let pl = n.places();
-        let village = l.buildings.iter().filter(|b| b.centre.distance(pl.village) < VILLAGE_R * 1.7).count();
-        eprintln!("village buildings: {village}, all: {}", l.buildings.len());
-        assert!((60..=140).contains(&village), "{village} buildings in the village");
-        assert!(l.buildings.len() <= 200, "{} buildings", l.buildings.len());
+        let farm = |b: &&Building| matches!(b.use_, Use::FarmHouse | Use::Barn);
+        let core = l.buildings.iter().filter(|b| super::super::town::in_core(b.centre) && !farm(b)).count();
+        let outskirts = l.buildings.iter().filter(|b| !super::super::town::in_core(b.centre) && b.use_ == Use::House).count();
+        let steadings = l.buildings.iter().filter(|b| b.use_ == Use::FarmHouse).count();
+        let huts = l.buildings.iter().filter(|b| b.use_ == Use::Hut).count();
+        let civic = l.buildings.iter().filter(|b| b.use_ == Use::Civic).count();
+        let high = l.buildings.iter().filter(|b| b.use_ == Use::Hut && b.ground > 250.0).count();
+        eprintln!("core {core}, outskirts and hamlets {outskirts}, farm steadings {steadings}, huts {huts} ({high} above 250 m), civic {civic}, all {}", l.buildings.len());
+        assert!((380..=520).contains(&core), "{core} buildings in the core");
+        assert!((80..=130).contains(&outskirts), "{outskirts} in the outskirts and hamlets");
+        assert!((25..=35).contains(&steadings), "{steadings} farm steadings");
+        assert!((8..=12).contains(&huts), "{huts} huts");
+        assert_eq!(civic, 3, "church, town hall, mill");
+        // Nothing else lives up in the mountains.
+        let others_high = l.buildings.iter().filter(|b| b.use_ != Use::Hut && b.ground > 250.0).count();
+        assert!(others_high <= 2, "{others_high} buildings other than huts above 250 m");
         for b in &l.buildings {
             assert!((1..=4).contains(&b.floors), "{b:?}");
             for c in b.corners() {
@@ -1415,7 +1731,8 @@ mod tests {
         // Four sides a building, less the facades joined in rows.
         let joined = 4 * l.buildings.len() - ws.len();
         eprintln!("walls: {} for {} buildings ({joined} facades joined onto a neighbour's)", ws.len(), l.buildings.len());
-        assert!(ws.len() >= 3 * l.buildings.len(), "{}", ws.len());
+        // (Terraces join their fronts and backs into one wall a row.)
+        assert!(ws.len() >= 2 * l.buildings.len(), "{}", ws.len());
         let grid = WallGrid::new(&ws, 10.0);
         assert_eq!(grid.len(), ws.len());
         let mut near = Vec::new();
@@ -1592,8 +1909,12 @@ mod map {
         let Ok(out) = std::env::var("PACENOTE_TOWN_SVG") else { return };
         let net = roads::generate(crate::open::SEED);
         let l = layout(&net);
-        let v = 900.0;
-        let mut s = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}" width="1400" height="1400"><rect x="{}" y="{}" width="{}" height="{}" fill="#3d5236"/>"##, -v, -v, 2.0 * v, 2.0 * v, -v, -v, 2.0 * v, 2.0 * v);
+        // Round the town (`PACENOTE_TOWN_VIEW=x,z,half` for elsewhere).
+        let (cx, cz, v) = std::env::var("PACENOTE_TOWN_VIEW").ok().and_then(|s| {
+            let p: Vec<f32> = s.split(',').filter_map(|x| x.parse().ok()).collect();
+            (p.len() == 3).then(|| (p[0], p[1], p[2]))
+        }).unwrap_or((-320.0, -1010.0, 450.0));
+        let mut s = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}" width="1400" height="1400"><rect x="{}" y="{}" width="{}" height="{}" fill="#3d5236"/>"##, cx - v, cz - v, 2.0 * v, 2.0 * v, cx - v, cz - v, 2.0 * v, 2.0 * v);
         for r in &net.roads {
             let d: Vec<String> = r.road.pts.iter().map(|p| format!("{:.1},{:.1}", p.x, p.z)).collect();
             s += &format!(r##"<polyline fill="none" stroke="#bdb8ad" stroke-width="{}" points="{}"/>"##, r.road.width[0] + 2.0 * SIDEWALK, d.join(" "));
@@ -1618,6 +1939,9 @@ mod map {
                 Use::Apartment => "#a07f9f",
                 Use::FarmHouse => "#f0e0c0",
                 Use::Barn => "#a0402c",
+                Use::Terrace => "#e8b890",
+                Use::Civic => "#f0f0f0",
+                Use::Hut => "#806040",
             };
             let pts: Vec<String> = b.corners().iter().map(|c| format!("{:.2},{:.2}", c.x, c.y)).collect();
             s += &format!(r##"<polygon points="{}" fill="{fill}" stroke="#202020" stroke-width="0.3"><title>{:?} {} floors {:?}</title></polygon>"##, pts.join(" "), b.use_, b.floors, b.roof);

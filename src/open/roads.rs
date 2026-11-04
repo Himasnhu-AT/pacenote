@@ -452,6 +452,8 @@ struct Builder<'a> {
     land: &'a Land,
     planner: Planner<'a>,
     roads: Vec<NetRoad>,
+    /// Legs drawn straight rather than planned (Main Street, the town's spine): their ends.
+    straight: Vec<(Vec2, Vec2)>,
 }
 
 impl Builder<'_> {
@@ -509,7 +511,13 @@ impl Builder<'_> {
         let legs = stops.len() - 1;
         for (li, w) in stops.windows(2).enumerate() {
             let arrive = if li + 1 == legs { to.map(|b| -b.out) } else { None };
-            let Some(leg) = self.planner.route(w[0], dir, w[1], arrive, rules, 90.0, no_cross) else {
+            let leg = if self.straight.iter().any(|(a, b)| a.distance(w[0]) < 3.0 && b.distance(w[1]) < 3.0) {
+                let n = (w[0].distance(w[1]) / plan::GRID).ceil().max(1.0) as usize;
+                Some((0..=n).map(|k| w[0].lerp(w[1], k as f32 / n as f32)).collect())
+            } else {
+                self.planner.route(w[0], dir, w[1], arrive, rules, 90.0, no_cross)
+            };
+            let Some(leg) = leg else {
                 self.planner.restore(saved);
                 return None;
             };
@@ -536,6 +544,37 @@ impl Builder<'_> {
             return None;
         }
         Some(pts)
+    }
+
+    /// A town street (no planner): from the station of road `from.0` nearest `from.1`, through
+    /// `via`, to the station of road `to.0` nearest `to.1` (each end a T-junction). Corners
+    /// rounded to ~12 m; held to an 8 % grade between the heights of the roads it joins.
+    fn street(&mut self, from: (usize, Vec2), via: &[Vec2], to: (usize, Vec2)) -> usize {
+        // The point of road k's centreline nearest p (between its stations), and its height.
+        let at = |b: &Builder, (k, p): (usize, Vec2)| {
+            let r = &b.roads[k].road;
+            let n = r.nearest(p, 400.0).expect("a street joins a road nearby");
+            let j = (n.i + 1).min(r.len() - 1);
+            let (q0, q1) = (r.pts[n.i], r.pts[j]);
+            let q = q0.lerp(q1, n.t);
+            (Vec2::new(q.x, q.z), q.y)
+        };
+        let (a, ya) = at(self, from);
+        let (b, yb) = at(self, to);
+        let mut line = vec![a];
+        line.extend_from_slice(via);
+        line.push(b);
+        // Points every ~12 m, so the rounding only takes the corners (to a ~12 m radius).
+        let mut dense = vec![line[0]];
+        for w in line.windows(2) {
+            let n = (w[0].distance(w[1]) / 12.0).ceil().max(1.0) as usize;
+            dense.extend((1..=n).map(|k| w[0].lerp(w[1], k as f32 / n as f32)));
+        }
+        let pts = resample(&plan::chaikin(&dense, 3), false);
+        let rules = Rules { max_grade: 0.08, ..Rules::TARMAC };
+        let from_at = Attach { pos: a, y: ya, out: Vec2::ZERO };
+        let to_at = Attach { pos: b, y: yb, out: Vec2::ZERO };
+        self.finish(RoadKind::Street, rules, Some(from_at), Some(to_at), pts)
     }
 
     /// Heights, widths, surfaces and banking along a planned centreline; the road is added.
@@ -604,12 +643,18 @@ pub fn generate(seed: u64) -> RoadNet {
 fn build(seed: u64) -> RoadNet {
     let land = land::land(seed);
     let pl = plan::places(&land);
-    let mut b = Builder { seed, land: &land, planner: Planner::new(&land), roads: Vec::new() };
+    let mut b = Builder { seed, land: &land, planner: Planner::new(&land), roads: Vec::new(), straight: Vec::new() };
     let tarmac_climb = Rules { max_turn: 3, w_turn: 0.9, ..Rules::TARMAC };
     let flat = Rules { max_grade: 0.08, ..Rules::TARMAC };
+    // Fernhollow's Main Street (the B-road) runs straight through the town; the forestry road
+    // starts at the top of the town's spine (a street, built with the others) and heads north.
+    let (main_w, main_e) = (Vec2::new(land::TOWN_LO.x - 40.0, land::MAIN_Z), Vec2::new(land::TOWN_HI.x + 40.0, land::MAIN_Z));
+    let spine_top = Vec2::new(land::SPINE_X, super::town::UPPER.1);
+    let spine_on = spine_top + Vec2::Y * 60.0;
+    b.straight = vec![(main_w, main_e), (spine_top, spine_on)];
 
-    // The valley B-road, west to east through the village and the service park.
-    let valley = b.road(RoadKind::BRoad, flat, None, &[pl.west, pl.village, pl.park, pl.east], None).expect("valley road");
+    // The valley B-road, west to east through the town and past the service park.
+    let valley = b.road(RoadKind::BRoad, flat, None, &[pl.west, main_w, main_e, pl.park, pl.east], None).expect("valley road");
     // Tarmac hillclimb from its west end to the plateau.
     let w_end = end_of(&b.roads, valley, false);
     let climb = b.road(RoadKind::BRoad, tarmac_climb, Some(w_end), &[pl.pass_w], None);
@@ -620,10 +665,10 @@ fn build(seed: u64) -> RoadNet {
     let from = climb.map(|k| end_of(&b.roads, k, true));
     let to = basin.map(|k| end_of(&b.roads, k, true));
     let pass = b.road(RoadKind::Forest, Rules::FOREST, from, &[pl.tower], to);
-    // Forestry road from the village up the escarpment past the logging camp to the pass.
-    let v_at = attach(&b.roads, valley, pl.village + Vec2::new(-80.0, 0.0), pl.camp);
+    // Forestry road from the top of the town up the escarpment past the logging camp to the
+    // pass.
     let to = pass.map(|k| attach(&b.roads, k, pl.tower + Vec2::new(-500.0, -150.0), pl.camp));
-    let escarp = b.road(RoadKind::Forest, Rules::FOREST, Some(v_at), &[pl.camp], to);
+    let escarp = b.road(RoadKind::Forest, Rules::FOREST, None, &[spine_top, spine_on, pl.camp], to);
     // A logging track from the camp west to the hillclimb (a loop with both).
     if let (Some(e), Some(c)) = (escarp, climb) {
         let west = attach_options(&b.roads, c, pl.camp + Vec2::new(-700.0, 100.0), pl.camp, 4);
@@ -639,19 +684,50 @@ fn build(seed: u64) -> RoadNet {
     let s0 = attach(&b.roads, valley, pl.ford_w + Vec2::Y * 150.0, pl.ford_w);
     let s1 = attach(&b.roads, valley, pl.ford_e + Vec2::Y * 150.0, pl.ford_e);
     let bridge = Rules { bridge: true, ..Rules::GRAVEL };
-    b.road(RoadKind::Gravel, bridge, Some(s0), &[pl.ford_w, pl.south, pl.ford_e], Some(s1));
-    // Village lanes: a loop north of the B-road.
-    let l0 = attach(&b.roads, valley, pl.village + Vec2::new(-170.0, 0.0), pl.village + Vec2::Y * 200.0);
-    let l1 = attach(&b.roads, valley, pl.village + Vec2::new(170.0, 0.0), pl.village + Vec2::Y * 200.0);
-    let lane = Rules { max_turn: 3, w_turn: 0.3, ..Rules::TARMAC };
-    b.road(RoadKind::Street, lane, Some(l0), &[pl.village + Vec2::new(0.0, 150.0)], Some(l1));
-
+    // (Straight over each bridge and 45 m on: no bend on a deck.)
+    let (fw, fe) = (pl.ford_w - Vec2::Y * 45.0, pl.ford_e - Vec2::Y * 45.0);
+    b.straight.extend([(s0.pos + s0.out * 16.0, pl.ford_w), (pl.ford_w, fw), (fe, pl.ford_e), (pl.ford_e, s1.pos + s1.out * 16.0)]);
+    b.road(RoadKind::Gravel, bridge, Some(s0), &[pl.ford_w, fw, pl.south, fe, pl.ford_e], Some(s1));
+    // Fernhollow's streets (roads 8 on), when the forestry road is there to lead on from the
+    // town.
+    if let Some(forest) = escarp {
+        town_streets(&mut b, valley, forest);
+    }
     let roads = b.roads;
     let junctions = find_junctions(&roads);
     let town_y = land.coarse(pl.village);
     let mut net = RoadNet { seed, roads, junctions, town_y, land };
     super::profile::dress(&mut net);
     net
+}
+
+/// Fernhollow's street grid (docs/festival/WORLD_PASS.md §3), all T-junctions: West Lane and
+/// the west half of Upper Road (road 8), East Lane and Upper Road's east half, Church Street
+/// and Mill Street in two halves each meeting the spine 30 m apart, and six cross lanes,
+/// staggered so no two meet a street at the same point.
+fn town_streets(b: &mut Builder, main: usize, forest: usize) {
+    use super::town::{CHURCH, EAST_X, LANES_A, LANES_B, MILL, SPINE_W, UPPER, WEST_X};
+    use land::{MAIN_Z, SPINE_X};
+    let (xw, xe) = (WEST_X, EAST_X);
+    let p = Vec2::new;
+    // The spine (road 8): Main Street to the top of the town, where the forestry road starts.
+    let spine = b.street((main, p(SPINE_X, MAIN_Z)), &[], (forest, p(SPINE_X, UPPER.1)));
+    b.roads[spine].road.width.iter_mut().for_each(|w| *w = SPINE_W);
+    let west = b.street((main, p(xw, MAIN_Z)), &[p(xw, UPPER.0)], (spine, p(SPINE_X, UPPER.0)));
+    let east = b.street((main, p(xe, MAIN_Z)), &[p(xe, UPPER.1)], (spine, p(SPINE_X, UPPER.1)));
+    let church_w = b.street((west, p(xw, CHURCH.0)), &[], (spine, p(SPINE_X, CHURCH.0)));
+    let church_e = b.street((spine, p(SPINE_X, CHURCH.1)), &[], (east, p(xe, CHURCH.1)));
+    let mill_w = b.street((west, p(xw, MILL.0)), &[], (spine, p(SPINE_X, MILL.0)));
+    let mill_e = b.street((spine, p(SPINE_X, MILL.1)), &[], (east, p(xe, MILL.1)));
+    // Cross lanes: Main Street to Church Street, Church Street to Mill Street.
+    for x in LANES_A.0 {
+        b.street((main, p(x, MAIN_Z)), &[], (church_w, p(x, CHURCH.0)));
+    }
+    for x in LANES_A.1 {
+        b.street((main, p(x, MAIN_Z)), &[], (church_e, p(x, CHURCH.1)));
+    }
+    b.street((church_w, p(LANES_B.0, CHURCH.0)), &[], (mill_w, p(LANES_B.0, MILL.0)));
+    b.street((church_e, p(LANES_B.1, CHURCH.1)), &[], (mill_e, p(LANES_B.1, MILL.1)));
 }
 
 /// The nearest road to `p` within `max` m and the next nearest (another road, or another leg
