@@ -44,6 +44,8 @@ pub struct RaceRun {
     placed: bool,
     /// Rival race time / progress of the step before, for the HUD's live gaps.
     pub player_progress: f32,
+    /// The countdown second last cued.
+    last_count: u8,
 }
 
 /// The entry fee charged for the race in progress (Ace / Legend), so a Restart doesn't charge
@@ -128,7 +130,7 @@ pub fn begin(world: &mut World, difficulty: Difficulty) -> bool {
     let solids = Arc::new(RacerSolids::default());
     world.resource_mut::<StageWorld>().racers = Some(solids.clone());
     world.insert_resource(field_of(&sim, event.id, world.resource::<super::garage::Garage>().active_car().model.clone()));
-    world.insert_resource(RaceRun { sim, ground, solids, player_pi, hold: 0, last_penalty: 0.0, holding: false, done: false, placed: false, player_progress: 0.0 });
+    world.insert_resource(RaceRun { sim, ground, solids, player_pi, hold: 0, last_penalty: 0.0, holding: false, done: false, placed: false, player_progress: 0.0, last_count: 0 });
     world.remove_resource::<LastRace>();
     true
 }
@@ -181,6 +183,7 @@ fn race_pre(mut race: ResMut<RaceRun>, run: Res<StageRun>, mut cars: Query<&mut 
         race.done = false;
         race.hold = 0;
         race.last_penalty = 0.0;
+        race.last_count = 0;
         if let Some(f) = field.as_deref_mut() {
             for e in &mut f.entrants {
                 e.finish = None;
@@ -217,8 +220,20 @@ fn race_step(world: &mut World) {
     let t0 = std::time::Instant::now();
     let mut race = world.remove_resource::<RaceRun>().unwrap();
     let done = run.finished.is_some() || run.retired;
+    // Race cues for the festival sounds (F1's `audio::festival`): 3-2-1, GO (the player's
+    // release in a pursuit start).
+    let before = (race.sim.started(), race.sim.player_held(), race.last_count);
     race.sim.step(&race.ground, &road, &corners, PlayerNow { car: &player, progress: run.progress, done }, run.countdown > 0.0);
     // Before the clock runs `StageRun::progress` is 0: the grid slot's place on the route.
+    let count = run.countdown.ceil().max(0.0) as u8;
+    if count > 0 && count != before.2 {
+        world.write_message(crate::open::challenges::RunCue::Countdown(count));
+    }
+    race.last_count = count;
+    if before.1 && !race.sim.player_held() && race.sim.started() {
+        world.write_message(crate::open::challenges::RunCue::Go);
+    }
+    let _ = before.0;
     race.player_progress = if run.countdown > 0.0 { road.nearest(Vec2::new(player.pos.x, player.pos.z), 20.0).map_or(run.progress, |r| r.s) } else { run.progress };
     if let Ok(mut v) = race.solids.0.write() {
         v.clear();
@@ -252,6 +267,13 @@ fn race_step(world: &mut World) {
                 }
             }
         }
+        let first_win = result.player_pos == 1
+            && time.is_some()
+            && !world.get_resource::<super::save::CareerProgress>().and_then(|p| p.races.get(&result.event)).is_some_and(|r| r.won(result.difficulty));
+        world.write_message(match time {
+            Some(_) => crate::open::challenges::RunCue::Finish { place: result.player_pos, best: first_win },
+            None => crate::open::challenges::RunCue::Fail,
+        });
         world.insert_resource(LastRace(result.clone()));
         world.write_message(result);
     }
