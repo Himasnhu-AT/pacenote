@@ -430,7 +430,7 @@ route (free roam with the map waypoint set), Leaderboard.
 (event: your best, record, mode; free roam: grade, Notes, events finished, route), tips
 shuffled per mode with device-named keys, every 7 s with a 300 ms crossfade, Left / Right or
 LB / RB step them. Open world: the painted region map in a frame, zoomed to the event route
-(dotted, drawn start → finish over 1.2 s, green start, chequered-red finish) or 1.4 km around
+(dotted, drawn start → finish over 1.2 s, green start, red finish) or 1.4 km around
 the car ("you are here"); before it is painted, the contour backdrop. The screen fades in
 over 200 ms and dissolves into the stage over 250 ms after loading (visual only; the load
 logic is unchanged).
