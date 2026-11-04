@@ -1272,16 +1272,7 @@ pub struct TrafficCar {
     shadows: bool,
 }
 
-/// Shared meshes and materials for every traffic car.
-#[derive(Resource)]
-struct TrafficArt {
-    body: Handle<Mesh>,
-    glass: Handle<Mesh>,
-    wheels: Handle<Mesh>,
-    paint: Vec<Handle<StandardMaterial>>,
-    glass_mat: Handle<StandardMaterial>,
-    tyre_mat: Handle<StandardMaterial>,
-}
+use crate::art::traffic_car::TrafficArt;
 
 /// Cars beyond this from the camera don't cast shadows (m).
 pub const SHADOW_RANGE: f32 = 70.0;
@@ -1299,7 +1290,7 @@ fn draw(
 ) {
     let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else { return };
     let Some(art) = art else {
-        commands.insert_resource(make_art(&mut meshes, &mut materials));
+        commands.insert_resource(TrafficArt::new(&mut meshes, &mut materials));
         return;
     };
     let a = fixed.overstep_fraction();
@@ -1336,103 +1327,15 @@ fn draw(
         if seen[k] {
             continue;
         }
-        let paint = art.paint[c.color as usize % art.paint.len()].clone();
         commands
             .spawn((Name::new("traffic car"), engine::level::GeneratedBy("pacenote::traffic"), TrafficCar { id: c.id, shadows: false }, pose(c), Visibility::default(), engine::render_budget::Actor, DespawnOnExit(engine::flow::AppState::InGame)))
-            .with_children(|p| {
-                p.spawn((Mesh3d(art.body.clone()), MeshMaterial3d(paint), bevy::light::NotShadowCaster));
-                p.spawn((Mesh3d(art.glass.clone()), MeshMaterial3d(art.glass_mat.clone()), bevy::light::NotShadowCaster));
-                p.spawn((Mesh3d(art.wheels.clone()), MeshMaterial3d(art.tyre_mat.clone()), bevy::light::NotShadowCaster));
-            });
+            .with_children(|p| crate::art::traffic_car::spawn_parts(p, &art, c.id, c.color));
     }
 }
 
 fn clear(mut commands: Commands, shown: Query<Entity, With<TrafficCar>>) {
     for e in &shown {
         commands.entity(e).despawn();
-    }
-}
-
-fn make_art(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> TrafficArt {
-    const PAINT: [[f32; 3]; COLORS as usize] = [[0.85, 0.85, 0.83], [0.55, 0.57, 0.6], [0.04, 0.04, 0.05], [0.55, 0.06, 0.05], [0.08, 0.2, 0.5], [0.08, 0.25, 0.14], [0.8, 0.6, 0.12]];
-    let paint = PAINT
-        .iter()
-        .map(|c| materials.add(StandardMaterial { base_color: Color::srgb(c[0], c[1], c[2]), metallic: 0.3, perceptual_roughness: 0.35, ..default() }))
-        .collect();
-    let glass_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.05, 0.06, 0.08), metallic: 0.0, perceptual_roughness: 0.08, reflectance: 0.6, ..default() });
-    let tyre_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.03, 0.03, 0.03), perceptual_roughness: 0.9, ..default() });
-    let (body, glass, wheels) = car_meshes();
-    TrafficArt { body: meshes.add(body), glass: meshes.add(glass), wheels: meshes.add(wheels), paint, glass_mat, tyre_mat }
-}
-
-/// A low-poly car (local −Z forward, origin on the ground at the centre): body, cabin glass
-/// and the four wheels, each one mesh.
-fn car_meshes() -> (Mesh, Mesh, Mesh) {
-    let mut body = MeshBuild::default();
-    // Side profiles (z back, y up), extruded across x. Convex each.
-    let lower = [Vec2::new(2.2, 0.3), Vec2::new(2.22, 0.92), Vec2::new(-1.55, 0.86), Vec2::new(-2.2, 0.62), Vec2::new(-2.15, 0.3)];
-    body.prism(&lower, -0.9, 0.9);
-    let roof = [Vec2::new(1.05, 1.36), Vec2::new(1.0, 1.42), Vec2::new(-0.45, 1.42), Vec2::new(-0.5, 1.36)];
-    body.prism(&roof, -0.74, 0.74);
-    let mut glass = MeshBuild::default();
-    let cabin = [Vec2::new(1.55, 0.9), Vec2::new(1.05, 1.37), Vec2::new(-0.5, 1.37), Vec2::new(-1.35, 0.88)];
-    glass.prism(&cabin, -0.8, 0.8);
-    let mut wheels = MeshBuild::default();
-    let circle: Vec<Vec2> = (0..10).map(|i| {
-        let a = i as f32 / 10.0 * core::f32::consts::TAU;
-        Vec2::new(libm::cosf(a), libm::sinf(a)) * 0.33
-    }).collect();
-    for (x, z) in [(-0.8, -1.35), (0.8, -1.35), (-0.8, 1.35), (0.8, 1.35)] {
-        let prof: Vec<Vec2> = circle.iter().map(|p| *p + Vec2::new(z, 0.33)).collect();
-        wheels.prism(&prof, x - 0.13, x + 0.13);
-    }
-    (body.mesh(), glass.mesh(), wheels.mesh())
-}
-
-/// Flat-shaded triangles.
-#[derive(Default)]
-struct MeshBuild {
-    pos: Vec<[f32; 3]>,
-    nrm: Vec<[f32; 3]>,
-}
-
-impl MeshBuild {
-    /// A triangle facing `out` (wound to face it).
-    fn tri(&mut self, a: Vec3, b: Vec3, c: Vec3, out: Vec3) {
-        let n = (b - a).cross(c - a);
-        let (b, c) = if n.dot(out) < 0.0 { (c, b) } else { (b, c) };
-        let n = (b - a).cross(c - a).normalize_or_zero();
-        for p in [a, b, c] {
-            self.pos.push(p.to_array());
-            self.nrm.push(n.to_array());
-        }
-    }
-
-    /// A convex side profile (`(z, y)` points) extruded from `x0` to `x1`.
-    fn prism(&mut self, prof: &[Vec2], x0: f32, x1: f32) {
-        let c: Vec2 = prof.iter().copied().sum::<Vec2>() / prof.len() as f32;
-        let at = |p: Vec2, x: f32| Vec3::new(x, p.y, p.x);
-        for i in 1..prof.len() - 1 {
-            self.tri(at(prof[0], x0), at(prof[i], x0), at(prof[i + 1], x0), -Vec3::X);
-            self.tri(at(prof[0], x1), at(prof[i], x1), at(prof[i + 1], x1), Vec3::X);
-        }
-        for i in 0..prof.len() {
-            let (p, q) = (prof[i], prof[(i + 1) % prof.len()]);
-            let mid = (p + q) * 0.5 - c;
-            let out = Vec3::new(0.0, mid.y, mid.x);
-            self.tri(at(p, x0), at(q, x0), at(q, x1), out);
-            self.tri(at(p, x0), at(q, x1), at(p, x1), out);
-        }
-    }
-
-    fn mesh(self) -> Mesh {
-        use bevy::asset::RenderAssetUsages;
-        use bevy::mesh::{Indices, PrimitiveTopology};
-        let n = self.pos.len() as u32;
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.pos)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.nrm)
-            .with_inserted_indices(Indices::U32((0..n).collect()))
     }
 }
 
@@ -1668,14 +1571,6 @@ mod tests {
         let mut out = Vec::new();
         t.obstacles(xz(t.agents[0].pose.0), 5.0, &mut out);
         assert_eq!(out.len(), 3);
-    }
-
-    #[test]
-    fn car_mesh_faces_outward() {
-        let (body, glass, wheels) = car_meshes();
-        for m in [body, glass, wheels] {
-            assert!(m.count_vertices() > 0);
-        }
     }
 }
 
