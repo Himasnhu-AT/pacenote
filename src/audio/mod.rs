@@ -400,6 +400,9 @@ pub fn traffic_heard(t: &crate::open::traffic::Traffic, ear: &GlobalTransform, e
     p
 }
 
+/// Exhaust pops decided this frame and their counters.
+type PopsOut<'w> = (ResMut<'w, pops::PopFeed>, ResMut<'w, pops::PopStats>);
+
 #[allow(clippy::too_many_arguments)]
 fn gather(
     time: Res<Time>,
@@ -414,7 +417,7 @@ fn gather(
     remote: Res<RemoteCarSound>,
     mixer: Res<Mixer>,
     codriver: Option<Res<crate::codriver::CoDriver>>,
-    (traffic, listener): (Option<Res<crate::open::traffic::Traffic>>, Query<&GlobalTransform, With<engine::gfx::MainCamera>>),
+    (traffic, listener, mut pops): (Option<Res<crate::open::traffic::Traffic>>, Query<&GlobalTransform, With<engine::gfx::MainCamera>>, PopsOut),
     mut link: ResMut<Link>,
     mut tr: Local<Tracker>,
     mut stats: ResMut<RallyAudioStats>,
@@ -489,6 +492,11 @@ fn gather(
         stats.roll[i] = f.car.surfaces[i].roll;
         stats.slide[i] = f.car.surfaces[i].slide;
     }
+    // Exhaust pops decided this frame (`pops::PopScheduler`).
+    for e in pops.0.events.drain(..) {
+        f.push(e);
+    }
+    pops.1.played = link.shared.pops_played.load(Ordering::Relaxed) as u32;
     link.shared.publish(&link.frame);
     // CPU share of the audio thread, every ~0.5 s.
     tr.stats_t += time.delta_secs();
@@ -514,6 +522,7 @@ fn capture(time: Res<Time>, link: Res<Link>, cap: Option<ResMut<Capture>>, mut s
     let t0 = std::time::Instant::now();
     let c = &mut *cap;
     c.synth.apply(&link.frame);
+    link.shared.pops_played.store(c.synth.car.pops.played as u64, Ordering::Relaxed);
     c.frac += time.delta_secs_f64() * dsp::RATE as f64;
     let blocks = (c.frac / stream::BLOCK as f64).floor() as usize;
     c.frac -= (blocks * stream::BLOCK) as f64;

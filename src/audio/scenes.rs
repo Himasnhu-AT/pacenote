@@ -111,6 +111,9 @@ pub fn render(scene: &Scene, seed: u32) -> Rendered {
     let mut frac = 0.0f64;
     let (mut ns_sum, mut ns_max, mut blocks_n) = (0f64, 0f64, 0usize);
     let mut counts = [0u32; 3];
+    // Exhaust pops: the main-thread scheduler, as in the game (chase: a little right).
+    let mut sched = super::pops::PopScheduler::new(seed, crate::career::garage::PopProfile::Rally);
+    let mut pops = Vec::new();
     for i in 0..frames {
         let t = i as f32 * dt;
         let input = (scene.script)(t);
@@ -120,6 +123,12 @@ pub fn render(scene: &Scene, seed: u32) -> Rendered {
         let c = tr.detect(&car, &spec, dt, &mut frame);
         for k in 0..3 {
             counts[k] += c[k];
+        }
+        pops.clear();
+        let pin = super::pops::PopInput { active: true, throttle: input.throttle, rpm: car.rpm, redline: spec.redline, gear: car.gear, engine_damage: car.damage.engine };
+        sched.update(dt, &pin, &mut pops);
+        for p in &pops {
+            frame.push(super::car::CarEvent::Pop { intensity: p.intensity, kind: p.kind, seed: p.seed, pan: if scene.interior { 0.15 } else { 0.25 } });
         }
         synth.apply(&frame);
         frac += dt as f64 * 48_000.0;

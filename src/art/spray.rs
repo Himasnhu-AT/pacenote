@@ -37,6 +37,8 @@ pub enum Kind {
     Snow,
     /// Faint tyre smoke on tarmac when sliding hard.
     Smoke,
+    /// Water mist off the tyres on a wet road (`Surface::Wet`), growing with speed.
+    Water,
 }
 
 impl Kind {
@@ -47,6 +49,7 @@ impl Kind {
             Kind::Mud => "pn_mud",
             Kind::Snow => "pn_snow",
             Kind::Smoke => "pn_smoke",
+            Kind::Water => "pn_water",
         }
     }
 }
@@ -84,6 +87,23 @@ pub fn defs(def: &StageDef) -> Vec<EffectDef> {
         puff("pn_dust", dust, dust_alpha, (0.6, 1.0), 4.5, (1.6, 2.8), 160),
         puff("pn_snow", [0.93, 0.95, 1.0], 0.45, (0.4, 0.8), 3.5, (0.8, 1.6), 120),
         puff("pn_smoke", [0.75, 0.75, 0.76], 0.22, (0.5, 0.8), 4.0, (1.2, 2.0), 80),
+        // Wet road: a fine grey-white mist thrown back and up, short-lived, fast.
+        EffectDef { cull_distance: 140.0, ..EffectDef::new("pn_water") }.with(EmitterDef {
+            name: "mist".into(),
+            capacity: 140,
+            rate: 45.0,
+            lifetime: (0.5, 0.9),
+            shape: Shape::Sphere { radius: 0.18, surface: false },
+            velocity: Velocity::Cone { dir: Vec3::new(0.0, 0.6, 0.0), angle: 0.9, speed: (1.5, 3.5) },
+            gravity: Vec3::new(0.0, -2.0, 0.0),
+            drag: 2.2,
+            size: (0.35, 0.6),
+            size_over_life: Curve::linear(0.6, 3.0),
+            color_over_life: Gradient::srgb(&[(0.0, [0.8, 0.83, 0.86], 0.0), (0.1, [0.8, 0.83, 0.86], 0.28), (1.0, [0.8, 0.83, 0.86], 0.0)]),
+            rotation: (0.0, std::f32::consts::TAU),
+            render: RenderDef { texture: VfxTexture::Smoke, blend: Blend::Alpha, lit: 0.8, soft: 0.6, flipbook: Some(Flipbook { random_start: true, ..default() }), sort: true, ..default() },
+            ..default()
+        }),
         EffectDef { cull_distance: 120.0, ..EffectDef::new("pn_chips") }.with(EmitterDef {
             name: "chips".into(),
             capacity: 120,
@@ -146,7 +166,7 @@ pub fn setup(world: &mut World, def: &StageDef) {
     } else {
         return;
     }
-    let kinds = [Kind::Dust, Kind::Chips, Kind::Mud, Kind::Snow, Kind::Smoke];
+    let kinds = [Kind::Dust, Kind::Chips, Kind::Mud, Kind::Snow, Kind::Smoke, Kind::Water];
     for wheel in 0..4 {
         for kind in kinds {
             let mut fx = ParticleEffect::new(kind.effect());
@@ -177,6 +197,8 @@ pub fn intensity(kind: Kind, surface: Option<Surface>, speed: f32, slip_ratio: f
         (Kind::Mud, Surface::Verge | Surface::Rough) => (slip * v * 0.5).clamp(0.0, 1.0),
         (Kind::Snow, Surface::Snow) => loose,
         (Kind::Smoke, Surface::Tarmac) => ((slip - 0.5) * 2.0).clamp(0.0, 1.0) * v,
+        // Spray needs speed: none at a crawl, a plume by ~100 km/h, more off the rears.
+        (Kind::Water, Surface::Wet) => (((speed - 6.0) / 22.0).clamp(0.0, 1.0).powi(2) * if rear { 1.0 } else { 0.5 } + slip * 0.3).clamp(0.0, 1.0),
         _ => 0.0,
     }
 }
@@ -213,6 +235,11 @@ mod tests {
         assert!(intensity(Kind::Smoke, Some(Surface::Tarmac), 25.0, 0.5, 0.3, true) > 0.3);
         assert!(intensity(Kind::Snow, Some(Surface::Snow), 20.0, 0.1, 0.0, true) > 0.3);
         assert_eq!(intensity(Kind::Mud, None, 20.0, 0.5, 0.5, true), 0.0);
+        // Wet roads spray with speed, dry tarmac doesn't.
+        assert_eq!(intensity(Kind::Water, Some(Surface::Wet), 4.0, 0.0, 0.0, true), 0.0);
+        assert!(intensity(Kind::Water, Some(Surface::Wet), 30.0, 0.0, 0.0, true) > 0.8);
+        assert!(intensity(Kind::Water, Some(Surface::Wet), 30.0, 0.0, 0.0, false) < 0.6);
+        assert_eq!(intensity(Kind::Water, Some(Surface::Tarmac), 30.0, 0.0, 0.0, true), 0.0);
     }
 
     #[test]

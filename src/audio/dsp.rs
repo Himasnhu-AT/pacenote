@@ -419,13 +419,20 @@ impl Dynamics {
     /// Processes one stereo frame; output is delayed by the look-ahead (1 ms).
     #[inline]
     pub fn run(&mut self, l: f32, r: f32) -> (f32, f32) {
+        self.run_with(l, r, 0.0, 0.0)
+    }
+
+    /// [`Self::run`] with `(post_l, post_r)` added after the compressor and before the limiter
+    /// (exhaust pops: their transient survives and they don't pump the rest).
+    #[inline]
+    pub fn run_with(&mut self, l: f32, r: f32, post_l: f32, post_r: f32) -> (f32, f32) {
         // Compressor: smoothed level, gain from a power law above the threshold.
         let lvl = l.abs().max(r.abs());
         let k = if lvl > self.env { self.att } else { self.rel };
         self.env += k * (lvl - self.env);
         let want = if self.env > Self::THRESH { (self.env / Self::THRESH).powf(1.0 / Self::RATIO - 1.0) } else { 1.0 };
         self.comp_gain += 0.02 * (want - self.comp_gain);
-        let (l, r) = (l * self.comp_gain, r * self.comp_gain);
+        let (l, r) = (l * self.comp_gain + post_l, r * self.comp_gain + post_r);
         // Limiter: peak of the incoming (not yet delayed) signal sets the gain the delayed
         // signal gets, so the gain is already down when the peak comes out.
         let p = l.abs().max(r.abs());

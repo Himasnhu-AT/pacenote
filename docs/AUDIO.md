@@ -91,17 +91,29 @@ The game has 26 loops per mic, ~16 % apart:
   throttle (30 ms up, 60 ms down). Loudness grows with rpm (idle about 10 dB under the top)
   and load (the overrun about 6 dB under full load at the same rpm).
 - Rev limiter: at the redline under throttle, ignition is cut about half of each 70 ms cycle
-  (14 Hz bounce): the level drops to 0.35, load goes to zero, rpm dips 3 %, and a pop is
-  likely at each cut.
-- Gear change: the sim's `shifting` cuts load (overrun). An upshift under power above 4200
-  rpm bangs (75 %). A downshift blips the throttle for 90 ms and opens the crackle window. A
-  dog-box clunk plays on every change (synthesised, `body.rs`).
-- Pops: three recorded anti-lag bangs, picked at random with ±12 % pitch. After a lift above
-  3200 rpm a crackle window opens (decays over ~1.4 s) and each firing may pop on the
-  overrun (2 % × overrun × crackle).
+  (14 Hz bounce): the level drops to 0.35, load goes to zero, rpm dips 3 %.
+- Gear change: the sim's `shifting` cuts load (overrun). A downshift blips the throttle for
+  90 ms. A dog-box clunk plays on every change (synthesised, `body.rs`).
+- Pops and bangs (`pops.rs`, festival AUDIO_PASS §2): decided on the **main thread** by
+  `PopScheduler` (game time, seeded), which sends `ExhaustPop` (the flame, `art::exhaust`)
+  and `CarEvent::Pop` (the synth) on the same frame. Triggers: a lift (peak throttle in the
+  last 200 ms ≥ 0.6, now ≤ 0.2, ≥ 3200 rpm; any pedal speed, so a gamepad trigger let go over
+  150 ms crackles) gives a burst of 2-6 clustered pops over 0.4-1.2 s (Rally profile +1, a
+  Bang first above ~5600 rpm); an upshift at full throttle above 0.7 × redline bangs (90 %)
+  plus 0-2 crackles; a downshift above 2800 rpm 1-3 crackles; 35 % of limiter cuts crackle;
+  engine damage > 0.3 adds a Misfire (chance dmg²). Throttle back on ends a burst after one
+  more pop; at most 10 pops a second.
+- Each pop is synthesised (`PopVoices`, 6 voices, oldest stolen): a 1-3 ms noise crack into a
+  resonant low-pass (decorrelated L/R), one of the three recorded pops (±15 %, −9/−4 dB), a
+  band-passed body, a falling sub thump and, on bangs, a pipe-ring comb, every layer drawn
+  from the pop's seed. Its own peak over its first 25 ms is measured on a copy so it lands at
+  **+8 dB (Crackle) / +13 dB (Bang) over the engine's 50 ms RMS** (± 2 dB with intensity,
+  capped at −3 dBFS). Pops are mixed **after the compressor, before the limiter**
+  (`Dynamics::run_with`), never ducked. Chase: panned from the tail pipe's bearing, plus a
+  9 ms ground slap; inside: low-passed at 1.4 kHz, −5 dB, the sub +3 dB, and a bang knocks
+  the shell.
 - Damage (`engine_damage`): misfires (up to ~28 % of firings at full damage): the level
-  drops 85 % for about a firing, and the unburnt fuel may bang on a later firing. The idle
-  hunts (rpm wobble).
+  drops 85 % for about a firing. The idle hunts (rpm wobble).
 - A stopped engine (rpm below ~300) is silent.
 
 **Tyres** (`tyres.rs`): drift only. Rolling road noise (gravel crunch, tarmac roar, snow) and
@@ -138,7 +150,7 @@ buffeting and a door-seal whistle. Both go as speed², with slow gusts.
 
 **Inside vs outside** (bonnet/cockpit vs chase camera, crossfaded over 50 ms):
 - Inside: the engine bay mic through the bulkhead (low-passed at 2.6 kHz), the exhaust
-  low-passed at 850 Hz plus a 118 Hz cabin boom; pops at half level.
+  low-passed at 850 Hz plus a 118 Hz cabin boom; pops muffled (see above).
 - Outside: mostly the exhaust mic, with the engine bay under it (0.4).
 - Inside, tyres and outside wind are low-passed at 1.7 kHz; scrapes and rattles are louder,
   and stones on the floor are twice as loud as outside.
@@ -270,7 +282,11 @@ Apple M-series, dev profile (game crate at opt-level 1):
   - the pitch follows rpm, on and off load, at the recorded rpms and between them: firing
     harmonics (rpm/30 × 1..6) beat those of an rpm 18 % off either way;
   - load and rpm make it louder;
-  - a lift pops; an upshift under power bangs; a downshift blips;
+  - pops (`pops.rs`): 2-6 per lift at 6000 rpm for keys and a 150 ms trigger lift in ≥ 90 %
+    of 50 seeds, 2-3 at 3500, none below 3200; upshift bangs ≥ 85 %; downshift crackles;
+    cancel, rate cap, misfires; levels +6..+10 / +11..+15 dB over the engine; no two pops of a
+    burst alike; cockpit darker with more sub; a bang adds ≤ 1 dB of gain reduction
+    (`stream.rs`); a downshift blips;
   - the limiter bounces;
   - every surface rolls and sliding is louder; mud is the darkest surface;
   - a damaged engine misfires (spread of the level per two firings ×1.5);
@@ -301,6 +317,13 @@ Apple M-series, dev profile (game crate at opt-level 1):
 - Sim-driven (`sim_drives_the_synth`): 16 s of the real `vehicle::step`. Output is finite and
   ≤ 1, upshifts are detected, and the pitch tracker finds rpm/30 within 8 % in at least 80 %
   of the windows under load.
+
+Festival pass (stream D, 4 Nov): `render_scenes` mean 42.5 µs per block, worst block with
+pops 192 µs; scene 03 peak −4.5 dBFS, no clipped samples; lift and upshift pops reach 15-17 dB
+peak (10 ms) over the 50 ms RMS where the engine alone sits at 9.8 (median). Wind gains a
+6 kHz "air" band at `0.4 × SpeedFeel²` and keeps growing to ~220 km/h; the seal whistle
+follows `2.2 + 1.5 × SpeedFeel` kHz (`camera::speed_feel`, the value the FOV and blur use).
+`PopStats` (`scheduled`, `played`, `bangs`, `misfires`) is on the control port.
 
 ## Known limits
 

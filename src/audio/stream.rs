@@ -1,4 +1,5 @@
-//! The rally stream: [`RallySynth`] (car + ambience → bus gains/low-pass → soft clip), fed by a
+//! The rally stream: [`RallySynth`] (car + ambience → bus gains/low-pass → compressor → exhaust
+//! pops → limiter → soft clip), fed by a
 //! [`Frame`] of parameters the main thread writes once per frame, and played as one rodio
 //! source next to the engine mixer's.
 //!
@@ -89,6 +90,9 @@ pub struct RallySynth {
     amb_gain: Smooth,
     car_lp: [OnePole; 2],
     amb_lp: [OnePole; 2],
+    /// The pops: the car bus gain (never ducked) and low-pass.
+    pop_gain: Smooth,
+    pop_lp: [OnePole; 2],
     dc: [Biquad; 2],
     pub dynamics: Dynamics,
     /// The co-driver (mono, centre), mixed after the car's dynamics.
@@ -97,6 +101,7 @@ pub struct RallySynth {
     talk: Smooth,
     car_buf: [f32; BLOCK * 2],
     amb_buf: [f32; BLOCK * 2],
+    pop_buf: [f32; BLOCK * 2],
     out: [f32; BLOCK * 2],
 }
 
@@ -111,12 +116,15 @@ impl RallySynth {
             amb_gain: Smooth::new(1.0, 0.01, 0.01, RATE),
             car_lp: [OnePole::new(20_000.0); 2],
             amb_lp: [OnePole::new(20_000.0); 2],
+            pop_gain: Smooth::new(1.0, 0.01, 0.01, RATE),
+            pop_lp: [OnePole::new(20_000.0); 2],
             dc: [Biquad::highpass(22.0, 0.7); 2],
             dynamics: Dynamics::default(),
             voice: VoicePlayer::default(),
             talk: Smooth::new(0.0, 0.03, 0.25, RATE),
             car_buf: [0.0; BLOCK * 2],
             amb_buf: [0.0; BLOCK * 2],
+            pop_buf: [0.0; BLOCK * 2],
             out: [0.0; BLOCK * 2],
         }
     }
@@ -131,7 +139,7 @@ impl RallySynth {
         let g = |v: f32| if v.is_finite() { v.clamp(0.0, 4.0) } else { 0.0 };
         self.mix = Mix { car: g(f.mix.car), amb: g(f.mix.amb), car_lp: f.mix.car_lp, amb_lp: f.mix.amb_lp, talk: f.mix.talk };
         self.voice.set(&f.voice);
-        for lp in &mut self.car_lp {
+        for lp in self.car_lp.iter_mut().chain(&mut self.pop_lp) {
             lp.set(self.mix.car_lp.min(20_000.0));
         }
         for lp in &mut self.amb_lp {
@@ -143,7 +151,8 @@ impl RallySynth {
     pub fn render_block(&mut self) -> &[f32] {
         self.car_buf.fill(0.0);
         self.amb_buf.fill(0.0);
-        self.car.render(&mut self.car_buf);
+        self.pop_buf.fill(0.0);
+        self.car.render_split(&mut self.car_buf, &mut self.pop_buf);
         self.traffic.render(&mut self.car_buf);
         self.amb.render(&mut self.amb_buf);
         let car_filtered = self.mix.car_lp < 19_000.0;
@@ -155,6 +164,16 @@ impl RallySynth {
             let duck = self.voice.duck().max(self.talk.next(if self.mix.talk { 1.0 } else { 0.0 }));
             let gc = self.car_gain.next(self.mix.car * (1.0 - (1.0 - TALK_DUCK) * duck));
             let ga = self.amb_gain.next(self.mix.amb * (1.0 - (1.0 - TALK_DUCK_AMB) * duck));
+            // Pops are never ducked (AUDIO_PASS §5) and skip the compressor (§2.4).
+            let gp = self.pop_gain.next(self.mix.car);
+            let mut pops = [0.0; 2];
+            for (ch, out) in pops.iter_mut().enumerate() {
+                let mut p = self.pop_buf[i * 2 + ch];
+                if car_filtered {
+                    p = self.pop_lp[ch].lp(p);
+                }
+                *out = finite(p * gp);
+            }
             let mut lr = [0.0; 2];
             for (ch, out) in lr.iter_mut().enumerate() {
                 // DC blocker on the car before its gain, so a mute is silent at once.
@@ -168,7 +187,7 @@ impl RallySynth {
                 }
                 *out = finite(c * gc + a * ga);
             }
-            let (l, r) = self.dynamics.run(lr[0], lr[1]);
+            let (l, r) = self.dynamics.run_with(lr[0], lr[1], pops[0], pops[1]);
             self.out[i * 2] = soft_clip(l + v);
             self.out[i * 2 + 1] = soft_clip(r + v);
         }
@@ -193,6 +212,8 @@ pub struct Shared {
     pub frame: Mutex<Frame>,
     pub render_ns: AtomicU64,
     pub rendered: AtomicU64,
+    /// Exhaust pops the synth has started (`pops::PopStats::played`).
+    pub pops_played: AtomicU64,
 }
 
 impl Shared {
@@ -253,6 +274,7 @@ impl RallySource {
         for (d, v) in self.buf.iter_mut().zip(out) {
             *d = v * self.gain;
         }
+        self.shared.pops_played.store(s.car.pops.played as u64, Ordering::Relaxed);
         self.shared.render_ns.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         self.shared.rendered.fetch_add(BLOCK as u64, Ordering::Relaxed);
     }
@@ -369,6 +391,39 @@ mod tests {
         assert!((ducked - TALK_DUCK).abs() < 0.06, "car under the voice ×{ducked}");
         let with_voice = render(true, 1.0);
         assert!(with_voice > quiet * 1.3, "voice heard: {with_voice} vs car {quiet}");
+    }
+
+    /// Pops skip the compressor (AUDIO_PASS §2.4, §8.3): a bang over a loud engine moves the
+    /// compressor's gain by ≤ 1 dB, the output never clips, and the pop stands out.
+    #[test]
+    fn pops_skip_the_compressor_and_never_clip() {
+        use crate::audio::pops::PopKind;
+        let run = |pop: bool| {
+            let mut s = RallySynth::new(4);
+            let mut f = Frame { car: CarParams { active: true, rpm: 6500.0, throttle: 1.0, speed: 30.0, ..CarParams::default() }, ..Frame::default() };
+            s.apply(&f);
+            let mut out = Vec::new();
+            s.render_into(48_000, &mut out);
+            let before = s.dynamics.reduction_db;
+            f.car.throttle = 0.0;
+            if pop {
+                f.push(CarEvent::Pop { intensity: 1.0, kind: PopKind::Bang, seed: 9, pan: 0.3 });
+            }
+            s.apply(&f);
+            let (mut worst, mut peak) = (0.0f32, 0.0f32);
+            for _ in 0..40 {
+                let b = s.render_block();
+                peak = b.iter().fold(peak, |m, v| m.max(v.abs()));
+                worst = worst.max(s.dynamics.reduction_db);
+            }
+            (before, worst, peak, s.car.pops.played)
+        };
+        let (b0, w0, p0, n0) = run(false);
+        let (b1, w1, p1, n1) = run(true);
+        assert_eq!((n0, n1), (0, 1));
+        assert!(p1 <= 0.9 && p1 > p0 * 1.5, "peak {p0} → {p1}");
+        // The reduction (compressor + limiter) the pop adds over the same lift without it.
+        assert!(w1 - w0 <= 1.0 + (b1 - b0).abs(), "gain reduction {w0:.2} → {w1:.2} dB");
     }
 
     #[test]

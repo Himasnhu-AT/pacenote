@@ -253,6 +253,7 @@ fn rig(
     mut images: ResMut<Assets<Image>>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
     mirror: Option<Res<super::mirror::MirrorImage>>,
+    placed: Query<(&Mesh3d, &ChildOf, &Transform)>,
 ) {
     for m in &models {
         let mut hub = [Entity::PLACEHOLDER; 4];
@@ -297,30 +298,49 @@ fn rig(
         let mut done = std::collections::HashSet::new();
         let mut glass_done = std::collections::HashSet::new();
         // This car's own copies of the materials that change while it drives (paint gets
-        // dusty, the tail lamps light up under braking): one copy per source material.
+        // dusty, the tail lamps light up under braking and with the lights, the headlamp
+        // lenses glow with the lights): one copy per source material.
         let mut own: std::collections::HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>> = default();
         let mut wear = CarWear::default();
         let mut rear_mirror = None;
         for &e in &parts {
             let (Ok(mm), Ok(name)) = (meshes.get(e), mat_names.get(e)) else { continue };
-            let paint = match name.0.as_str() {
-                "Paint" | "Chalk" => true,
-                "TailLamp" => false,
+            let kind = match name.0.as_str() {
+                "Paint" | "Chalk" => Own::Paint,
+                "TailLamp" => Own::Tail,
+                "Lamp" => Own::Lens,
                 "Mirror" => {
                     rear_mirror = Some(mm.0.clone());
                     continue;
                 }
                 _ => continue,
             };
+            // The body's lamp glass covers the reversing lamps at the back too: those stay dark
+            // (the back half moves to its own entity with the original material).
+            if kind == Own::Lens
+                && let Ok((m3, parent, tf)) = placed.get(e)
+                && let Some((front, back)) = mesh_assets.get(&m3.0).and_then(split_front_back)
+            {
+                let (fh, bh) = (mesh_assets.add(front), mesh_assets.add(back));
+                commands.entity(e).insert(Mesh3d(fh));
+                let mut back = commands.spawn((Name::new("reversing lamps"), Mesh3d(bh), MeshMaterial3d(mm.0.clone()), *tf, Actor));
+                if let Ok(n) = mesh_names.get(e)
+                    && let Some(level) = lod_of(&n.0)
+                {
+                    back.insert(lod_range(level));
+                }
+                let back = back.id();
+                commands.entity(parent.parent()).add_child(back);
+            }
             let h = own
                 .entry(mm.0.id())
                 .or_insert_with(|| {
                     let m = mats.get(&mm.0).cloned().unwrap_or_default();
                     let h = mats.add(m.clone());
-                    if paint {
-                        wear.paint.push((h.clone(), m.base_color, m.perceptual_roughness, m.clearcoat));
-                    } else {
-                        wear.tail.push((h.clone(), m.emissive));
+                    match kind {
+                        Own::Paint => wear.paint.push((h.clone(), m.base_color, m.perceptual_roughness, m.clearcoat)),
+                        Own::Tail => wear.tail.push((h.clone(), m.emissive)),
+                        Own::Lens => wear.lens.push((h.clone(), m.emissive)),
                     }
                     h
                 })
@@ -360,6 +380,37 @@ fn rig(
         }
         commands.entity(m).insert(CarRig { hub, knuckle, spin, rest, dials, pod, driver, chassis, parts: detached });
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Own {
+    Paint,
+    Tail,
+    Lens,
+}
+
+/// Splits a mesh into its triangles in front of the model's middle (z < 0) and behind it, or
+/// `None` if it's all on one side (or not readable).
+pub fn split_front_back(m: &Mesh) -> Option<(Mesh, Mesh)> {
+    use bevy::mesh::{Indices, VertexAttributeValues};
+    let Some(VertexAttributeValues::Float32x3(p)) = m.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
+    let idx: Vec<u32> = match m.indices()? {
+        Indices::U16(v) => v.iter().map(|&i| i as u32).collect(),
+        Indices::U32(v) => v.clone(),
+    };
+    let (mut front, mut back) = (Vec::new(), Vec::new());
+    for t in idx.as_chunks::<3>().0 {
+        let z: f32 = t.iter().map(|&i| p.get(i as usize).map_or(0.0, |v| v[2])).sum();
+        if z < 0.0 { &mut front } else { &mut back }.extend_from_slice(t);
+    }
+    if front.is_empty() || back.is_empty() {
+        return None;
+    }
+    let mut f = m.clone();
+    f.insert_indices(Indices::U32(front));
+    let mut b = m.clone();
+    b.insert_indices(Indices::U32(back));
+    Some((f, b))
 }
 
 /// The model's windows: blended and see-through (the importer gives glass a fixed alpha).
@@ -462,16 +513,24 @@ fn cockpit(
 }
 
 /// The car's materials that change with the run: its own copies of the paint (base colour,
-/// roughness, clear coat as built) and the tail lamps (emissive as built).
+/// roughness, clear coat as built), the tail lamps and the headlamp lenses (emissive as built).
 #[derive(Component, Default)]
 pub struct CarWear {
     paint: Vec<(Handle<StandardMaterial>, Color, f32, f32)>,
     tail: Vec<(Handle<StandardMaterial>, LinearRgba)>,
+    lens: Vec<(Handle<StandardMaterial>, LinearRgba)>,
+    /// What the lamps show now: (braking, lights on).
+    lamps: Option<(bool, bool)>,
     /// Dust and mud on the paint, 0 (clean) ..= 1 (caked).
     pub dirt: f32,
     shown_dirt: f32,
-    braking: bool,
 }
+
+/// Tail lamps: as built, ×2.2 with the lights on, ×5 under braking. Headlamp lenses with the
+/// lights on (display-relative: they bloom by day and night alike).
+const TAIL_LIT: f32 = 2.2;
+const TAIL_BRAKE: f32 = 5.0;
+const LENS_LIT: LinearRgba = LinearRgba::rgb(7.0, 6.5, 5.6);
 
 /// How far a fully dirty car's paint goes towards [`DUST`].
 const MAX_DIRT: f32 = 0.6;
@@ -499,9 +558,16 @@ pub fn dusty(c: Color, d: f32) -> Color {
     Color::srgba(s.red * (1.0 - d + d * DUST[0]), s.green * (1.0 - d + d * DUST[1]), s.blue * (1.0 - d + d * DUST[2]), s.alpha)
 }
 
-/// Paint gets dusty as the car drives on loose surfaces (faster while the wheels slip), and the
-/// tail lamps light up under braking.
-fn wear(time: Res<Time>, cars: Query<(&DrivenCar, Option<&DriverInput>, &Children)>, mut wears: Query<&mut CarWear>, mut mats: ResMut<Assets<StandardMaterial>>) {
+/// Paint gets dusty as the car drives on loose surfaces (faster while the wheels slip), the
+/// tail lamps light up under braking and with the lights, the headlamps glow with the lights.
+fn wear(
+    time: Res<Time>,
+    lights: Option<Res<super::headlights::Headlights>>,
+    cars: Query<(&DrivenCar, Option<&DriverInput>, &Children)>,
+    mut wears: Query<&mut CarWear>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+) {
+    let lit = lights.is_some_and(|l| l.on);
     let dt = time.delta_secs();
     for (driven, input, kids) in &cars {
         let Some(k) = kids.iter().find(|k| wears.contains(*k)) else { continue };
@@ -528,11 +594,22 @@ fn wear(time: Res<Time>, cars: Query<(&DrivenCar, Option<&DriverInput>, &Childre
             }
         }
         let braking = input.is_some_and(|i| i.0.brake > 0.05) && v > 0.5;
-        if braking != w.braking {
-            w.braking = braking;
-            for (h, e) in &w.tail {
-                if let Some(mut m) = mats.get_mut(h) {
-                    m.emissive = if braking { *e * 5.0 } else { *e };
+        if w.lamps != Some((braking, lit)) {
+            let (was_braking, was_lit) = w.lamps.unwrap_or((!braking, !lit));
+            w.lamps = Some((braking, lit));
+            if was_braking != braking || was_lit != lit {
+                let k = if braking { TAIL_BRAKE } else if lit { TAIL_LIT } else { 1.0 };
+                for (h, e) in &w.tail {
+                    if let Some(mut m) = mats.get_mut(h) {
+                        m.emissive = *e * k;
+                    }
+                }
+            }
+            if was_lit != lit {
+                for (h, e) in &w.lens {
+                    if let Some(mut m) = mats.get_mut(h) {
+                        m.emissive = if lit { LENS_LIT } else { *e };
+                    }
                 }
             }
         }
@@ -542,6 +619,20 @@ fn wear(time: Res<Time>, cars: Query<(&DrivenCar, Option<&DriverInput>, &Childre
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lamp_glass_splits_front_from_back() {
+        use bevy::asset::RenderAssetUsages;
+        use bevy::mesh::{Indices, PrimitiveTopology};
+        let tri = |z: f32| [[0.0, 0.0, z], [1.0, 0.0, z], [0.0, 1.0, z]];
+        let pos: Vec<[f32; 3]> = tri(-2.0).into_iter().chain(tri(2.0)).collect();
+        let m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()).with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos).with_inserted_indices(Indices::U16(vec![0, 1, 2, 3, 4, 5]));
+        let (f, b) = split_front_back(&m).unwrap();
+        assert_eq!((f.indices().unwrap().len(), b.indices().unwrap().len()), (3, 3));
+        assert_eq!(f.indices().unwrap().iter().next(), Some(0));
+        let front_only = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()).with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, tri(-2.0).to_vec()).with_inserted_indices(Indices::U16(vec![0, 1, 2]));
+        assert!(split_front_back(&front_only).is_none());
+    }
 
     #[test]
     fn dirt_builds_on_loose_surfaces_only() {

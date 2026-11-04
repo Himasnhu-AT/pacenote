@@ -12,12 +12,13 @@
 //! full-load and no-load sets. The idle loop is the bottom of both sets.
 //!
 //! On top: the rev limiter (ignition cut ~14 times a second), gear changes (the sim's cut
-//! drops to overrun; an upshift under power bangs; a downshift blips), recorded backfire pops
-//! on the overrun after a lift and on the limiter, and a damaged engine misfiring.
+//! drops to overrun; a downshift blips) and a damaged engine misfiring. Exhaust pops and bangs
+//! are decided on the main thread (`super::pops::PopScheduler`) and played by
+//! `super::pops::PopVoices`.
 
 use super::car::CarParams;
 use super::dsp::{Noise, RATE, Smooth, Wander, smoothstep};
-use super::samples::{Bank, Id, Shots, read_wrap};
+use super::samples::{Bank, read_wrap};
 
 /// The loops: file stem (`assets/sounds/car/engine_<stem>_{bay,exh}.ogg`), rpm (measured from
 /// the firing frequency for the recordings) and whole firings in the loop, which starts on a
@@ -62,8 +63,6 @@ pub struct EngineOut {
     pub bay: f32,
     /// Exhaust mic (outside sound; boomy and dark inside).
     pub exhaust: f32,
-    /// Backfire pops and bangs (stereo; outside sound).
-    pub pops: (f32, f32),
 }
 
 /// Crossfade weights over one set at `rpm`: (index into LOOPS, weight) × 2. The loops pulse
@@ -97,22 +96,16 @@ pub struct Engine {
     clock: f64,
     /// Gain of each loop (smoothed a little so a crossfade step never clicks).
     gain: [Smooth; N],
-    /// Firing clock (0..1 per firing, rpm/30 Hz): pops and misfires happen on firings.
+    /// Firing clock (0..1 per firing, rpm/30 Hz): misfires happen on firings.
     fire: f32,
     /// Ignition cut by the limiter (fast smoothing of the dip).
     cut_gain: Smooth,
     limiter: f32,
-    /// 1 right after a lift (pops are likely), decays.
-    pub crackle: f32,
     /// Seconds left of a downshift throttle blip.
     blip: f32,
-    /// A misfire left unburnt fuel: the next firing may bang in the exhaust.
-    unburnt: bool,
     /// A misfire's dip (1 at the misfire, falls over about a firing).
     misfire: f32,
     wobble: Wander,
-    last_throttle: f32,
-    pops: Shots<4>,
 }
 
 impl Engine {
@@ -128,49 +121,18 @@ impl Engine {
             fire: 0.0,
             cut_gain: Smooth::new(1.0, 0.004, 0.004, RATE),
             limiter: 0.5,
-            crackle: 0.0,
             blip: 0.0,
-            unburnt: false,
             misfire: 0.0,
             wobble: Wander::new(3.0),
-            last_throttle: 0.0,
-            pops: Shots::default(),
         }
     }
 
-    /// New parameters (once per block): lift-off crackle window.
-    pub fn set(&mut self, p: &CarParams) {
-        if p.throttle < 0.25 && self.last_throttle >= 0.5 && p.rpm > 3200.0 {
-            self.crackle = 1.0;
-        }
-        self.last_throttle = p.throttle;
-    }
-
-    /// A gear change: an upshift under power bangs (ignition cut with fuel in the pipe); a
-    /// downshift blips the throttle (rev-matching) and crackles.
-    pub fn shift(&mut self, up: bool, p: &CarParams) {
-        if up {
-            if p.throttle > 0.5 && p.rpm > 4200.0 && self.n.chance(0.75) {
-                self.pop(1.0);
-            }
-        } else {
+    /// A gear change: a downshift blips the throttle (rev-matching). (The bangs and crackles
+    /// come from the pop scheduler.)
+    pub fn shift(&mut self, up: bool) {
+        if !up {
             self.blip = 0.09;
-            if p.rpm > 2800.0 {
-                self.crackle = self.crackle.max(0.7);
-            }
         }
-    }
-
-    /// A backfire is sounding.
-    pub fn popping(&self) -> bool {
-        self.pops.active()
-    }
-
-    fn pop(&mut self, strength: f32) {
-        let n = &mut self.n;
-        let id = [Id::Pop1, Id::Pop2, Id::Pop3][(n.next_u32() % 3) as usize];
-        let gain = n.range(0.5, 1.0) * strength;
-        self.pops.play(id, n.range(0.88, 1.12), gain, n.range(-0.2, 0.2));
     }
 
     /// One sample. Silent (but keeping time) until the bank has loaded.
@@ -181,15 +143,12 @@ impl Engine {
         // Limiter bounce: cut ignition about half of each ~70 ms cycle.
         let mut cut = p.shifting;
         let mut lim_cut = false;
-        let mut lim_start = false;
         if at_limit {
-            let before = self.limiter;
             self.limiter += 14.0 / RATE;
             if self.limiter >= 1.0 {
                 self.limiter -= 1.0;
             }
             lim_cut = self.limiter < 0.45;
-            lim_start = lim_cut && before >= 0.45;
             cut |= lim_cut;
         } else {
             self.limiter = 0.5;
@@ -211,34 +170,15 @@ impl Engine {
         let running = smoothstep(150.0, 450.0, rpm);
         let rpm = rpm.max(200.0);
         let rpm_n = ((rpm - p.idle_rpm) / (redline - p.idle_rpm)).clamp(0.0, 1.0);
-        let overrun = (1.0 - load) * smoothstep(2200.0, 4500.0, rpm);
-        self.crackle *= 1.0 - 1.0 / (1.4 * RATE);
-        // Firings: misfires and backfires.
+        // Firings: a damaged engine misfires (the backfire that may follow is the pop
+        // scheduler's).
         self.fire += rpm / 30.0 / RATE;
         if self.fire >= 1.0 {
             self.fire -= 1.0;
-            let n = &mut self.n;
             let misfire = dmg * dmg * 0.28 * (0.6 + 0.4 * load);
-            let mut bang = 0.0;
-            if p.active && n.chance(misfire) {
+            if p.active && self.n.chance(misfire) {
                 self.misfire = 1.0;
-                self.unburnt = true;
-            } else if self.unburnt {
-                self.unburnt = false;
-                if n.chance(0.5) {
-                    bang = 0.6;
-                }
             }
-            // Unburnt fuel lighting in the exhaust on the overrun after a lift.
-            if p.active && n.chance(0.02 * overrun * self.crackle) {
-                bang = 1.0;
-            }
-            if bang > 0.0 {
-                self.pop(bang);
-            }
-        }
-        if lim_start && p.active && self.n.chance(0.45) {
-            self.pop(0.8);
         }
         // A misfire is a missing firing: the level drops for about a firing.
         self.misfire *= 1.0 - (rpm / 30.0 * 0.8) / RATE;
@@ -277,8 +217,7 @@ impl Engine {
             bay += read_wrap(b, pos) * g;
             exhaust += read_wrap(e, pos) * g;
         }
-        let pops = self.pops.next(bank);
-        EngineOut { bay: bay * gain, exhaust: exhaust * gain, pops: (pops.0 * level, pops.1 * level) }
+        EngineOut { bay: bay * gain, exhaust: exhaust * gain }
     }
 }
 
