@@ -81,6 +81,7 @@ impl Default for WorldDoc {
             grades: Vec::new(),
             lots: Vec::new(),
             buildings: Vec::new(),
+            yumps: Vec::new(),
         };
         WorldDoc { data, terrain: String::new() }
     }

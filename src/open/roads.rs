@@ -85,6 +85,9 @@ pub struct RoadNet {
     pub town_y: f32,
     /// The land under it (`land::land(seed)`).
     pub land: Arc<Land>,
+    /// The jump crests (road, station) the generator built for the Yump challenges
+    /// (WORLD_PASS §5; kept in the world data).
+    pub yumps: Vec<(usize, usize)>,
 }
 
 /// The nearest road to a point.
@@ -693,10 +696,19 @@ fn build(seed: u64) -> RoadNet {
     if let Some(forest) = escarp {
         town_streets(&mut b, valley, forest);
     }
-    let roads = b.roads;
+    // Jump crests for the Yump challenges: one on tarmac (the hillclimb, else the B-road out of
+    // town), two on gravel (the pass or the basin road; the gully, forestry or southern road).
+    let mut roads = b.roads;
     let junctions = find_junctions(&roads);
+    let mut yumps = Vec::new();
+    for (choices, r_v) in YUMP_ROADS {
+        if let Some((k, i)) = choices.iter().find_map(|&k| roads.get(k).and_then(|r| yump_site(&r.road, k, &junctions)).map(|i| (k, i))) {
+            sculpt_yump(&mut roads[k], i, r_v);
+            yumps.push((k, i));
+        }
+    }
     let town_y = land.coarse(pl.village);
-    let mut net = RoadNet { seed, roads, junctions, town_y, land };
+    let mut net = RoadNet { seed, roads, junctions, town_y, land, yumps };
     super::profile::dress(&mut net);
     net
 }
@@ -728,6 +740,101 @@ fn town_streets(b: &mut Builder, main: usize, forest: usize) {
     }
     b.street((church_w, p(LANES_B.0, CHURCH.0)), &[], (mill_w, p(LANES_B.0, MILL.0)));
     b.street((church_e, p(LANES_B.1, CHURCH.1)), &[], (mill_e, p(LANES_B.1, MILL.1)));
+}
+
+/// Vertical radius (m) of a jump crest (WORLD_PASS §5): gravel, tarmac. A car leaves the ground
+/// over it above √(g·R): 75 km/h, 83 km/h.
+pub const YUMP_R: (f32, f32) = (45.0, 55.0);
+
+/// A jump: a kicker raised `YUMP_RISE` m on a straight, gentle stretch, up over `YUMP_UP` m
+/// (+5.6 %) and down over `YUMP_DOWN` m (−14 %, where the car flies), its crest rounded to
+/// [`YUMP_R`].
+const YUMP_RISE: f32 = 2.8;
+const YUMP_UP: f32 = 50.0;
+const YUMP_DOWN: f32 = 20.0;
+const YUMP_RAMP: f32 = YUMP_UP;
+
+/// The roads a jump may go on, in order of preference, and its crest radius.
+const YUMP_ROADS: [(&[usize], f32); 3] = [(&[1, 0], YUMP_R.1), (&[3, 2], YUMP_R.0), (&[6, 4, 7], YUMP_R.0)];
+
+/// Where on `road` a jump goes (station): a stretch with no bend tighter than 250 m from 100 m
+/// before to 50 m after, climbing or falling under 4 %, more than 150 m from either end, a
+/// junction and the town; the most level one.
+fn yump_site(road: &Road, k: usize, junctions: &[Junction]) -> Option<usize> {
+    let n = road.len();
+    let (before, after) = ((100.0 / STEP) as usize, (50.0 / STEP) as usize);
+    let ends = (150.0 / STEP) as usize;
+    let here: Vec<usize> = junctions.iter().flat_map(|j| j.roads.iter().filter(|r| r.0 == k).map(|r| r.1)).collect();
+    let ramp = (YUMP_RAMP / STEP) as usize;
+    let mut best: Option<(f32, usize)> = None;
+    for i in before.max(ends)..n.saturating_sub(ends.max(after)) {
+        let p = Vec2::new(road.pts[i].x, road.pts[i].z);
+        if super::town::in_core(p) || here.iter().any(|&j| j.abs_diff(i) as f32 * STEP < 150.0) {
+            continue;
+        }
+        let g = (road.pts[i + ramp / 2].y - road.pts[i - ramp].y) / (1.5 * YUMP_RAMP);
+        if g.abs() > 0.04 || (i - before..=i + after).any(|j| road.curv[j].abs() > 1.0 / 250.0) {
+            continue;
+        }
+        if best.is_none_or(|b| g.abs() < b.0) {
+            best = Some((g.abs(), i));
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// Builds the jump at station `i`: the road raised along a tent `YUMP_RISE` m high, its crest
+/// rounded to a vertical radius `r_v` (a car flies over it at about 80 km/h and up) and the two
+/// toes eased.
+fn sculpt_yump(nr: &mut NetRoad, i: usize, r_v: f32) {
+    let road = &nr.road;
+    let (up, down) = ((YUMP_UP / STEP) as usize, (YUMP_DOWN / STEP) as usize);
+    let (a, b) = (i - up, i + down);
+    let mut y: Vec<f32> = road.pts.iter().map(|p| p.y).collect();
+    // No steeper than 15 % down the far side, whatever the road does there.
+    let fall = (y[b] - y[i]) / YUMP_DOWN;
+    let rise = YUMP_RISE.min((fall + 0.15) * YUMP_DOWN).max(1.0);
+    for (j, v) in y.iter_mut().enumerate().take(b + 1).skip(a) {
+        let t = if j <= i { (j - a) as f32 / up as f32 } else { (b - j) as f32 / down as f32 };
+        *v += rise * t;
+    }
+    // The crest: the two grades either side joined by an arc of radius r_v.
+    let (sa, sb, si) = (a as f32 * STEP, b as f32 * STEP, i as f32 * STEP);
+    let g1 = (y[i] - y[a]) / (si - sa);
+    let g2 = (y[b] - y[i]) / (sb - si);
+    let half = r_v * (g1 - g2) * 0.5;
+    let top = y[i];
+    for (j, v) in y.iter_mut().enumerate().take(b + 1).skip(a) {
+        let x = j as f32 * STEP - si;
+        if x.abs() < half {
+            // The parabola tangent to both grades at ±half.
+            let u = x + half;
+            *v = top - g1 * half + g1 * u - u * u / (2.0 * r_v);
+        }
+    }
+    // The toes: a short sag curve each (a jolt otherwise).
+    for toe in [a, b] {
+        let span = 2usize;
+        let (l, r) = (toe - span, toe + span);
+        let (yl, yr) = (y[l], y[r]);
+        let (gl, gr) = ((y[l] - y[l - 1]) / STEP, (y[r + 1] - y[r]) / STEP);
+        for j in l + 1..r {
+            // Cubic Hermite between the two sides, matching their grades.
+            let t = (j - l) as f32 / (r - l) as f32;
+            let h = (r - l) as f32 * STEP;
+            let (t2, t3) = (t * t, t * t * t);
+            y[j] = (2.0 * t3 - 3.0 * t2 + 1.0) * yl + (t3 - 2.0 * t2 + t) * h * gl + (-2.0 * t3 + 3.0 * t2) * yr + (t3 - t2) * h * gr;
+        }
+    }
+    let pts: Vec<Vec2> = road.pts.iter().map(|p| Vec2::new(p.x, p.z)).collect();
+    let mut new = Road::from_centreline(&pts, &y, road.width.clone(), road.surface.clone());
+    new.bank = road.bank.clone();
+    nr.road = new;
+}
+
+/// The jump crests on the network (road, station), as the generator built them.
+pub fn yumps(net: &RoadNet) -> Vec<(usize, usize)> {
+    net.yumps.clone()
 }
 
 /// The nearest road to `p` within `max` m and the next nearest (another road, or another leg
@@ -999,6 +1106,61 @@ mod tests {
         assert_eq!(at(0.0), Surface::Loose);
         assert_eq!(at(gravel.road.width[i] * 0.5 - 0.05), Surface::Loose);
         assert_eq!(at(gravel.road.width[i] * 0.5 + 0.3), Surface::Verge, "shoulder");
+    }
+}
+
+/// The jump crests send a car flying (WORLD_PASS §5: ≥ 0.3 s in the air), at about the pace
+/// the dev autopilot takes them at 0.85 (95 km/h gravel, 105 km/h tarmac), on the road's line.
+#[cfg(test)]
+mod yump {
+    use bevy::math::Vec3;
+
+    use crate::stage::{STEP, Surface};
+    use crate::vehicle::{Car, Input, Spec, step};
+
+    #[test]
+    fn yumps_fly() {
+        let w = crate::open::OpenWorld::generate(crate::open::SEED);
+        let sites = super::yumps(&w.net);
+        let spec = Spec::default();
+        for (k, i) in sites {
+            let road = &w.net.roads[k].road;
+            let tarmac = road.surface[i] == Surface::Tarmac;
+            let v = if tarmac { 105.0 } else { 95.0 } / 3.6;
+            let start = i - (90.0 / STEP) as usize;
+            let (p, d) = (road.pts[start], road.dir[start]);
+            let mut car = Car::new(Vec3::new(p.x, w.ground_height(p.x, p.z) + 0.5, p.z), libm::atan2f(d.x, d.y));
+            car.vel = car.forward() * v;
+            for wh in &mut car.wheels {
+                wh.spin = v / spec.wheel_radius;
+            }
+            let (mut air, mut longest) = (0.0f32, 0.0f32);
+            let crest = i as f32 * STEP;
+            for _ in 0..(5 * 60) {
+                let throttle = if car.vel.length() < v { 1.0 } else { 0.0 };
+                // Kept on the road's line (a driver's small corrections; left = +).
+                let xz = bevy::math::Vec2::new(car.pos.x, car.pos.z);
+                let at = road.nearest(xz, 30.0);
+                let steer = at.map_or(0.0, |at| {
+                    let d = road.dir[at.i];
+                    let left = bevy::math::Vec2::new(d.y, -d.x);
+                    let f = bevy::math::Vec2::new(car.forward().x, car.forward().z).normalize_or_zero();
+                    (-(0.15 * at.lateral + 2.0 * f.dot(left))).clamp(-1.0, 1.0)
+                });
+                step(&mut car, &spec, Input { throttle, steer, ..Default::default() }, &w, 1.0 / 60.0);
+                // Only the jump itself: from the crest to 60 m on, over the road.
+                let on = road.nearest(bevy::math::Vec2::new(car.pos.x, car.pos.z), 6.0).is_some_and(|at| at.s > crest - 5.0 && at.s < crest + 60.0);
+                if on && car.wheels.iter().all(|wh| !wh.contact) {
+                    air += 1.0 / 60.0;
+                    longest = longest.max(air);
+                } else {
+                    air = 0.0;
+                }
+            }
+            let at = road.pts[i];
+            eprintln!("yump on road {k} station {i} (s {:.0} m, at {:.0}, {:.0}): {:.2} s in the air at {:.0} km/h", i as f32 * STEP, at.x, at.z, longest, v * 3.6);
+            assert!(longest >= 0.3, "road {k} station {i}: {longest} s in the air");
+        }
     }
 }
 
