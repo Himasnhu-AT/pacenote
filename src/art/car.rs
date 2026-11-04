@@ -399,7 +399,7 @@ pub fn split_front_back(m: &Mesh) -> Option<(Mesh, Mesh)> {
         Indices::U32(v) => v.clone(),
     };
     let (mut front, mut back) = (Vec::new(), Vec::new());
-    for t in idx.chunks_exact(3) {
+    for t in idx.as_chunks::<3>().0 {
         let z: f32 = t.iter().map(|&i| p.get(i as usize).map_or(0.0, |v| v[2])).sum();
         if z < 0.0 { &mut front } else { &mut back }.extend_from_slice(t);
     }

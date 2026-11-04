@@ -269,7 +269,7 @@ impl CarSynth {
         if self.bank.is_none() {
             self.bank = samples::bank();
         }
-        for (fr, pf) in out.chunks_exact_mut(2).zip(pops.chunks_exact_mut(2)) {
+        for (fr, pf) in out.as_chunks_mut::<2>().0.iter_mut().zip(pops.as_chunks_mut::<2>().0) {
             let (l, r, pl, pr) = self.sample();
             fr[0] += l;
             fr[1] += r;

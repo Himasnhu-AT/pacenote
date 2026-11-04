@@ -19,6 +19,37 @@ surface, trees and dressing, the car model, sky and weather, wheel spray. One pl
 | `spray.rs` | dust, gravel chips, mud clods, snow powder, tarmac smoke per wheel from surface, speed and slip; rain around the camera on wet stages |
 | `meshfile.rs` | reader for `assets/models/*.pnm` (small binary meshes, read synchronously at load) |
 
+## Car feel (festival stream D)
+
+- **Exhaust flames** (`exhaust.rs`): one pooled rig per car at the tail pipe (model
+  (0.46, 0.27 m above ground, 1.99), axis rearward, 11° down, 7° out): two nested additive
+  cones (24 tris, shared mesh/materials, `NotShadowCaster`, emissive not exposed so they bloom
+  alike day and night: core blue-white 8×, outer orange 3×), 40-70 ms (crackle) / 90-120 ms
+  (bang), random roll and ±15 % length from the pop's seed; a flash `PointLight` (1.3k / 3k
+  lm, a third of ART_BIBLE's: the full value washed out the tail at night); bangs add 8 vfx
+  sparks and a grey-blue puff, misfires black smoke and no flame. From the cockpit only the
+  flash shows. Driven by `audio::pops::ExhaustPop`, the same frame as the sound.
+- **Cameras** (`camera.rs`, moved from `drive.rs`): the chase camera hangs on a spring arm,
+  one closed-form damped spring per axis in the arm's yaw frame (boom ω 5 ζ 0.8 −1.0/+1.6 m,
+  lateral 4/0.9 ±1.2 m, vertical 7/1 −0.4/+0.6 m, heading 3.5/1 ≤ 25°, aim 9/1), driven only
+  by the rest pose's acceleration (speeding up stretches, braking squashes, a steady speed
+  rests); boom +0.8 m and height −0.25 m from 60 → 180 km/h; 0.35 m probe; landing kick
+  (0.06 m per m/s over 2, ≤ 0.35 m), chase shake over 110 km/h, impact jolt ≤ 1.5°, all
+  scaled by Camera shake. `SpeedFeel` (smoothstep 40 → 180 km/h) drives FOV (+7°, +5° inside),
+  blur and wind. Settings › Camera: Motion blur Off/Low/High (default Low), Chase distance,
+  Chase stiffness, Landing kick.
+- **Motion blur**: `Look.lens.motion_blur` on while the setting allows (re-asserted before
+  `apply_look` if the look is rewritten), so `MotionBlur` exists only where the tier allows
+  (High+) and is never inserted in play; `shutter_angle` written after `QualitySet::Look`:
+  0 under ~60 km/h, ≈0.35 at 160, 0.4 flat out (×0.6 Low, ×0.6 inside), 0 for 3 frames after
+  a cut.
+- **Lights** (`headlights.rs`): two low beams (12k lm, 80 m, the left one shadowed on High+,
+  fixed at spawn) and the pod (40k lm, 160 m) as children of the car at intensity 0; L /
+  D-pad right, Settings › Driving › Headlights Auto/On/Off (auto below a 2° sun, off above 4°).
+  Lens glass glows (the body's rear reversing-lamp half is split off and stays dark), tail
+  lamps ×2.2 with the lights, ×5 braking. Inserts `Headlights` (Night start gate).
+- **Wet spray** (`spray.rs`): water mist off the tyres on `Surface::Wet`, growing with speed.
+
 ## Assets and how to rebuild them
 
 Sources are the raw downloads in the main checkout's `assets_src/` (see `assets_src/SOURCES.md`).

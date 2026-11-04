@@ -400,6 +400,9 @@ pub fn traffic_heard(t: &crate::open::traffic::Traffic, ear: &GlobalTransform, e
     p
 }
 
+/// Exhaust pops decided this frame and their counters.
+type PopsOut<'w> = (ResMut<'w, pops::PopFeed>, ResMut<'w, pops::PopStats>);
+
 #[allow(clippy::too_many_arguments)]
 fn gather(
     time: Res<Time>,
@@ -414,7 +417,7 @@ fn gather(
     remote: Res<RemoteCarSound>,
     mixer: Res<Mixer>,
     codriver: Option<Res<crate::codriver::CoDriver>>,
-    (traffic, listener, mut pops): (Option<Res<crate::open::traffic::Traffic>>, Query<&GlobalTransform, With<engine::gfx::MainCamera>>, (ResMut<pops::PopFeed>, ResMut<pops::PopStats>)),
+    (traffic, listener, mut pops): (Option<Res<crate::open::traffic::Traffic>>, Query<&GlobalTransform, With<engine::gfx::MainCamera>>, PopsOut),
     mut link: ResMut<Link>,
     mut tr: Local<Tracker>,
     mut stats: ResMut<RallyAudioStats>,

@@ -765,7 +765,7 @@ mod tests {
             arm.step(pos, 0.0, 0.0, boom, 1.0, dt);
             min_long = min_long.min(arm.long.x);
         }
-        assert!(min_long < -0.2 && min_long >= LONG.lo, "squash {min_long}");
+        assert!((LONG.lo..-0.2).contains(&min_long), "squash {min_long}");
         // A hairpin: the car turns 180° in 1.5 s; the arm lags up to 25° and catches up.
         let mut arm = Arm::new(Vec3::ZERO, 0.0, boom);
         let mut worst = 0.0f32;
