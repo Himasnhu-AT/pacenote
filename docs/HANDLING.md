@@ -208,6 +208,102 @@ Skipped from the audit:
 - **Grip-limited braking:** braking stays torque-limited (1.10 g on tarmac, about the tyre
   limit anyway).
 
+## Crashes, rolls and starts (revision 10)
+
+A playthrough of stage 1 with the throttle held from the line ended in 4.7 s: the road bent
+away, the car went into a tree at ~80 km/h, and one hit took the engine and steering to 100 %
+("fatal crash"). Revision 10 changes the damage model, the start lines and where trunks push.
+
+**Damage** (`vehicle::Damage`, `drive::DEATH_HIT`):
+- Severity is still quadratic in closing speed, but a part breaks outright head-on at
+  `DAMAGE_FATAL` = 33 m/s (~120 km/h), not 22 m/s (80 km/h).
+- A front-corner hit goes into the steering and suspension more, the engine less.
+- Death ("You're dead", back to the line) needs one crash, meaning hits less than
+  `CRASH_GAP` = 0.5 s apart, to take 0.6 of `Damage::total` (the mean of the three parts).
+  It used to be 0.5 of the worst part in a single 60 Hz step.
+- A part at 100 % still stops the car until a recover (repaired, +5 s).
+
+Head-on into a trunk (`vehicle::tests::damage_table`):
+
+| | Engine | Steering | Suspension | Total | Before (rev 9) |
+|---|---|---|---|---|---|
+| 35 km/h | 0.04 | 0.01 | 0.01 | 0.02 | engine 0.06 |
+| 50 km/h | 0.11 | 0.03 | 0.02 | 0.06 | engine 0.17 |
+| 65 km/h | 0.23 | 0.07 | 0.05 | 0.12 | engine 0.36 |
+| 80 km/h | 0.39 | 0.12 | 0.08 | 0.20 | engine 1.0: wrecked, dead |
+| 100 km/h | 0.66 | 0.20 | 0.13 | 0.33 | wrecked, dead |
+| 115 km/h | 0.91 | 0.27 | 0.18 | 0.46 | wrecked, dead |
+| 130 km/h | 1.00 | 0.36 | 0.24 | 0.53: wrecked | wrecked, dead |
+
+Death takes about 125 km/h nose-on or ~110 km/h on a front corner. The playtest's stage 1
+crash at ~105 km/h on a front corner now leaves engine 0.42, steering 0.65 and suspension
+0.46: a limping car the co-driver tells you to nurse home.
+
+**Start lines** (`stage::LEAD_IN`): every stage now starts on a 60 m straight, and the car
+faces along it. With the throttle held and the wheels straight, the car stays on the road
+through the run-up, and leaves it 80–195 m out (85–145 km/h) where the first bend starts. On two
+stages it's still on the road after 8 s. Before, it left within 20–60 m on 17 of the 20 stages
+(`throttle_off_the_line`). Every stage, obstacle and prop hash moved: boards
+key on the road hash, so old times show as stale.
+
+**Rolls:**
+- Trunks and walls now push on the body at the height of the centre of mass
+  (`vehicle::IMPACT_Y`), not at the middle of the body box 0.28 m above it.
+- A car sliding sideways into a tree used to be rolled by its own impact.
+- Off the road, the tyres trip the car on steep banks. That is physical, so it stays.
+
+Lowest `up.y` in 4 s (below 0 means it rolled). From `trunk_roll_report` and `roll_report`;
+β is the slip angle in degrees.
+
+| Case | 40 / 60 / 80 / 100 / 120 km/h |
+|---|---|
+| Sideways into a trunk, before | 0.99 / **−0.06 / −1 / −1 / −1** |
+| Sideways into a trunk, now | 1.0 at every speed |
+| 45° nose-in into a trunk, before → now | rolled from 100 km/h → 1.0 at every speed |
+| Off the road at 20°, onto a 19° drop | 0.93 … 0.70 (never rolls) |
+| Sideways off the road, 19° drop (50–130 km/h) | 0.55 / 0.39 / 0.30 / **−1 / −1** (rolls from ~110) |
+| Sideways off the road, 31° drop | rolls at any speed |
+| Off the road at 20° (β 30°), 31° drop | rolls from ~110 km/h |
+| Flat rough ground, banks rising away, 15 cm lip | never |
+
+Stages at pace 0.85, scored as finished / rolls / wrecked:
+- with the new damage and start lines but the old impact height: 18 / 2 / 1;
+- with the impact at the centre of mass's height: 19 / 1 / 0;
+- at pace 1.0: 19 / 2 / 1. The remaining rolls follow a tree hit or a slide off
+the road down a 35°+ bank. A keyboard driver at pace 0.6 finishes 20 / 20, with no rolls and no
+wrecks.
+
+**Acceleration:** unchanged and on target. 0–100 km/h takes 4.1 s on tarmac, 4.6 s on gravel
+and 7.5 s on snow (`launch_table`); 0–50 on gravel takes 2.0 s. A Fabia or i20 R5 is quoted at
+~4 s on tarmac. The playthrough's 0 → 82 km/h in 3.7 s matches the harness, which reaches
+82 km/h in ~3.5 s. HANDOFF's "~8 s" was out of date.
+
+**Cameras (`drive::follow_camera`):**
+- The chase camera marches its boom from the roof to the eye (`chase_clearance`) and keeps out
+  of:
+  - the ground;
+  - building walls;
+  - big solids (traffic cars, boulders) all along the boom;
+  - thin trunks, but only near the eye, so one passing between camera and car doesn't make it
+    jump.
+- When something is in the way, the camera rises up to 2.4 m first, then pulls in (no closer
+  than 22 % of the boom). It moves in at once and eases back out over ~0.4 s.
+- The field of view widens by up to 7° between 40 and 180 km/h.
+- The cockpit and bonnet views get a few millimetres of road buzz. It scales with surface
+  (tarmac 0.15 … rough 2) and speed.
+- The FOV widening and the road buzz both scale with Camera shake; Reduce motion turns them off.
+
+**Still open: gravel keyboard turn-in at speed.**
+- Holding a key at 100 km/h on gravel overshoots the yaw by ~170 %, then swings once. At
+  70 km/h it's ~110 %; on tarmac at 100 km/h, ~38 %.
+- Full input keeps the fronts at their peak slip measured from the axle's travel, while the
+  rears lag on gravel's soft cornering stiffness. That gives the front axle no yaw damping.
+- Things that barely moved it:
+  - `steer_slip` 0.8 (165 %);
+  - a slower keyboard ramp (130 %, at the cost of response).
+- A proper fix (tyre relaxation length, or yaw-rate damping in `steer_frame`) needs its own
+  pass.
+
 ## Dev autopilot
 
 In dev builds, `src/autopilot.rs` drives the car for recording videos. It uses the same input
@@ -229,6 +325,8 @@ KEYS=1 PACE=0.55 memgate -- cargo test ... vehicle::handling_tests::stage_report
 memgate -- cargo test -q --lib -- --ignored --nocapture --exact vehicle::handling_tests::player_report
 STAGE=8 TRACE=700,800 memgate -- cargo test ... vehicle::handling_tests::stage_report   # per-step trace
 STAGE=8 TRACE=700,800 memgate -- cargo test ... vehicle::handling_tests::road_profile   # road cross-section
+memgate -- cargo test -q --lib -- --ignored --nocapture throttle_off_the_line   # throttle held from each start line
+memgate -- cargo test -q --lib -- --ignored --nocapture roll_report trunk_roll_report launch_table damage_table
 ```
 
 The tests cover:
@@ -244,7 +342,7 @@ The tests cover:
 ## Ghosts and boards
 
 - **Ghosts:** a ghost stores `meta::ghost::sim_hash`, which hashes the `Spec` and
-  `vehicle::REVISION` (now 5). `meta::pick_ghost` only races ghosts with the current hash,
+  `vehicle::REVISION` (now 10). `meta::pick_ghost` only races ghosts with the current hash,
   because an old ghost would replay its inputs through the new car and drive somewhere else.
 - **Boards:** each board `Record` stores `handling` (`vehicle::REVISION`; files from before
   load with 0). Only current-handling runs rank, count as a team's best or lead a stage. Older
