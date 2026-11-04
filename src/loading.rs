@@ -370,8 +370,8 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
                         m.spawn((RegionMap { built: None }, ImageNode { color: Color::NONE, ..default() }, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE));
                     });
                     r.spawn((Node { justify_content: JustifyContent::SpaceBetween, width: px(760), margin: UiRect::top(px(GAP_S)), ..default() }, Pickable::IGNORE)).with_children(|cap| {
-                        cap.spawn(text("THE VALLEY \u{b7} 4 \u{d7} 4 KM", label(16.0), t.text_dim));
-                        cap.spawn(text(if event.is_some() { "ROUTE, START TO FINISH" } else { "YOU ARE HERE" }, label(16.0), t.text_dim));
+                        cap.spawn(text("THE VALLEY \u{b7} 4 \u{d7} 4 KM", label(18.0), t.text_dim));
+                        cap.spawn(text(if event.is_some() { "ROUTE, START TO FINISH" } else { "YOU ARE HERE" }, label(18.0), t.text_dim));
                     });
                 });
             } else {
@@ -407,7 +407,7 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
                 c.spawn(accent_panel(&t, accent, 22.0, GAP_S)).insert(Node { width: px(620), flex_direction: FlexDirection::Column, row_gap: px(GAP_XS + 3.0), padding: UiRect::all(px(22)), border: UiRect::left(px(3)), border_radius: BorderRadius::all(px(RADIUS)), ..default() }).with_children(|card| {
                     card.spawn((Node { justify_content: JustifyContent::SpaceBetween, ..default() }, Pickable::IGNORE)).with_children(|h| {
                         h.spawn(eyebrow("Briefing", t.text_dim));
-                        h.spawn(text(format!("{} \u{b7} {} {}", chip.name.to_uppercase(), chip.class.letter(), chip.pi), label(SIZE_LABEL - 1.0), t.text_dim));
+                        h.spawn(text(format!("{} \u{b7} {} {}", chip.name.to_uppercase(), chip.class.letter(), chip.pi), label(SIZE_LABEL), t.text_dim));
                     });
                     let line = |card: &mut ChildSpawnerCommands, what: &str, value: String, color: Color| {
                         card.spawn((Node { justify_content: JustifyContent::SpaceBetween, column_gap: px(GAP_M), ..default() }, Pickable::IGNORE)).with_children(|row| {
@@ -466,7 +466,7 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
                         h.spawn((Node { column_gap: px(GAP_S), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|k| {
                             k.spawn(key_cap(&t, if pad { "LB" } else { "Left" }));
                             k.spawn(key_cap(&t, if pad { "RB" } else { "Right" }));
-                            k.spawn(text("More tips", body(SIZE_SMALL), t.text_dim));
+                            k.spawn(text("More tips", body(18.0), t.text_dim));
                         });
                     });
                     card.spawn((TipText, text(first_tip, body(SIZE_BODY + 1.0), t.text), Node { min_height: px(52), ..default() }));

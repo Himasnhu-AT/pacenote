@@ -256,7 +256,7 @@ pub fn top_bar(world: &mut World, root: Entity) {
                         Some(h) => format!("{} / {} XP", thousands(xp - lo), thousands(h - lo)),
                         None => "TOP GRADE".into(),
                     };
-                    c.spawn(text(xp_line, body(15.0), t.text_muted));
+                    c.spawn(text(xp_line, body(18.0), t.text_muted));
                 });
                 // Notes.
                 r.spawn((Node { column_gap: px(6), align_items: AlignItems::Baseline, ..default() }, Pickable::IGNORE)).with_children(|c| {
@@ -573,7 +573,7 @@ pub fn build(world: &mut World, root: Entity) {
         // Credits: a footer link, last in the focus order.
         p.spawn((Node { position_type: PositionType::Absolute, right: px(EDGE), bottom: px(FOOTER_BOTTOM - 6.0), column_gap: px(GAP_M), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
             if !version.is_empty() {
-                r.spawn(text(format!("v{version}"), body(SIZE_TINY), t.text_dim));
+                r.spawn(text(format!("v{version}"), body(18.0), t.text_dim));
             }
             r.spawn((
                 Button,
@@ -587,7 +587,7 @@ pub fn build(world: &mut World, root: Entity) {
                 BorderColor::all(t.line),
             ))
             .with_children(|b| {
-                b.spawn(text("CREDITS", label(SIZE_TINY + 2.0), t.text_muted));
+                b.spawn(text("CREDITS", label(18.0), t.text_muted));
             });
         });
     });
@@ -599,8 +599,8 @@ pub fn build(world: &mut World, root: Entity) {
 fn section_header(p: &mut ChildSpawnerCommands, t: &Theme, s: usize, name: &str) {
     p.spawn((Node { column_gap: px(GAP_S + 2.0), align_items: AlignItems::Center, width: px(560), margin: UiRect::new(px(26), px(0), px(if s == 0 { 0.0 } else { GAP_M }), px(GAP_XS)), ..default() }, Pickable::IGNORE))
         .with_children(|h| {
-            h.spawn(text(format!("{:02}", s + 1), label(17.0), t.accent));
-            h.spawn(text(name.to_uppercase(), label(17.0), t.text_muted));
+            h.spawn(text(format!("{:02}", s + 1), label(18.0), t.accent));
+            h.spawn(text(name.to_uppercase(), label(18.0), t.text_muted));
             h.spawn((Node { flex_grow: 1.0, height: px(1), ..default() }, BackgroundColor(t.line), Pickable::IGNORE));
         });
 }
@@ -620,7 +620,7 @@ fn hub_row(p: &mut ChildSpawnerCommands, t: &Theme, item: &Item, meta: &str, ord
         b.spawn((LookBg([Color::NONE, t.accent, Color::NONE]), Node { position_type: PositionType::Absolute, left: px(0), top: px(10), bottom: px(10), width: px(4), ..default() }, BackgroundColor(Color::NONE), Pickable::IGNORE));
         b.spawn((text(item.label.to_uppercase(), label(31.0), t.text_muted), TextLayout::no_wrap()));
         if !meta.is_empty() {
-            b.spawn((text(meta, body(17.0), t.text_muted), KeepColor, TextLayout::no_wrap()));
+            b.spawn((text(meta, body(18.0), t.text_muted), KeepColor, TextLayout::no_wrap()));
         }
     });
 }
@@ -654,7 +654,7 @@ fn info_card(world: &mut World, mut last: Local<Option<usize>>) {
         s.spawn(accent_panel(&t, t.accent, 22.0, GAP_S)).with_children(|c| {
             c.spawn((Node { justify_content: JustifyContent::SpaceBetween, ..default() }, Pickable::IGNORE)).with_children(|h| {
                 h.spawn(eyebrow(&card.kicker, t.text_dim));
-                h.spawn(text("ROUTE CARD", label(SIZE_LABEL - 2.0), t.text_dim));
+                h.spawn(text("ROUTE CARD", label(SIZE_LABEL), t.text_dim));
             });
             c.spawn(text(card.title.to_uppercase(), display(36.0), t.text));
             if !card.body.is_empty() {

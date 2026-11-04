@@ -643,11 +643,11 @@ fn build_events(world: &mut World, root: Entity) {
                     glyph(row, &gl, kind_glyph(&e.kind), 20.0, kind_color(&e.kind));
                     row.spawn((Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|n| {
                         n.spawn((text(e.name.to_uppercase(), label(27.0), t.text_muted), TextLayout::no_wrap()));
-                        n.spawn((text(format!("{} \u{b7} {:.1} km", e.kind, e.km), body(15.0), t.text_dim), KeepColor));
+                        n.spawn((text(format!("{} \u{b7} {:.1} km", e.kind, e.km), body(18.0), t.text_dim), KeepColor));
                     });
                     match best {
                         Some(s) => row.spawn((text(board::clock(*s), body_bold(20.0), t.text), KeepColor)),
-                        None => row.spawn((text("no time yet", body(16.0), t.text_dim), KeepColor)),
+                        None => row.spawn((text("no time yet", body(18.0), t.text_dim), KeepColor)),
                     };
                 });
             }
@@ -671,7 +671,7 @@ fn build_events(world: &mut World, root: Entity) {
                         stat(r, &t, best.map_or("\u{2014}".into(), board::clock), "Your best", if best.is_some() { t.text } else { t.text_dim }, 36.0);
                     });
                     c.spawn(rule(t.line));
-                    c.spawn(text("TOP TIMES", label(16.0), t.text_dim));
+                    c.spawn(text("TOP TIMES", label(18.0), t.text_dim));
                     if top.is_empty() {
                         c.spawn(text("No times yet: be the first.", body(SIZE_BODY - 2.0), t.text_muted));
                     }
@@ -697,9 +697,9 @@ fn build_events(world: &mut World, root: Entity) {
                                 chip(m, &t, difficulty_name(*x), DIFF_IDS[k], d == *x, false);
                             }
                         });
-                        c.spawn(text("Five rivals on the road with you. Race runs set no board time.", body(SIZE_SMALL), t.text_dim));
+                        c.spawn(text("Five rivals on the road with you. Race runs set no board time.", body(18.0), t.text_dim));
                     } else {
-                        c.spawn(text(if lap { "Laps are solo: your ghost and the board." } else { "Solo against the clock, your ghost and the board." }, body(SIZE_SMALL), t.text_dim));
+                        c.spawn(text(if lap { "Laps are solo: your ghost and the board." } else { "Solo against the clock, your ghost and the board." }, body(18.0), t.text_dim));
                     }
                     c.spawn(spacer(GAP_S));
                     c.spawn((Node { column_gap: px(GAP_S), ..default() }, Pickable::IGNORE)).with_children(|b| {
@@ -707,7 +707,7 @@ fn build_events(world: &mut World, root: Entity) {
                         action_button(b, &t, "Set route", MenuAction::Custom("set_route"), Some(31), false, 210.0);
                     });
                     action_button(c, &t, "Leaderboard", MenuAction::Custom("event_board"), Some(32), false, 230.0);
-                    c.spawn(text("Go now puts you on the start line. Set route drops you in free roam with the way there on the map.", body(SIZE_SMALL), t.text_dim));
+                    c.spawn(text("Go now puts you on the start line. Set route drops you in free roam with the way there on the map.", body(18.0), t.text_dim));
                 });
             });
         }
@@ -784,7 +784,7 @@ fn build_challenges(world: &mut World, root: Entity) {
                             for k in 0..3 {
                                 glyph(s, &gl, if k < 2 { Glyph::StarFull } else { Glyph::StarHollow }, 20.0, t.accent);
                             }
-                            s.spawn((text(format!("  higher {unit}, more stars"), body(15.0), t.text_dim), Node { margin: UiRect::left(px(6)), ..default() }));
+                            s.spawn((text(format!("  higher {unit}, more stars"), body(18.0), t.text_dim), Node { margin: UiRect::left(px(6)), ..default() }));
                         });
                         if n > 0 {
                             card.spawn(text(format!("{n} in the valley"), label(18.0), t.text));
@@ -863,7 +863,7 @@ fn build_logbook(world: &mut World, root: Entity) {
                             l.spawn((Node { column_gap: px(GAP_S), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|n| {
                                 n.spawn((Node { width: px(3), height: px(18), ..default() }, BackgroundColor(kind_color(kind)), Pickable::IGNORE));
                                 n.spawn(text(name.to_uppercase(), label(22.0), t.text));
-                                n.spawn(text(kind.clone(), body(15.0), t.text_dim));
+                                n.spawn(text(kind.clone(), body(18.0), t.text_dim));
                             });
                             match best {
                                 Some(s) => l.spawn(text(board::clock(*s), body_bold(SIZE_BODY), t.text)),
@@ -878,7 +878,7 @@ fn build_logbook(world: &mut World, root: Entity) {
                     action_button(btns, &t, "Leaderboards", MenuAction::Custom("boards"), Some(1), true, 320.0);
                     action_button(btns, &t, "Classic stages", MenuAction::Custom("classic"), Some(2), false, 320.0);
                     action_button(btns, &t, "Back", UiAction::Back, Some(3), false, 320.0);
-                    btns.spawn((text("Leaderboards hold every time on this machine and any boards you import from friends.", body(SIZE_SMALL), t.text_dim), Node { max_width: px(320), ..default() }));
+                    btns.spawn((text("Leaderboards hold every time on this machine and any boards you import from friends.", body(18.0), t.text_dim), Node { max_width: px(320), ..default() }));
                 });
             });
         });

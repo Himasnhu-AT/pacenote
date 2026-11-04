@@ -126,9 +126,35 @@ fn spawn(world: &mut World) {
     let rings: Vec<Handle<Mesh>> = [4.3, 5.6, 7.2, 9.1].iter().map(|r| meshes.add(Annulus::new(*r, r + 0.025))).collect();
     let wall = meshes.add(Cylinder::new(15.0, 9.0));
     let pole = meshes.add(Cylinder::new(0.06, 9.0));
+    // The game's own gravel, tiled (repeat sampler; the floor darker than the plinth).
+    let server = world.resource::<AssetServer>().clone();
+    let load = |p: &'static str, srgb: bool| -> Handle<Image> {
+        server
+            .load_builder()
+            .with_settings(move |s: &mut bevy::image::ImageLoaderSettings| {
+                s.is_srgb = srgb;
+                s.sampler = bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+                    address_mode_u: bevy::image::ImageAddressMode::Repeat,
+                    address_mode_v: bevy::image::ImageAddressMode::Repeat,
+                    anisotropy_clamp: 8,
+                    ..bevy::image::ImageSamplerDescriptor::linear()
+                });
+            })
+            .load(p)
+    };
+    let gravel_tex = load("textures/gravel/color.ktx2", true);
+    let gravel_nrm = load("textures/gravel/normal.ktx2", false);
     let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
-    let gravel = mats.add(StandardMaterial { base_color: Color::srgb(0.13, 0.125, 0.11), perceptual_roughness: 0.96, ..default() });
-    let stone = mats.add(StandardMaterial { base_color: Color::srgb(0.27, 0.25, 0.22), perceptual_roughness: 0.9, ..default() });
+    let tiled = |base: Color, tiles: f32| StandardMaterial {
+        base_color: base,
+        base_color_texture: Some(gravel_tex.clone()),
+        normal_map_texture: Some(gravel_nrm.clone()),
+        perceptual_roughness: 0.95,
+        uv_transform: bevy::math::Affine2::from_scale(Vec2::splat(tiles)),
+        ..default()
+    };
+    let gravel = mats.add(tiled(Color::srgb(0.32, 0.31, 0.29), 26.0));
+    let stone = mats.add(tiled(Color::srgb(0.72, 0.68, 0.62), 3.2));
     let edge = mats.add(StandardMaterial { base_color: Color::srgb(0.09, 0.085, 0.08), perceptual_roughness: 0.8, ..default() });
     let a = t.accent.to_srgba();
     let contour = mats.add(StandardMaterial { base_color: Color::srgba(a.red, a.green, a.blue, 0.28), unlit: true, alpha_mode: AlphaMode::Blend, ..default() });

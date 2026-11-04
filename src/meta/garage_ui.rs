@@ -444,7 +444,7 @@ fn list_row(p: &mut ChildSpawnerCommands, t: &Theme, id: &'static str, order: u3
 /// A small tag ("ACTIVE", "OWNED").
 fn tag(p: &mut ChildSpawnerCommands, s: &str, fg: Color, bg: Color) {
     p.spawn((Node { padding: UiRect::axes(px(7), px(1)), border_radius: BorderRadius::all(px(2)), ..default() }, BackgroundColor(bg), Pickable::IGNORE)).with_children(|c| {
-        c.spawn((text(s.to_uppercase(), label(15.0), fg), KeepColor));
+        c.spawn((text(s.to_uppercase(), label(18.0), fg), KeepColor));
     });
 }
 
@@ -456,7 +456,7 @@ fn stat_bars(p: &mut ChildSpawnerCommands, t: &Theme, now: [f32; 5], preview: Op
         let b = preview.map_or(a, |p| (p[k] * SEGS as f32).round() as i32);
         p.spawn((Node { column_gap: px(GAP_M), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
             r.spawn((Node { width: px(104), ..default() }, Pickable::IGNORE)).with_children(|c| {
-                c.spawn(text(name.to_uppercase(), label(17.0), t.text_muted));
+                c.spawn(text(name.to_uppercase(), label(18.0), t.text_muted));
             });
             r.spawn((Node { column_gap: px(3), ..default() }, Pickable::IGNORE)).with_children(|s| {
                 for i in 0..SEGS as i32 {
@@ -474,7 +474,7 @@ fn stat_bars(p: &mut ChildSpawnerCommands, t: &Theme, now: [f32; 5], preview: Op
             });
             if b != a {
                 let (s, c) = if b > a { (format!("+{}", b - a), t.good) } else { (format!("\u{2212}{}", a - b), t.bad) };
-                r.spawn(text(s, body_bold(16.0), c));
+                r.spawn(text(s, body_bold(18.0), c));
             }
         });
     }
@@ -544,7 +544,7 @@ fn build_garage(world: &mut World, root: Entity) {
                 list_row(c, &t, CAR_IDS[i], 1 + i as u32, OwnedRow(i), |r| {
                     r.spawn((Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|n| {
                         n.spawn((text(format!("{}  #{}", car_name(car).to_uppercase(), car.number), label(27.0), t.text_muted), TextLayout::no_wrap()));
-                        n.spawn((text(build_line(car), body(15.0), t.text_dim), KeepColor));
+                        n.spawn((text(build_line(car), body(18.0), t.text_dim), KeepColor));
                     });
                     class_plate(r, &t, Class::of(pi), pi);
                     if i == g.active {
@@ -555,13 +555,13 @@ fn build_garage(world: &mut World, root: Entity) {
             // The car you drive: paint, number, repair, sell.
             c.spawn(spacer(GAP_M));
             c.spawn((Node { column_gap: px(GAP_S + 2.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|h| {
-                h.spawn(text(format!("THE {} YOU DRIVE", car_name(&active).to_uppercase()), label(17.0), t.text_muted));
+                h.spawn(text(format!("THE {} YOU DRIVE", car_name(&active).to_uppercase()), label(18.0), t.text_muted));
                 h.spawn((Node { flex_grow: 1.0, height: px(1), ..default() }, BackgroundColor(t.line), Pickable::IGNORE));
             });
             // Paint swatches + metallic.
             c.spawn((Node { column_gap: px(GAP_S), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
                 r.spawn((Node { width: px(96), ..default() }, Pickable::IGNORE)).with_children(|l| {
-                    l.spawn(text("PAINT", label(17.0), t.text_dim));
+                    l.spawn(text("PAINT", label(18.0), t.text_dim));
                 });
                 let rally = active.def().is_some_and(|d| d.body == garage::Body::Rally);
                 for (k, (_, c)) in PAINTS.iter().enumerate() {
@@ -597,7 +597,7 @@ fn build_garage(world: &mut World, root: Entity) {
             });
             c.spawn((Node { column_gap: px(GAP_S), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
                 r.spawn((Node { width: px(96), ..default() }, Pickable::IGNORE)).with_children(|l| {
-                    l.spawn(text("NUMBER", label(17.0), t.text_dim));
+                    l.spawn(text("NUMBER", label(18.0), t.text_dim));
                 });
                 small_button(r, &t, "\u{2212}", "num_down", 38, 42.0);
                 r.spawn((Node { width: px(64), justify_content: JustifyContent::Center, ..default() }, Pickable::IGNORE)).with_children(|n| {
@@ -607,13 +607,13 @@ fn build_garage(world: &mut World, root: Entity) {
             });
             c.spawn((Node { column_gap: px(GAP_S), align_items: AlignItems::Center, margin: UiRect::top(px(GAP_XS)), ..default() }, Pickable::IGNORE)).with_children(|r| {
                 r.spawn((Node { width: px(96), ..default() }, Pickable::IGNORE)).with_children(|l| {
-                    l.spawn(text("SERVICE", label(17.0), t.text_dim));
+                    l.spawn(text("SERVICE", label(18.0), t.text_dim));
                 });
                 if active.damage > 0.005 {
                     small_button(r, &t, "Repair", "service", 40, 136.0);
-                    r.spawn(text(format!("Damage {:.0}%", active.damage * 100.0), body(16.0), t.bad));
+                    r.spawn(text(format!("Damage {:.0}%", active.damage * 100.0), body(18.0), t.bad));
                 } else {
-                    r.spawn(text("No damage", body(16.0), t.text_muted));
+                    r.spawn(text("No damage", body(18.0), t.text_muted));
                 }
             });
         });
@@ -631,7 +631,7 @@ fn build_garage(world: &mut World, root: Entity) {
             c.spawn(rule(t.line));
             stat_bars(c, &t, garage::stat_bars(&spec), None);
             c.spawn(rule(t.line));
-            c.spawn(text("FITTED", label(16.0), t.text_dim));
+            c.spawn(text("FITTED", label(18.0), t.text_dim));
             c.spawn((text(build_line(&shown), body(SIZE_BODY - 2.0), t.text), Node { max_width: px(420), ..default() }));
             c.spawn(spacer(GAP_XS));
             let driving = sel.owned == g.active;
@@ -689,7 +689,7 @@ fn build_upgrades(world: &mut World, root: Entity) {
             c.spawn((Node { column_gap: px(6), padding: UiRect::left(px(146)), ..default() }, Pickable::IGNORE)).with_children(|h| {
                 for l in 0..4u8 {
                     h.spawn((Node { width: px(106), justify_content: JustifyContent::Center, ..default() }, Pickable::IGNORE)).with_children(|x| {
-                        x.spawn(text(level_name(l).to_uppercase(), label(15.0), t.text_dim));
+                        x.spawn(text(level_name(l).to_uppercase(), label(18.0), t.text_dim));
                     });
                 }
             });
@@ -705,7 +705,7 @@ fn build_upgrades(world: &mut World, root: Entity) {
                         for l in 0..4u8 {
                             if l > kind.max_level() {
                                 cells.spawn((Node { width: px(106), height: px(40), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|x| {
-                                    x.spawn((text("\u{2014}", body(16.0), t.text_dim), KeepColor));
+                                    x.spawn((text("\u{2014}", body(18.0), t.text_dim), KeepColor));
                                 });
                                 continue;
                             }
@@ -738,14 +738,14 @@ fn build_upgrades(world: &mut World, root: Entity) {
                                     if let Some(m) = mark {
                                         glyph(x, &gl, m, 14.0, col);
                                     }
-                                    x.spawn((text(txt, label(17.0), col), KeepColor, TextLayout::no_wrap()));
+                                    x.spawn((text(txt, label(18.0), col), KeepColor, TextLayout::no_wrap()));
                                 });
                         }
                     });
                 });
             }
             c.spawn(spacer(GAP_XS));
-            c.spawn((text("Your times record the car and its class: the board shows a class chip by each.", body(SIZE_SMALL), t.text_dim), Node { max_width: px(600), ..default() }));
+            c.spawn((text("Your times record the car and its class: the board shows a class chip by each.", body(18.0), t.text_dim), Node { max_width: px(600), ..default() }));
         });
         right_panel(p, &t, |c| {
             c.spawn(eyebrow("Build", t.text_dim));
@@ -758,7 +758,7 @@ fn build_upgrades(world: &mut World, root: Entity) {
                     glyph(h, &gl, Glyph::Arrow, 18.0, t.text_muted);
                     class_plate(h, &t, Class::of(ppi), ppi);
                     let d = ppi as i32 - pi as i32;
-                    h.spawn(text(if d > 0 { format!("+{d} PI") } else { format!("\u{2212}{} PI", -d) }, body_bold(16.0), if d > 0 { t.good } else { t.bad }));
+                    h.spawn(text(if d > 0 { format!("+{d} PI") } else { format!("\u{2212}{} PI", -d) }, body_bold(18.0), if d > 0 { t.good } else { t.bad }));
                 }
             });
             c.spawn(rule(t.line));
@@ -777,7 +777,7 @@ fn build_upgrades(world: &mut World, root: Entity) {
                 }
                 Some(Ok(cost)) => {
                     action_button(c, &t, &format!("Fit \u{b7} {}", notes(cost)), MenuAction::Custom("fit"), None, true, 420.0);
-                    c.spawn(text(format!("Balance after {}", notes(w.balance - cost)), body(SIZE_SMALL), t.text_muted));
+                    c.spawn(text(format!("Balance after {}", notes(w.balance - cost)), body(18.0), t.text_muted));
                 }
                 Some(Err(r)) => {
                     c.spawn((Node { column_gap: px(GAP_S), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|row| {
@@ -820,7 +820,7 @@ fn build_dealer(world: &mut World, root: Entity) {
                     list_row(list, &t, DEALER_IDS[i], 1 + i as u32, DealerRow(i), |r| {
                         r.spawn((Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|n| {
                             n.spawn((text(d.name.to_uppercase(), label(27.0), t.text_muted), TextLayout::no_wrap()));
-                            n.spawn((text(body_name(d), body(15.0), t.text_dim), KeepColor));
+                            n.spawn((text(body_name(d), body(18.0), t.text_dim), KeepColor));
                         });
                         class_plate(r, &t, Class::of(pi), pi);
                         r.spawn((Node { width: px(150), justify_content: JustifyContent::FlexEnd, ..default() }, Pickable::IGNORE)).with_children(|x| match state {
@@ -857,7 +857,7 @@ fn build_dealer(world: &mut World, root: Entity) {
                 c.spawn(text(format!("{:.0} kg \u{b7} {}", spec.mass, if spec.front_split > 0.2 && spec.front_split < 0.8 { "four-wheel drive" } else if spec.front_split <= 0.2 { "rear-wheel drive" } else { "front-wheel drive" }), body(SIZE_BODY - 2.0), t.text_muted));
                 c.spawn(rule(t.line));
                 stat_bars(c, &t, mine, Some(garage::stat_bars(&spec)));
-                c.spawn(text(format!("Bars: the {} you drive, and the change with this car.", car_name(g.active_car())), body(SIZE_SMALL), t.text_dim));
+                c.spawn(text(format!("Bars: the {} you drive, and the change with this car.", car_name(g.active_car())), body(18.0), t.text_dim));
                 c.spawn(rule(t.line));
                 c.spawn((Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Baseline, ..default() }, Pickable::IGNORE)).with_children(|r| {
                     r.spawn(text("PRICE", label(18.0), t.text_dim));
@@ -866,7 +866,7 @@ fn build_dealer(world: &mut World, root: Entity) {
                 match state {
                     Ok(price) => {
                         action_button(c, &t, "Buy", MenuAction::Custom("buy"), None, true, 420.0);
-                        c.spawn(text(format!("Balance after {}", notes(w.balance - price)), body(SIZE_SMALL), t.text_muted));
+                        c.spawn(text(format!("Balance after {}", notes(w.balance - price)), body(18.0), t.text_muted));
                     }
                     Err(Refusal::Owned) => {
                         c.spawn(text("In your garage.", body_bold(SIZE_BODY), t.text_muted));
