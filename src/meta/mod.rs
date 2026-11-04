@@ -13,6 +13,7 @@
 //! removes the stage so another can load.
 
 pub mod board;
+pub mod coach;
 pub mod ghost;
 pub mod netlink;
 pub(crate) mod screens;
@@ -75,6 +76,22 @@ pub struct Profile {
     /// Driver's camera: 0 cockpit, 1 bonnet, 2 chase ([`CAMERA_VIEWS`]). Runs start in it; C
     /// in game changes it (and it's remembered).
     pub camera: u32,
+    /// Free-roam drives that opened with the controls card (`coach`, up to
+    /// [`coach::CONTROLS_AUTO_RUNS`]).
+    pub controls_hint_runs: u32,
+    /// The open world's events as last loaded, for the main menu's list (the world itself
+    /// isn't loaded there).
+    pub events: Vec<EventSeen>,
+}
+
+/// An open-world event as the menus list it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EventSeen {
+    pub id: u32,
+    pub name: String,
+    /// "Rally", "Sprint", "Lap".
+    pub kind: String,
+    pub km: f32,
 }
 
 /// The camera views in [`Profile::camera`] order.
@@ -109,6 +126,8 @@ impl Default for Profile {
             stats_notice_seen: false,
             conditions: Vec::new(),
             camera: 0,
+            controls_hint_runs: 0,
+            events: Vec::new(),
         }
     }
 }
@@ -240,10 +259,11 @@ impl Plugin for MetaPlugin {
             .init_resource::<Finished>()
             .init_resource::<Role>()
             .init_resource::<StageCatalog>()
-            .add_plugins((textfield::TextFieldPlugin, screens::ScreensPlugin))
+            .add_plugins((textfield::TextFieldPlugin, screens::ScreensPlugin, coach::CoachPlugin))
             .add_systems(Startup, (load_board, start_catalog, import_from_cli).chain())
             .add_systems(Update, poll_catalog)
             .add_systems(Update, (sync_camera, free_pointer))
+            .add_systems(Update, remember_events.run_if(resource_exists::<crate::open::events::Events>))
             .add_systems(Update, (collect_menu, apply_menu).chain().after(engine::ui::UiSet::Screens))
             .add_systems(Update, (stage_ready, watch_finish, follow_ghost, dress_ghosts).chain().run_if(resource_exists::<StageWorld>))
             .add_systems(Update, restart_after_death.run_if(resource_exists::<StageRun>))
@@ -254,14 +274,14 @@ impl Plugin for MetaPlugin {
 }
 
 /// Keeps the driver's camera and `Profile::camera` the same, whichever changed: C in game
-/// (toast naming the view), the setting, or the stage picker's chip.
+/// (a notice naming the view, replacing the last one), the setting, or the stage picker's chip.
 fn sync_camera(
     view: Option<ResMut<CameraView>>,
     mut profile: ResMut<Profile>,
     state: Option<Res<State<AppState>>>,
     role: Option<Res<Role>>,
     mut last: Local<Option<(CameraView, u32)>>,
-    mut toasts: MessageWriter<Toast>,
+    mut notices: MessageWriter<coach::Notice>,
 ) {
     let Some(mut view) = view else { return };
     let want = CAMERA_VIEWS[(profile.camera as usize).min(CAMERA_VIEWS.len() - 1)];
@@ -288,9 +308,21 @@ fn sync_camera(
     // Name the view when it changes in game (C, or the setting from the pause menu).
     let in_game = state.is_some_and(|s| *s.get() == AppState::InGame) && role.is_none_or(|r| *r != Role::Guide);
     if toast && in_game {
-        toasts.write(Toast::new(format!("{} camera", view_name(*view))).secs(1.6));
+        notices.write(coach::Notice::new(format!("{} camera", view_name(*view))).secs(1.6));
     }
     *last = Some((*view, profile.camera));
+}
+
+/// Notes the loaded world's events in the profile (the main menu lists them).
+fn remember_events(events: Res<crate::open::events::Events>, mut profile: ResMut<Profile>, mut save: MessageWriter<engine::settings::SaveSettings>) {
+    if !events.is_changed() {
+        return;
+    }
+    let seen: Vec<EventSeen> = events.0.iter().map(|e| EventSeen { id: e.id, name: e.name.clone(), kind: e.kind.label().into(), km: e.route.length() / 1000.0 }).collect();
+    if profile.events != seen {
+        profile.events = seen;
+        save.write(engine::settings::SaveSettings);
+    }
 }
 
 /// The mouse pointer is only captured while there's a car to drive or a head to turn: the guide
