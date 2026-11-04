@@ -501,7 +501,9 @@ impl Damage {
         let corner = (local.x.abs() / 0.8).clamp(0.0, 1.0);
         let front_half = local.z < 0.0;
         let (e, st, su) = match zone {
-            HitZone::Front => (1.0, 0.35 + 0.5 * corner, 0.25 + 0.2 * corner),
+            // Nose on: the radiator and engine take it. On a front corner the wheel, arms and
+            // rack take most of it and the engine less.
+            HitZone::Front => (1.0 - 0.45 * corner, 0.3 + 0.55 * corner, 0.2 + 0.4 * corner),
             HitZone::Side if front_half => (0.15, 0.9, 0.7),
             HitZone::Side => (0.15, 0.2, 0.9),
             HitZone::Rear => (0.35, 0.05, 0.6),
