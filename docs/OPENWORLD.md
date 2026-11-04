@@ -105,4 +105,6 @@ Phase 1 (compact world, in this order, each step playable and committed):
 6. Events with AI pace notes; results and records.
 7. Performance pass on Low/Medium/High with the metrics viewer.
 
+Map: `src/map/` (minimap in free roam, full map on `M` with routes to events; none during an event). See section 4.6 of `docs/GAME_OVERVIEW.md`.
+
 Phase 2: radio voice chat and racing with friends in one world, drift zones, the larger region.

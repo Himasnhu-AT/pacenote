@@ -83,7 +83,7 @@ matter inside events. Section 10 asks what the unifying hook should be.
 | Driver + guide (2 players) | **Legacy** | Works on the old 20 stages only; not in the open world. |
 | Voice chat | **Legacy** | Works in the driver + guide session; radio for the open world not built. |
 | The 20 old stages | **Hidden** | Still in code; reachable with `--stage N` and from "Play together". |
-| Map / minimap | **Missing** | No way to find events except driving around. |
+| Map / minimap | **Working** | Free-roam minimap (heading up, roads by kind, events, traffic, route); full map on `M` / d-pad up or the pause menu: terrain, roads, village, events, pick one for a route along the roads (`src/map/`). Hidden during events. |
 | Online play, matchmaking | **Missing** | LAN / forwarded port only (engine has no relay). |
 | Steam demo build | **Outdated** | Built for the 3-stage demo before the open-world pivot. |
 | Website / store copy | **Outdated** | Describes the stage-based game. |
@@ -110,7 +110,7 @@ passing at `1be89ed`. Assets ~110 MB (`assets/`).
 4. At the finish: the **results screen** (time, splits, rank against your own and the best
    records, ghost saved if it's your best). **Retry**, **Free roam** (continue roaming from
    where you are) or **Menu**.
-5. Esc pauses (Resume, Restart, Recover +5 s, Settings, Quit to menu). R recovers. C changes
+5. Esc pauses (Resume, Restart, Recover +5 s, Map, Settings, Quit to menu). M opens the map in free roam. R recovers. C changes
    camera. N toggles the co-driver voice.
 
 Controls: keyboard (W/S/A/D or arrows, Space handbrake, R recover, C camera) and gamepad
@@ -248,7 +248,7 @@ x = −2,000 m                                             x = +2,000 m
 - **Traffic** (`traffic.rs`) drives **only the tarmac** (B-road and village lane: the gravel and
   forest tracks are single-car rally roads); cars turn round where the tarmac ends. Intelligent-
   driver model, speed limits, junction reservation. Solid; free roam only.
-- There is **no map or minimap** in the game: events are found by driving around (9.4).
+- **Map** (`src/map/`, 4 Nov 2026): the region painted once per world on a worker (~0.1 s: height tints, hill shading, 50 m contours, river, buildings, roads by kind; 2048² with mips). Free roam has a heading-up minimap (bottom left) with event dots, nearby traffic, the route line and the nearest or picked event with its distance; `M` / d-pad up (or Map on the pause menu) opens the full map, which pauses: Q/E / LB/RB pick an event, Enter / A sets a route to it along the roads (Dijkstra over the junction graph, `map/path.rs`), pan, zoom, F / X back to the car. During an event there is no map (pillar: the pace notes are the map). The map puts −z at the top (left turns stay left); the ASCII sketch in 4.1 has +z up, so it is the mirror image of the in-game map.
 
 ### 4.7 The level file and the editor
 
@@ -470,7 +470,7 @@ exists**. The open world keeps ~145k trees resident and ~2.4 GB at High.
 
 - The game's hook (two people, one reading pace notes) is now confined to events, and the
   two-player mode doesn't work in the open world yet. Free roam has nothing to do but drive.
-- No map or minimap: events can only be found by driving around. No progression, unlocks,
+- No progression, unlocks,
   cars to choose, or reason to return besides records.
 - The 20 old stages are hidden but still in the code, docs, website, demo config
   (`demo::STAGES = [1, 6, 9]`) and store copy.
@@ -502,8 +502,8 @@ exists**. The open world keeps ~145k trees resident and ~2.4 GB at High.
 - The co-driver voice uses OS TTS: different voices per OS, ~0.3–1 s latency on Windows, not
   in the game's audio mix or volume settings.
 - Recover always places on the nearest road, which can be a different road at junctions.
-- No map or minimap: the only way to find events is to drive around. The level already holds
-  everything one needs (roads, buildings, event starts, home).
+- ~~No map or minimap~~ Fixed 4 Nov 2026: minimap and full map with routes (`src/map/`, 4.6). Open: no
+  hand-placed place names beyond the village, no map on the old stages.
 
 ### 9.5 Performance and platforms
 
@@ -550,7 +550,7 @@ exists**. The open world keeps ~145k trees resident and ~2.4 GB at High.
 
 Phase 1 (compact world), done: road network and terrain, free roam, buildings, traffic, events,
 the world as a level file with a working editor (roads, buildings, events, trees, terrain).
-Remaining phase 1: a map/minimap (from the level's roads, buildings and event starts),
+Remaining phase 1 (the map/minimap was added on 4 Nov):
 performance pass on Low/Medium on a base Mac, polish of town dressing (parks, street props,
 markings).
 

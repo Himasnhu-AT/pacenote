@@ -32,6 +32,7 @@ Full design: `docs/DESIGN.md`.
 | `src/loading.rs` | Loading screen: stage generated on a worker, built, pipelines warmed, near scenery and trees in, frames settled; then the countdown |
 | `src/codriver/` | AI co-driver: pace notes read ahead by time (`calls.rs`, pure), damage/splits/finish/off-road/roof lines, system TTS (`speech.rs`: `say`, espeak, PowerShell), subtitles; `N` toggles; quiet when a human guide is connected |
 | `src/hud.rs` | Driver HUD (speed, gear, clock, damage readout, retired message) |
+| `src/map/` | Open-world map: painted region image (`paint.rs`), road routes (`path.rs`), free-roam minimap (`mini.rs`), full map screen on M (`screen.rs`) |
 | `src/art/` | Textured terrain material (`terrain.wgsl`), road ribbon, card trees, rocks/plants, car model, per-stage look (sky/fog/rain), wheel spray |
 | `src/audio/` | Car from CC0 recordings (`assets/sounds/car/`, cooked by `tools/audio/cook_car.py`): engine rpm/load loops crossfaded and pitched, tyres per surface, impacts, pops; synthesised wind, stones, thumps and ambience; all on a custom stream; guide hears the replicated car (`RemoteCarSound`) |
 | `src/meta/` | Menus, stage select, leaderboards (`board.rs`), ghosts (`ghost.rs`), results, credits; `netlink.rs` adapts to `net_session` |
