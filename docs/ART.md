@@ -9,11 +9,13 @@ surface, trees and dressing, the car model, sky and weather, wheel spray. One pl
 |---|---|
 | `mod.rs` | plugin, `pbr(set)` (cooked set → `StandardMaterial`), `spawn_stage`, dev commands `art.stats`, `art.place {s, lateral?}` |
 | `ground.rs` | terrain splat layers per biome (textured), road ribbon (UVs along the road, darker compacted wheel lines, loose stones in the middle and at the edges), surface patches as blended overlays that fade in over 10 m, soft verge strips each side |
-| `terrain.rs`, `terrain.wgsl` | full-PBR terrain material (colour + normal + ORM per layer, two-scale anti-tiling, AO-weighted layer blend) put on the engine's terrain chunks; same splat map and layer rules as the engine's |
-| `trees.rs` | trees built from foliage cards: pine, spruce, snowy spruce, birch, olive-like scrub tree (3 variants each), placed on the dressing graph's `trunks` points (the ones the car collides with) |
+| `terrain.rs`, `terrain.wgsl` | full-PBR terrain material (colour + normal + ORM per layer, two-scale anti-tiling, AO-weighted layer blend) put on the engine's terrain chunks; same splat map and layer rules as the engine's; forest floors darkened beyond the shadow distance from a canopy texture (`Canopy`, 16 m texels, rebuilt from the known trees once a second) |
+| `trees.rs` | trees built from foliage cards: pine, spruce, snowy spruce, birch, olive-like scrub tree (3 variants each), placed on the dressing graph's `trunks` points (the ones the car collides with); three foliage tints per species picked per tree (`TINTS`; impostors carry the same tint as vertex colour) |
 | `dressing.rs` | PCG catalog: decimated Poly Haven rocks, shrubs, ferns, grass, stump; item mixes per biome; ground cover fades out at ~95 m instead of the budget's flat far version |
-| `car.rs` | the rally car model on the simulated car: hubs follow suspension and steer, wheels spin; steering wheel, tacho and speedo follow the sim; lamp pod hidden from inside; cockpit-eye and bonnet camera positions |
-| `look.rs` | `Look` per stage: sun angle/colour/lux per time of day, atmosphere or overcast gradient sky, fog distance per weather (also where trees and scenery stop), exposure, grading |
+| `car.rs` | the rally car model on the simulated car: hubs follow suspension and steer, wheels spin; steering wheel, tacho and speedo follow the sim; lamp pod hidden from inside; cockpit-eye and bonnet camera positions; per-car paint and tail-lamp materials (`CarWear`): the paint dusts over on loose surfaces (faster when the wheels slip; tarmac stays clean), tail lamps 5× under braking; outer glass dark and glossy (single-sided, so the cockpit view is unchanged) |
+| `mirror.rs` | rear-view and door mirrors: a 384×96 camera at the mirror renders linear, pre-exposed radiance (`Tonemapping::None`, like the probes) that the mirror glass and door-mirror picture quads show unlit, so the main camera tone-maps it with the scene. It sees only render layer 1 (`mirror::seen()`: terrain, road, traffic, trees) and no sun, so it draws no shadow maps (exposed 1.3 EV brighter instead). On only in the cockpit view at High+; in-run A/B within noise (a full-scene mirror with shadows cost ~6 ms) |
+| `traffic_car.rs` | traffic cars' look (`open::traffic` calls `spawn_parts`): hatch, saloon, estate and SUV lofted from side-profile knots (arches, tumblehome, dark sills/bumpers by vertex colour), glass with pillars, 16-sided wheels with rims, grille, plates, mirrors, unlit head/tail lamps, brake lamps while slowing or stopped, hazards blinking after a hit; one material per colour, solid or metallic with clear coat; all shared (batched), six entities per car |
+| `look.rs` | `Look` per stage: sun angle/colour/lux per time of day, atmosphere or overcast gradient sky, fog distance per weather (also where trees and scenery stop), exposure, grading. Tony McMapface tone mapping (AgX greyed the clear sky to lavender); clear days get neutral haze (the default's blue fog lit the ground between far trunks as a blue band), +0.4 EV, contrast 1.08, a little warmth |
 | `spray.rs` | dust, gravel chips, mud clods, snow powder, tarmac smoke per wheel from surface, speed and slip; rain around the camera on wet stages |
 | `meshfile.rs` | reader for `assets/models/*.pnm` (small binary meshes, read synchronously at load) |
 
@@ -113,4 +115,8 @@ Breakdown on stage 1 (A/B, same binary): trees +2.7 ms GPU, +240 MB; PCG rocks/p
 - Terrain layers are world-XZ projected (no triplanar): steep rock faces stretch.
 - HDRIs in `assets_src/hdri` are unused: the engine's cubemap sky needs KTX2 cubemaps and there
   is no equirect → cubemap tool yet; the atmosphere / gradient skies are used instead.
-- No tyre-track decals beyond the shaded wheel lines; no mud build-up on the car yet.
+- Stage roads run on 18 m past both ends and fade into the ground (`ground::tail`), so the
+  start line has no hard road edge behind the car.
+- No tyre-track decals beyond the shaded wheel lines. Dirt on the car is a uniform tint of the paint (no masks: sills and arches don't get it first).
+- The mirror sees terrain, road, traffic and trees but not buildings, props or the car's own cabin, and has no sun light (sky light only).
+- Beyond the impostor reach (1.2 km) the terrain has no trees, and the canopy texture only knows streamed trees: far hills read as bare ground in haze.
