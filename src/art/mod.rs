@@ -14,10 +14,12 @@ pub mod hands;
 pub mod junctions;
 pub mod look;
 pub mod meshfile;
+pub mod mirror;
 pub mod props;
 pub mod roadside;
 pub mod spray;
 pub mod terrain;
+pub mod traffic_car;
 pub mod trees;
 
 use std::sync::Arc;
@@ -51,6 +53,7 @@ impl Plugin for ArtPlugin {
         trees::register(app);
         app.add_systems(Update, (trees::ingest, trees::stream).chain())
             .add_systems(Update, dressing::tag_cover)
+            .add_systems(Update, traffic_car::lamps_update.run_if(resource_exists::<crate::open::traffic::Traffic>))
             .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin));
     }
 }

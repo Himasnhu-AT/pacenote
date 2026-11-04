@@ -7,6 +7,7 @@ import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     forward_io::{VertexOutput, FragmentOutput},
+    mesh_view_bindings::view,
 };
 @if(VISIBILITY_RANGE_DITHER)
 import bevy_pbr::render::pbr_functions::visibility_range_dither;
@@ -38,6 +39,9 @@ struct Params {
 @group(constants::MATERIAL_BIND_GROUP) @binding(113) var o2: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(114) var o3: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(115) var smp: sampler;
+// Light under the forest canopy (R: 1 open .. 0 dense), over the same extent as the splat.
+@group(constants::MATERIAL_BIND_GROUP) @binding(116) var canopy_tex: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(117) var canopy_smp: sampler;
 
 fn hash21(q0: vec2<f32>) -> f32 {
     let q = fract(q0 * vec2<f32>(123.34, 456.21));
@@ -122,6 +126,11 @@ fn fragment(vertex_output: VertexOutput, @builtin(front_facing) is_front: bool) 
     let freq = p.misc.y;
     let mv = value_noise(wp * freq) * 0.6 + value_noise(wp * freq * 4.7) * 0.4;
     col = col * (1.0 + p.misc.x * (mv - 0.5));
+
+    // Forest floor in shade beyond the shadow distance (near trees cast real shadows).
+    let light = textureSample(canopy_tex, canopy_smp, suv).r;
+    let far = smoothstep(110.0, 170.0, distance(view.world_position.xyz, in.world_position.xyz));
+    col = col * mix(1.0, 0.3, (1.0 - light) * far);
 
     // World-aligned tangent frame (UVs are world XZ; green = -Z).
     let N = normalize(in.world_normal);
