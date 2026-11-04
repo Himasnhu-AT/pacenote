@@ -14,6 +14,7 @@ pub mod hardware;
 pub mod hud;
 pub mod open;
 pub mod loading;
+pub mod map;
 pub mod meta;
 pub mod net_session;
 pub mod prefs;
@@ -65,6 +66,7 @@ impl Plugin for Pacenote {
             .add_plugins(codriver::CoDriverPlugin)
             .add_plugins(telemetry::TelemetryPlugin)
             .add_plugins(open::events::EventsPlugin)
+            .add_plugins(map::MapPlugin)
             .add_plugins(open::traffic::TrafficPlugin)
             .add_plugins(open::forest::ForestPlugin)
             .add_plugins((open::placeable::PlaceablePlugin, open::level::LevelTypesPlugin, open::live::LivePlugin))

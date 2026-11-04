@@ -16,3 +16,4 @@
 /dist/
 /packaging/steam/ids.env
 __pycache__/
+.claude/worktrees/

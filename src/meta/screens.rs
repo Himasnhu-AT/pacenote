@@ -1213,7 +1213,7 @@ fn driving(world: &World) -> Driving {
 fn pause_items(d: Driving) -> (Vec<(&'static str, MenuAction)>, &'static str) {
     match d {
         Driving::FreeRoam => (
-            vec![("Resume", MenuAction::Resume), ("Recover car", MenuAction::Custom("recover")), ("Settings", MenuAction::Settings), ("Quit to menu", MenuAction::MainMenu)],
+            vec![("Resume", MenuAction::Resume), ("Recover car", MenuAction::Custom("recover")), ("Map", MenuAction::Open(crate::map::SCREEN)), ("Settings", MenuAction::Settings), ("Quit to menu", MenuAction::MainMenu)],
             "Free roam isn't timed: quitting loses nothing.",
         ),
         Driving::Event => (
