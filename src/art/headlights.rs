@@ -48,8 +48,8 @@ const BEAM_COLOUR: [f32; 3] = [1.0, 0.93, 0.82];
 const LAMP_L: Vec3 = Vec3::new(-0.55, 0.37, -2.1);
 const LAMP_R: Vec3 = Vec3::new(0.55, 0.37, -2.1);
 const POD_AT: Vec3 = Vec3::new(0.0, 0.66, -1.95);
-/// The beams dip 2.5° (low beam), the pod 1°.
-const BEAM_DIP: f32 = 0.044;
+/// The beams dip 1.5° (low beam), the pod 1°.
+const BEAM_DIP: f32 = 0.026;
 const POD_DIP: f32 = 0.017;
 /// Sun elevation (°) the lights come on below, and go off above.
 const AUTO_ON: f32 = 2.0;

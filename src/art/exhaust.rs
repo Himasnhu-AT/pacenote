@@ -23,6 +23,12 @@ use crate::drive::{CameraView, CarSpec, DrivenCar};
 /// ground; the model origin is at hub height), its axis rearward (+Z).
 pub const TIP_MODEL: Vec3 = Vec3::new(0.46, 0.27 - crate::art::car::MODEL_WHEEL_RADIUS, 1.99);
 
+/// The pipe's axis: rearward (+Z), turned 11° down and 7° out to the right like a real
+/// rally exit (and so the chase camera sees the flame's length, not just its end).
+pub fn tip_rotation() -> Quat {
+    Quat::from_rotation_y(0.12) * Quat::from_rotation_x(0.2)
+}
+
 /// The tail pipe's mouth in the car body's frame.
 pub fn tip(s: &crate::vehicle::Spec) -> Vec3 {
     TIP_MODEL + crate::art::car::model_offset(s)
@@ -185,14 +191,14 @@ fn attach(
         let light = commands
             .spawn((
                 Name::new("exhaust flash"),
-                PointLight { color: Color::srgb(FLASH[0], FLASH[1], FLASH[2]), intensity: 0.0, range: 4.0, radius: 0.05, shadow_maps_enabled: false, ..default() },
+                PointLight { color: Color::srgb(FLASH[0], FLASH[1], FLASH[2]), intensity: 0.0, range: 3.5, radius: 0.05, shadow_maps_enabled: false, ..default() },
                 Transform::from_xyz(0.0, 0.05, 0.25),
                 Visibility::Hidden,
                 Actor,
             ))
             .id();
         let rig = ExhaustRig { core, outer, light, t: 0.0, dur: 0.0, kind: PopKind::Crackle, intensity: 0.0, len: 0.0, roll: 0.0, on: false };
-        let r = commands.spawn((Name::new("exhaust"), rig, Transform::from_translation(tip(&spec)), Visibility::default(), Actor)).add_children(&[core, outer, light]).id();
+        let r = commands.spawn((Name::new("exhaust"), rig, Transform::from_translation(tip(&spec)).with_rotation(tip_rotation()), Visibility::default(), Actor)).add_children(&[core, outer, light]).id();
         commands.entity(car).add_child(r).insert(HasExhaust(r));
     }
 }
@@ -296,7 +302,9 @@ fn animate(
             }
         }
         if let Ok(mut l) = lights.get_mut(rig.light) {
-            let lumens = if bang { 9000.0 } else { 4000.0 };
+            // ART_BIBLE asks 4 000 / 9 000 lm; at night that washed out the whole tail and hid
+            // the flame in bloom, so a third of it (judged on night and dusk captures).
+            let lumens = if bang { 3000.0 } else { 1300.0 };
             l.intensity = lumens * e.max(0.0) * (0.6 + 0.4 * rig.intensity);
         }
         if done {

@@ -393,6 +393,39 @@ mod tests {
         assert!(with_voice > quiet * 1.3, "voice heard: {with_voice} vs car {quiet}");
     }
 
+    /// Pops skip the compressor (AUDIO_PASS §2.4, §8.3): a bang over a loud engine moves the
+    /// compressor's gain by ≤ 1 dB, the output never clips, and the pop stands out.
+    #[test]
+    fn pops_skip_the_compressor_and_never_clip() {
+        use crate::audio::pops::PopKind;
+        let run = |pop: bool| {
+            let mut s = RallySynth::new(4);
+            let mut f = Frame { car: CarParams { active: true, rpm: 6500.0, throttle: 1.0, speed: 30.0, ..CarParams::default() }, ..Frame::default() };
+            s.apply(&f);
+            let mut out = Vec::new();
+            s.render_into(48_000, &mut out);
+            let before = s.dynamics.reduction_db;
+            f.car.throttle = 0.0;
+            if pop {
+                f.push(CarEvent::Pop { intensity: 1.0, kind: PopKind::Bang, seed: 9, pan: 0.3 });
+            }
+            s.apply(&f);
+            let (mut worst, mut peak) = (0.0f32, 0.0f32);
+            for _ in 0..40 {
+                let b = s.render_block();
+                peak = b.iter().fold(peak, |m, v| m.max(v.abs()));
+                worst = worst.max(s.dynamics.reduction_db);
+            }
+            (before, worst, peak, s.car.pops.played)
+        };
+        let (b0, w0, p0, n0) = run(false);
+        let (b1, w1, p1, n1) = run(true);
+        assert_eq!((n0, n1), (0, 1));
+        assert!(p1 <= 0.9 && p1 > p0 * 1.5, "peak {p0} → {p1}");
+        // The reduction (compressor + limiter) the pop adds over the same lift without it.
+        assert!(w1 - w0 <= 1.0 + (b1 - b0).abs(), "gain reduction {w0:.2} → {w1:.2} dB");
+    }
+
     #[test]
     fn event_queue_keeps_untaken_events() {
         let shared = Shared::default();
