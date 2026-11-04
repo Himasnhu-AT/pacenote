@@ -575,26 +575,32 @@ fn follow_camera(
         None => (want_eye, want_at),
     };
     *smooth = Some((eye, at));
-    // Pulled in front of whatever is between the car and the camera (a car behind, a
-    // building, a bank, a big rock; a thin trunk only when the eye would be inside it): in
-    // at once, back out slowly.
+    // Clear of whatever is between the car and the camera (a car behind, a building, a bank,
+    // a big rock; a thin trunk only when the eye would be inside it): in at once, back out
+    // slowly.
     let pivot = car.translation + Vec3::Y * 1.1;
     let mut solids = Vec::new();
     if let Some(t) = traffic.as_deref() {
         let m = (pivot + eye) * 0.5;
         t.obstacles(Vec2::new(m.x, m.z), 8.0, &mut solids);
     }
+    // First up over it (a car close behind, a low wall), then in if that isn't enough.
+    let lift = [0.0, 1.2, 2.4].into_iter().find(|&y| chase_clearance(pivot, eye + Vec3::Y * y, &*stage, &solids) >= 1.0).unwrap_or(2.4);
+    let rate = if lift > cam_fx.lift { 8.0 } else { 2.0 };
+    cam_fx.lift += (lift - cam_fx.lift) * (1.0 - (-dt * rate).exp());
+    let eye = eye + Vec3::Y * cam_fx.lift;
     let clear = chase_clearance(pivot, eye, &*stage, &solids);
     cam_fx.pull = if clear < cam_fx.pull || cam_fx.pull <= 0.0 { clear } else { cam_fx.pull + (clear - cam_fx.pull) * (1.0 - (-dt * 2.5).exp()) };
     let eye = pivot + (eye - pivot) * cam_fx.pull;
     *cam = Transform::from_translation(eye).looking_at(at, Vec3::Y);
 }
 
-/// Camera effects state: the speed FOV kick (degrees, eased) and the chase camera's pull-in
-/// (share of the boom out, eased out).
+/// Camera effects state: the speed FOV kick (degrees, eased) and the chase camera's lift
+/// (m) and pull-in (share of the boom out), each eased back out.
 #[derive(Default)]
 struct CamFx {
     fov: f32,
+    lift: f32,
     pull: f32,
 }
 
