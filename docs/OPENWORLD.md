@@ -92,6 +92,36 @@ an anisotropic A* (switchbacks, 8-10 m hairpins, rally widths), a valley village
 park, traffic on the tarmac only. See `docs/RALLY_MAP.md` (plan, checklist) and section 4 of
 `docs/GAME_OVERVIEW.md` (the map as it is).
 
+## Roadside furniture and road conditions (festival, stream B)
+
+`open::furniture` places them at load from whatever roads and heights the level has (pure,
+seeded, tested; `furniture::REV` goes into each event's board hash). The car feels them through
+three hooks in `OpenWorld`: `dip` (potholes, washout corrugation) in `ground_height`,
+`surface_override` (wet tarmac, mud, washouts as loose gravel, shaded ice as snow) in
+`surface_at`, and `walls` (guard rails, stone blocks, street-light stubs) in the wall grid.
+
+- **Guard rails** where the ground 8 m past the edge is over 3 m below it: on the outside of
+  tarmac corners up to grade 4 (any grade above 250 m), at gravel and forest hairpins, and
+  anywhere it drops over 8 m (WORLD_PASS said 6 m; that put 4-6 km of rail on today's cliffy
+  land). Extended 20 m, gaps under 30 m merged, at least 24 m, never across a junction mouth or
+  a bridge. Steel W-beam on tarmac, timber on gravel and forest. Walls every 4 m, r 0.12, top
+  ground + 0.75: the car scrapes along them.
+- **Stone blocks** instead of rail on the outside of other dropping gravel and forest corners.
+- **Signs** on the right verge, 120 m (tarmac) / 70 m (gravel) before the hazard, one per 50 m
+  each way: junction > hairpin > crest / jump > double bend > steep, falling rocks, narrow
+  bridge > slippery, loose, deer > bend. **Chevrons** round every hairpin (two boards a post,
+  one for each way). **Speed signs** where `posted_kmh` (the traffic's limit) changes and at
+  town street mouths; town boards at the town limits. **Km posts** on roads 0 and 1,
+  **reflector posts** every 50 m on rural tarmac (25 m in bends), 100 m on fast gravel;
+  **street lights** every 30 m on town streets.
+- **Conditions**: potholes on old stretches of roads 0 and 1 (a dip, grip unchanged), wet
+  tarmac in damp dips, mud on wet gravel, washouts on steep wet gravel, ice on the shaded inside
+  of high forest hairpins.
+- **Look**: `art::signs` (one procedural atlas of original pictograms and lettering, one
+  material, one merged mesh per 256 m tile, range 250 m, no shadows) and `art::conditions`
+  (soft-edged mesh patches over the road, one material, per tile). `art::roadside::spawn` draws
+  both.
+
 ## Phases
 
 Phase 1 (compact world, in this order, each step playable and committed):

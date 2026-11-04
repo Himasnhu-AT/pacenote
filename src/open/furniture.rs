@@ -723,7 +723,7 @@ fn patches(net: &RoadNet, heights: &Heightfield, infos: &[RoadInfo]) -> Vec<Patc
                     out.push(Patch { a: p, b: p, radius: dia * 0.5, kind: PatchKind::Pothole { depth }, s0: s });
                     if rnd(seed, 12, k) < 0.35 {
                         let q = p + road.dir[i] * (1.2 + rnd(seed, 13, k) * 1.5);
-                        out.push(Patch { a: q, b: q, radius: dia * 0.35, kind: PatchKind::Pothole { depth: depth * 0.8 }, s0: s });
+                        out.push(Patch { a: q, b: q, radius: dia * 0.35, kind: PatchKind::Pothole { depth: (depth * 0.8).max(0.04) }, s0: s });
                     }
                     taken.push((i, i));
                 }
@@ -1076,7 +1076,9 @@ fn signs(net: &RoadNet, heights: &Heightfield, infos: &[RoadInfo], rails: &[Rail
                     for side in [1.0f32, -1.0] {
                         if !railed(r, side, i) {
                             let mut p = sign_at(road, i, -side as i32, SHOULDER + 0.15, SignKind::Reflector, ground);
-                            p.yaw = along(road, i);
+                            // The face towards +yaw is white (seen on the driver's left), the
+                            // other amber (on the right).
+                            p.yaw = along(road, i) + if side > 0.0 { core::f32::consts::PI } else { 0.0 };
                             out.push(p);
                         }
                     }
@@ -1172,6 +1174,242 @@ pub(crate) mod tests {
         for (k, p) in again.patches.iter().enumerate() {
             let c = p.centre();
             assert!(again.grid.at(c.x, c.y).iter().any(|e| e.1 as usize == k), "patch {k} not indexed");
+        }
+    }
+
+    /// A car driven into a guard rail at speed scrapes along it and stays on the road side.
+    #[test]
+    fn a_rail_holds_a_car_at_speed() {
+        use crate::vehicle::{Car, Input, Spec, step};
+        let w = world();
+        let f = &*w.furniture;
+        let rail = f.rails.iter().filter(|r| r.kind == RailKind::Steel).max_by(|a, b| (a.to - a.from).total_cmp(&(b.to - b.from))).expect("a steel rail");
+        let road = &w.net.roads[rail.road as usize].road;
+        let side = rail.side as f32;
+        let i = (((rail.from + rail.to) * 0.5) / STEP) as usize;
+        let spec = Spec::default();
+        for (kmh, deg) in [(60.0f32, 20.0f32), (100.0, 12.0), (90.0, 30.0)] {
+            let d = road.dir[i];
+            let towards = left(road, i) * side;
+            let a = deg.to_radians();
+            let v = d * libm::cosf(a) + towards * libm::sinf(a);
+            // From the far lane, 1 m off the centre.
+            let start = xz(road.pts[i]) - towards * 1.0;
+            let heading = libm::atan2f(v.x, v.y);
+            let mut car = Car::new(Vec3::new(start.x, w.ground_height(start.x, start.y) + 0.6, start.y), heading);
+            // Settle on the springs first.
+            for _ in 0..90 {
+                step(&mut car, &spec, Input { handbrake: true, ..Default::default() }, w, 1.0 / 60.0);
+            }
+            car.vel = car.forward() * kmh / 3.6;
+            for wh in &mut car.wheels {
+                wh.spin = kmh / 3.6 / spec.wheel_radius;
+            }
+            let mut worst = f32::MIN;
+            for _ in 0..180 {
+                step(&mut car, &spec, Input { throttle: 0.3, ..Default::default() }, w, 1.0 / 60.0);
+                let p = Vec2::new(car.pos.x, car.pos.z);
+                // How far past the rail line the car's centre got (− = still on the road side).
+                if let Some(np) = road.nearest(p, 30.0) {
+                    let rail_lat = road.half_width(&np) + RAIL_OFF;
+                    worst = worst.max(np.lateral * side - rail_lat);
+                }
+            }
+            eprintln!("{kmh} km/h at {deg}°: impacts {:.2}, centre {worst:.2} m from the rail line, {:.0} km/h after", car.impacts, car.vel.length() * 3.6);
+            assert!(car.impacts > 0.0, "{kmh} km/h at {deg}°: never hit the rail");
+            // Its centre stays more than half a car width inside the rail.
+            assert!(worst < -0.6, "{kmh} km/h at {deg}°: through the rail ({worst:.2} m)");
+        }
+    }
+
+    #[test]
+    fn potholes_dip_the_ground_and_keep_the_grip() {
+        let w = world();
+        let f = &*w.furniture;
+        let holes: Vec<&Patch> = f.patches.iter().filter(|p| matches!(p.kind, PatchKind::Pothole { .. })).collect();
+        assert!(holes.len() >= 5, "{} potholes", holes.len());
+        for p in holes {
+            let PatchKind::Pothole { depth } = p.kind else { unreachable!() };
+            let c = p.a;
+            let hf = w.heights.height_at(c.x, c.y);
+            let without = super::super::profile::ground(&w.net, c, hf).unwrap_or(hf);
+            assert!((without - w.ground_height(c.x, c.y) - depth).abs() < 1e-3 || dip(f, c.x, c.y) >= depth, "pothole at {c} doesn't dip {depth}");
+            assert!((0.04..=0.08).contains(&depth));
+            // Grip unchanged: the road's own surface.
+            assert_eq!(w.surface_at(c.x, c.y), super::super::roads::surface(&w.net, c.x, c.y));
+            // Nothing past its edge.
+            let out = c + Vec2::X * (p.radius + 0.05);
+            assert!(f.patches.iter().any(|q| q != p && q.local(out).1 < q.radius) || dip(f, out.x, out.y) == 0.0);
+        }
+    }
+
+    /// The surface at the middle of the first patch of `kind` (a synthetic one on a copy of
+    /// the world when the level has none).
+    fn surface_on(kind: PatchKind) -> (Surface, f32, f32) {
+        let w = world();
+        let p = w.furniture.patches.iter().find(|p| p.kind == kind).copied();
+        let (o, p) = match p {
+            Some(p) => (w.clone(), p),
+            None => {
+                let road = &w.net.roads[0].road;
+                let (a, b) = (xz(road.pts[200]), xz(road.pts[202]));
+                let p = Patch { a, b, radius: 1.5, kind, s0: 400.0 };
+                let mut o = w.clone();
+                o.furniture = std::sync::Arc::new(Furniture::new(vec![], vec![], vec![], vec![p]));
+                (o, p)
+            }
+        };
+        let c = p.centre();
+        // Dips along the patch's axis.
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for k in 0..=40 {
+            let q = p.a + (p.b - p.a) * (k as f32 / 40.0);
+            let d = dip(&o.furniture, q.x, q.y);
+            lo = lo.min(d);
+            hi = hi.max(d);
+        }
+        (o.surface_at(c.x, c.y), lo, hi)
+    }
+
+    #[test]
+    fn wet_patches_are_wet() {
+        let (s, _, hi) = surface_on(PatchKind::Wet);
+        assert_eq!(s, Surface::Wet);
+        assert_eq!(hi, 0.0, "wet tarmac doesn't dip");
+    }
+
+    #[test]
+    fn mud_patches_are_mud() {
+        assert_eq!(surface_on(PatchKind::Mud).0, Surface::Mud);
+    }
+
+    #[test]
+    fn washouts_are_loose_and_corrugated() {
+        let (s, lo, hi) = surface_on(PatchKind::Washout);
+        assert_eq!(s, Surface::Loose);
+        // ±2 cm about a 2 cm dip, at 0.9 m: sampled every 0.1 m over 4 m, it spans most of it.
+        assert!(hi > 0.03 && hi <= 0.0401 && lo < 0.01, "corrugation {lo}..{hi}");
+    }
+
+    #[test]
+    fn shaded_ice_is_snow() {
+        assert_eq!(surface_on(PatchKind::Ice).0, Surface::Snow);
+    }
+
+    /// Where a sign stands along road `r` (m), if it's by that road.
+    fn station_of(w: &OpenWorld, r: usize, s: &Sign) -> Option<(f32, f32)> {
+        w.net.roads[r].road.nearest(xz(s.pos), 8.0).map(|at| (at.s, at.lateral))
+    }
+
+    #[test]
+    fn every_hairpin_has_chevrons_and_a_warning() {
+        let w = world();
+        let f = &*w.furniture;
+        let town = town(&w.net);
+        let (mut hairpins, mut warned) = (0, 0);
+        for r in 0..w.net.roads.len() {
+            let info = road_info(&w.net, r, town);
+            let road = &w.net.roads[r].road;
+            let n = road.len();
+            let tarmac = info.tarmac;
+            let warn_m = if tarmac { 120.0 } else { 70.0 };
+            let hairpin_signs: Vec<(f32, f32)> = f.signs.iter().filter(|s| matches!(s.kind, SignKind::Warning(warn::HAIRPIN_L | warn::HAIRPIN_R))).filter_map(|s| station_of(w, r, s)).collect();
+            let starts: Vec<usize> = info.corners.iter().enumerate().filter(|(_, c)| c.grade == stage::HAIRPIN).map(|(k, _)| k).collect();
+            for &k in &starts {
+                let (ap, _) = info.apex[k];
+                if ap < 20 || ap + 20 >= n || info.near_j[ap] {
+                    continue;
+                }
+                hairpins += 1;
+                let apex = at(road, ap, 0.0);
+                assert!(f.signs.iter().any(|s| matches!(s.kind, SignKind::Chevron(_)) && xz(s.pos).distance(apex) < road.width[ap] + 12.0), "road {r} hairpin at {:.0} m: no chevrons", ap as f32 * STEP);
+                let c = &info.corners[k];
+                for dir in [1i32, -1] {
+                    let entry = if dir > 0 { c.start } else { c.end };
+                    // The road must reach far enough back for a sign.
+                    let back = entry - dir as f32 * warn_m;
+                    if back < 10.0 || back > road.length() - 10.0 {
+                        continue;
+                    }
+                    // A hairpin sign before it on the right, or one before the hairpin just
+                    // ahead of it (a ladder), within 170 m.
+                    let ok = hairpin_signs.iter().any(|&(s, lat)| {
+                        let before = (entry - s) * dir as f32;
+                        (30.0..=warn_m + 170.0).contains(&before) && lat * dir as f32 <= 0.0
+                    });
+                    warned += ok as usize;
+                    assert!(ok, "road {r} hairpin at {:.0} m going {dir}: no warning sign", ap as f32 * STEP);
+                }
+            }
+        }
+        eprintln!("{hairpins} hairpins, {warned} warned approaches");
+        assert!(hairpins > 10);
+    }
+
+    #[test]
+    fn reflector_posts_every_50_m_on_rural_tarmac() {
+        let w = world();
+        let f = &*w.furniture;
+        let town = town(&w.net);
+        let mut checked = 0.0;
+        for (r, nr) in w.net.roads.iter().enumerate() {
+            if nr.kind != RoadKind::BRoad {
+                continue;
+            }
+            let info = road_info(&w.net, r, town);
+            let road = &nr.road;
+            for side in [1.0f32, -1.0] {
+                let mut at_s: Vec<f32> = f.signs.iter().filter(|s| s.kind == SignKind::Reflector).filter_map(|s| station_of(w, r, s)).filter(|&(_, lat)| lat * side > 0.0).map(|(s, _)| s).collect();
+                at_s.sort_by(f32::total_cmp);
+                for pair in at_s.windows(2) {
+                    let (a, b) = (pair[0], pair[1]);
+                    if b - a <= 55.0 {
+                        checked += b - a;
+                        continue;
+                    }
+                    // A longer gap must have a reason: a junction, a bridge, the town or a rail.
+                    let (i0, i1) = (road.station(a), road.station(b));
+                    let excused = (i0..=i1).any(|i| info.near_j[i] || info.bridge[i] || info.in_town[i] || f.rails.iter().any(|x| x.road as usize == r && x.side as f32 == side && (x.from - 6.0..=x.to + 6.0).contains(&(i as f32 * STEP))));
+                    assert!(excused, "road {r} side {side}: no reflector post from {a:.0} to {b:.0} m");
+                }
+            }
+        }
+        assert!(checked > 4000.0, "only {checked} m checked");
+    }
+
+    #[test]
+    fn speed_signs_say_what_the_traffic_drives() {
+        let w = world();
+        let f = &*w.furniture;
+        let mut n = 0;
+        for s in &f.signs {
+            let SignKind::Speed(v) = s.kind else { continue };
+            n += 1;
+            let np = w.net.nearest(xz(s.pos), 15.0).expect("by a road");
+            // The limit where it stands, or a few metres on (it marks a change).
+            let ok = (-10..=10).any(|k| {
+                let i = (np.at.i as i64 + k).clamp(0, w.net.roads[np.road].road.len() as i64 - 1) as usize;
+                posted_kmh(&w.net, np.road, i) == v
+            });
+            assert!(ok, "{v} sign by road {} at {:.0} m: posted {}", np.road, np.at.s, posted_kmh(&w.net, np.road, np.at.i));
+        }
+        assert!(n > 0, "no speed signs");
+        assert!(f.signs.iter().any(|s| s.kind == SignKind::TownBoard) && f.signs.iter().any(|s| s.kind == SignKind::TownEnd));
+    }
+
+    #[test]
+    fn nothing_stands_on_a_road() {
+        let w = world();
+        let f = &*w.furniture;
+        let on_road = |p: Vec2| w.net.nearest(p, 30.0).is_some_and(|n| n.at.lateral.abs() < w.net.roads[n.road].road.half_width(&n.at) - 0.05);
+        for s in &f.signs {
+            // Street lights' arms reach over; their poles don't.
+            assert!(!on_road(xz(s.pos)), "{:?} on a road at {}", s.kind, s.pos);
+        }
+        for r in &f.rails {
+            for p in &r.pts {
+                assert!(!on_road(xz(*p)), "rail on a road at {p}");
+            }
         }
     }
 
@@ -1292,6 +1530,101 @@ mod measure {
                 let cut_h = -drop_at(road, &w.heights, ap, inside);
                 eprintln!("   hairpin at {:.0} y {:.0} cut {:.1} nz {:.2}", ap as f32 * STEP, road.pts[ap].y, cut_h, nz);
             }
+        }
+    }
+
+    /// Camera spots for screenshots: `eye -> at` for `art.overhead`, and car poses.
+    #[test]
+    #[ignore]
+    fn spots() {
+        let w = tests::world();
+        let f = &*w.furniture;
+        let net = &w.net;
+        let pose = |what: &str, r: usize, i: usize, back: f32, up: f32, side: f32| {
+            let road = &net.roads[r].road;
+            let i = i.min(road.len() - 1);
+            let d = road.dir[i];
+            let p = road.pts[i];
+            let j = ((i as f32) - back / STEP).max(0.0) as usize;
+            let q = road.pts[j];
+            let l = -road.dir[j].perp();
+            let eye = Vec3::new(q.x + l.x * side, q.y + up, q.z + l.y * side);
+            let heading = libm::atan2f(d.x, d.y).to_degrees();
+            eprintln!("{what}: road {r} s {:.0}: at [{:.1}, {:.1}, {:.1}] eye [{:.1}, {:.1}, {:.1}] heading {heading:.0} car@ x {:.1} z {:.1}", i as f32 * STEP, p.x, p.y, p.z, eye.x, eye.y, eye.z, q.x, q.z);
+        };
+        for rail in f.rails.iter().filter(|r| r.kind == RailKind::Steel).take(4) {
+            let mid = ((rail.from + rail.to) * 0.5 / STEP) as usize;
+            pose("steel rail", rail.road as usize, mid, 60.0, 4.0, 0.0);
+        }
+        for rail in f.rails.iter().filter(|r| r.kind == RailKind::Timber).take(2) {
+            let mid = ((rail.from + rail.to) * 0.5 / STEP) as usize;
+            pose("timber rail", rail.road as usize, mid, 50.0, 3.0, 0.0);
+        }
+        for s in f.signs.iter().filter(|s| matches!(s.kind, SignKind::TownBoard | SignKind::Speed(_))).take(6) {
+            let np = net.nearest(xz(s.pos), 20.0).unwrap();
+            eprintln!("{:?} at {:.1} {:.1} {:.1} yaw {:.0} (road {} s {:.0})", s.kind, s.pos.x, s.pos.y, s.pos.z, s.yaw.to_degrees(), np.road, np.at.s);
+        }
+        for kind in ["wet", "pothole", "washout", "mud", "ice"] {
+            if let Some(p) = f.patches.iter().find(|p| match kind { "wet" => p.kind == PatchKind::Wet, "pothole" => matches!(p.kind, PatchKind::Pothole { .. }), "washout" => p.kind == PatchKind::Washout, "mud" => p.kind == PatchKind::Mud, _ => p.kind == PatchKind::Ice }) {
+                let np = net.nearest(p.centre(), 20.0).unwrap();
+                pose(kind, np.road, np.at.i, 25.0, 2.5, 0.0);
+            }
+        }
+    }
+
+    /// `art.overhead` views (heights relative to the ground at `at`) for screenshots.
+    #[test]
+    #[ignore]
+    fn views() {
+        let w = tests::world();
+        let f = &*w.furniture;
+        let net = &w.net;
+        let view = |name: &str, eye: Vec3, at: Vec3| {
+            let g = w.ground_height(at.x, at.z);
+            println!("{{\"cmd\": \"art.overhead\", \"params\": {{\"eye\": [{:.1}, {:.2}, {:.1}], \"at\": [{:.1}, {:.2}, {:.1}]}}}}, {{\"sleep\": 2.5}}, {{\"shot\": \"{name}\"}},", eye.x, eye.y - g, eye.z, at.x, at.y - g, at.z);
+        };
+        let road_pt = |r: usize, i: usize, lat: f32, up: f32| {
+            let road = &net.roads[r].road;
+            let i = i.min(road.len() - 1);
+            let p = at(road, i, lat);
+            Vec3::new(p.x, road.pts[i].y + up, p.y)
+        };
+        // Hairpins with steel rails: from 50 m before, driver height, looking at the apex.
+        let town = town(net);
+        let mut k = 0;
+        for rail in f.rails.iter().filter(|r| r.kind == RailKind::Steel) {
+            let r = rail.road as usize;
+            let info = road_info(net, r, town);
+            for (c, &(ap, _)) in info.corners.iter().zip(&info.apex) {
+                let s = ap as f32 * STEP;
+                if c.grade == stage::HAIRPIN && s > rail.from && s < rail.to && k < 3 {
+                    k += 1;
+                    view(&format!("hairpin{k}"), road_pt(r, ap.saturating_sub(16), -1.0, 1.6), road_pt(r, ap, 0.0, 0.8));
+                    view(&format!("hairpin{k}_high"), road_pt(r, ap.saturating_sub(45), 0.0, 9.0), road_pt(r, ap, 0.0, 0.0));
+                }
+            }
+        }
+        for rail in f.rails.iter().filter(|r| r.kind == RailKind::Timber).take(1) {
+            let i = (rail.from / STEP) as usize + 10;
+            view("timber", road_pt(rail.road as usize, i.saturating_sub(20), 0.0, 1.6), road_pt(rail.road as usize, i + 5, rail.side as f32 * 4.0, 0.6));
+        }
+        for (name, kind) in [("town_board", SignKind::TownBoard), ("town_end", SignKind::TownEnd)] {
+            if let Some(s) = f.signs.iter().find(|s| s.kind == kind) {
+                let n = Vec3::new(libm::sinf(s.yaw), 0.0, libm::cosf(s.yaw));
+                view(name, s.pos + n * 14.0 + Vec3::Y * 1.8 + n.cross(Vec3::Y) * 2.0, s.pos + Vec3::Y * 1.6);
+            }
+        }
+        for (name, want) in [("wet", 0), ("pothole", 1), ("washout", 2), ("mud", 3)] {
+            let p = f.patches.iter().find(|p| match want { 0 => p.kind == PatchKind::Wet, 1 => matches!(p.kind, PatchKind::Pothole { .. }), 2 => p.kind == PatchKind::Washout, _ => p.kind == PatchKind::Mud });
+            if let Some(p) = p {
+                let np = net.nearest(p.centre(), 20.0).unwrap();
+                let back = if want == 1 { 4 } else { 10 };
+                view(name, road_pt(np.road, np.at.i.saturating_sub(back), np.at.lateral * 0.3, 1.5), Vec3::new(p.centre().x, net.roads[np.road].road.height_at(&np.at), p.centre().y));
+            }
+        }
+        if let Some(s) = f.signs.iter().find(|s| matches!(s.kind, SignKind::Warning(_))) {
+            let n = Vec3::new(libm::sinf(s.yaw), 0.0, libm::cosf(s.yaw));
+            view("warning", s.pos + n * 10.0 + Vec3::Y * 1.8 + n.cross(Vec3::Y) * 1.5, s.pos + Vec3::Y * 2.0);
         }
     }
 }
