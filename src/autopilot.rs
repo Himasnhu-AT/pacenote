@@ -133,7 +133,7 @@ impl Autopilot {
         p.power_beta = self.power_beta;
         p.hb_steer = self.hb_steer;
         self.pilot.crash_at_m = self.crash_at_m;
-        let input = self.pilot.input(car, spec, &w.road, &w.corners, progress, dt);
+        let input = self.pilot.input(car, spec, &w.road, &w.corners, w, progress, dt);
         self.doing = self.pilot.doing;
         input
     }

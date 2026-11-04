@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::stage::{self, Corner, Road, Surface, Turn};
-use crate::vehicle::{self, Car, Input, Spec};
+use crate::vehicle::{self, Car, Give, Ground, Input, Obstacle, Spec};
 
 /// How a pilot drives (a difficulty row of GAME_SYSTEMS §5, plus the per-rival spread).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -69,6 +69,10 @@ pub struct Pilot {
     rolled: [f32; 4],
     /// What it's doing (dev state).
     pub doing: &'static str,
+    /// Scratch for the obstacle query (no allocation per step).
+    scratch: Vec<Obstacle>,
+    /// The obstacle shift in use (eased, m).
+    dodge: f32,
 }
 
 impl Default for Pilot {
@@ -79,7 +83,40 @@ impl Default for Pilot {
 
 impl Pilot {
     pub fn new(params: PilotParams) -> Pilot {
-        Pilot { params, crash_at_m: None, pace_mod: 1.0, speed_cap: None, offset_target: None, offset: params.line_offset, handbrake: 0.0, last_hairpin: -1.0, mistake_left: 0.0, rolled: [-1.0; 4], doing: "off" }
+        Pilot { params, crash_at_m: None, pace_mod: 1.0, speed_cap: None, offset_target: None, offset: params.line_offset, handbrake: 0.0, last_hairpin: -1.0, mistake_left: 0.0, rolled: [-1.0; 4], doing: "off", scratch: Vec::new(), dodge: 0.0 }
+    }
+
+    /// Lateral shift (m, left +) that keeps the car's line 1.2 m plus their radius clear of
+    /// solids within ~15 m ahead, capped at 1.5 m.
+    fn avoid(&mut self, road: &Road, ground: &impl Ground, s: f32, line: f32, look: f32) -> f32 {
+        let mut push = 0.0f32;
+        let mut obs = std::mem::take(&mut self.scratch);
+        for ahead in [4.0, 9.0, 14.0] {
+            if ahead > look + 6.0 {
+                break;
+            }
+            let i = road.station(s + ahead);
+            let d = road.dir[i];
+            let left = Vec2::new(d.y, -d.x);
+            let c = Vec2::new(road.pts[i].x, road.pts[i].z) + left * line;
+            ground.obstacles(c, 3.2, &mut obs);
+            for o in obs.iter().filter(|o| o.give == Give::Solid) {
+                let rel = o.pos - c;
+                if rel.dot(d).abs() > 3.0 {
+                    continue;
+                }
+                let lat = rel.dot(left);
+                let clear = o.radius + 1.2;
+                if lat.abs() < clear {
+                    let want = -lat.signum() * (clear - lat.abs());
+                    if want.abs() > push.abs() {
+                        push = want;
+                    }
+                }
+            }
+        }
+        self.scratch = obs;
+        push.clamp(-1.5, 1.5)
     }
 
     /// Is a mistake under way?
@@ -87,8 +124,10 @@ impl Pilot {
         self.mistake_left > 0.0
     }
 
-    /// The input for one fixed step. `progress`: metres along `road` (best so far).
-    pub fn input(&mut self, car: &Car, spec: &Spec, road: &Road, corners: &[Corner], progress: f32, dt: f32) -> Input {
+    /// The input for one fixed step. `progress`: metres along `road` (best so far); `ground`:
+    /// what the car drives on (its solids near the line ahead are steered round).
+    #[allow(clippy::too_many_arguments)]
+    pub fn input(&mut self, car: &Car, spec: &Spec, road: &Road, corners: &[Corner], ground: &impl Ground, progress: f32, dt: f32) -> Input {
         let p = self.params;
         let pos = Vec2::new(car.pos.x, car.pos.z);
         let rp = road.nearest(pos, 40.0);
@@ -115,10 +154,16 @@ impl Pilot {
         self.offset += (want - self.offset).clamp(-1.2 * dt, 1.2 * dt);
         let i_look = road.station(s_here + look);
         let mut target = road.pts[i_look];
-        if self.offset != 0.0 {
-            let d = road.dir[i_look];
-            let room = (road.width[i_look] * 0.5 - 1.1).max(0.0);
-            target += Vec3::new(d.y, 0.0, -d.x) * self.offset.clamp(-room, room);
+        let d_look = road.dir[i_look];
+        let room = (road.width[i_look] * 0.5 - 1.1).max(0.0);
+        let line = self.offset.clamp(-room, room);
+        // Solids close to the line ahead (a trunk at a hairpin's edge, a stopped car): the
+        // line moves off them (instantly: the pursuit smooths it).
+        let avoid = self.avoid(road, ground, s_here, line, look);
+        self.dodge += (avoid - self.dodge).clamp(-3.0 * dt, 3.0 * dt);
+        let lat = line + self.dodge;
+        if lat != 0.0 {
+            target += Vec3::new(d_look.y, 0.0, -d_look.x) * lat;
         }
         let mut steer = pursuit(car, spec, target);
 
@@ -127,18 +172,43 @@ impl Pilot {
         let i0 = road.station(s_here);
         let mut vt = 30.0f32;
         let horizon = (v * v / 6.0 + 30.0) / stage::STEP;
+        let n = road.len();
         for k in 0..horizon as usize {
-            let i = (i0 + k).min(road.len() - 1);
-            let (mu, _) = road.surface[i].grip();
-            let mu = mu * spec.grip;
-            let a_lat = pace * mu * 9.81;
-            let a_brk = p.brake * mu * 9.81;
+            let i = (i0 + k).min(n - 1);
+            let (mu, loose) = road.surface[i].grip();
+            // Loose ground gives less than its peak once the tyre slides (a margin there).
+            let mu = mu * spec.grip * (1.0 - 0.2 * loose);
+            // Narrow roads leave no room to run wide: a little under the pace there.
+            let narrow = (road.width[i] / 5.0).clamp(0.85, 1.0);
+            // Over a crest the tyres unload: less grip for a corner on or just past it, and a
+            // speed past which the car leaves the ground (v² · |k_v| < 0.55 g).
+            let kv = if i > 0 && i + 1 < n { (road.pts[i + 1].y - 2.0 * road.pts[i].y + road.pts[i - 1].y) / (stage::STEP * stage::STEP) } else { 0.0 };
+            let crest = (-kv).max(0.0);
+            let unload = (1.0 - crest * 25.0).clamp(0.7, 1.0);
+            let a_lat = pace * narrow * unload * mu * 9.81;
+            // Downhill takes some of the braking (the slope's share of g).
+            let slope = if i + 2 < n && i >= 2 { (road.pts[i + 2].y - road.pts[i - 2].y) / (4.0 * stage::STEP) } else { 0.0 };
+            let a_brk = (p.brake * mu * 9.81 + 9.81 * slope.min(0.0)).max(1.5);
             let curv = road.curv[i].abs().max(1e-4);
-            let vc = (a_lat / curv).sqrt();
+            let mut vc = (a_lat / curv).sqrt();
+            if crest > 1e-3 {
+                vc = vc.min((0.55 * 9.81 / crest).sqrt().max(12.0));
+            }
             vt = vt.min((vc * vc + 2.0 * a_brk * k as f32 * stage::STEP).sqrt());
         }
         if off_road {
             vt = vt.min(12.0);
+        }
+        // Running wide (understeer, a slide): towards the outside edge of the bend, it slows
+        // until the car tracks again.
+        if let Some(r) = rp {
+            let half = road.half_width(&r);
+            let curv = road.curv[i0];
+            let outward = r.lateral * curv < 0.0;
+            let over = ((r.lateral.abs() - 0.3 * half) / half.max(0.5)).max(0.0);
+            if outward && over > 0.0 && curv.abs() > 1.0 / 400.0 {
+                vt = vt.min((v * (1.0 - 0.35 * over.min(1.0))).max(3.5));
+            }
         }
 
         // A mistake: at a tight corner (grade ≤ 2), now and then (seeded), it lifts and
@@ -158,12 +228,22 @@ impl Pilot {
                 vt *= 0.72;
             }
         }
+        // At full lock and still running wide: it can't turn at this speed, scrub some off.
+        if steer.abs() > 0.95 && v > 5.0 && rp.is_some_and(|r| r.lateral * road.curv[i0] < 0.0 && r.lateral.abs() > 0.5) {
+            vt = vt.min(v * 0.9);
+        }
         if let Some(cap) = self.speed_cap {
             vt = vt.min(cap);
         }
         let err = vt - car.speed();
         let mut throttle = (err * 0.6).clamp(0.0, 1.0);
-        let brake = (-err * 0.4).clamp(0.0, 1.0);
+        // Braking while turning hard shares the tyres: ease it (or the tail comes round).
+        let brake = (-err * 0.4).clamp(0.0, 1.0).min(1.0 - 0.55 * steer.abs().min(1.0));
+        // Steering near full lock is all the grip it has: no power on top (it only pushes wide),
+        // and at full lock still running wide, a touch of brake.
+        if steer.abs() > 0.7 && v > 5.0 {
+            throttle *= 0.3;
+        }
         // Ease off in a big slide, as a driver would (less so when drifting on purpose).
         let beta = car.vel.dot(left_of(car)).atan2(car.speed().abs().max(1.0)).abs().to_degrees();
         throttle *= (1.0 - (beta - if p.drift { 25.0 } else { 12.0 }) / 20.0).clamp(0.2, 1.0);

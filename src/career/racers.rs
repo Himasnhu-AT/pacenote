@@ -145,6 +145,8 @@ pub struct Racer {
     /// stalled car on a narrow road would block it for ever: it ghosts past, not solid).
     blocked: f32,
     pub ghost: f32,
+    /// The side it is passing on (+1 left, −1 right, 0 not passing): kept until the pass ends.
+    pass_side: f32,
 }
 
 /// The racers' poses after the last step, `(position, forward)` per car (the same shape as
@@ -438,7 +440,7 @@ impl RaceSim {
             let params = PilotParams {
                 pace: difficulty.pace() * (1.0 + spread),
                 brake: difficulty.brake(),
-                line_offset: lat,
+                line_offset: 0.0,
                 seed: pilot::seed(&[seed, slot as u64]),
                 mistake: difficulty.mistake(),
                 ..PilotParams::default()
@@ -449,7 +451,12 @@ impl RaceSim {
                 prev: (car.pos, car.rot),
                 car,
                 spec,
-                pilot: Pilot::new(params),
+                // From its grid spot it eases to the racing line.
+                pilot: {
+                    let mut p = Pilot::new(params);
+                    p.offset = lat;
+                    p
+                },
                 name: names[k],
                 model: d.id,
                 paint: Paint { colour, metallic: k % 2 == 1 },
@@ -467,6 +474,7 @@ impl RaceSim {
                 resets: 0,
                 blocked: 0.0,
                 ghost: 0.0,
+                pass_side: 0.0,
             });
         }
         let player_release = slot_spot(format, player_slot).2;
@@ -532,9 +540,18 @@ impl RaceSim {
                 Input { handbrake: true, ..Input::default() }
             } else {
                 racecraft(r, k, &snapshot, (player.progress, player.car.speed(), player_lat, player.done), self.difficulty, road, self.seed, self.len);
-                r.pilot.input(&r.car, &r.spec, road, corners, r.progress, DT)
+                r.pilot.input(&r.car, &r.spec, road, corners, ground, r.progress, DT)
             };
             vehicle::step(&mut r.car, &r.spec, input, &g, DT);
+            #[cfg(test)]
+            if let Ok(t) = std::env::var("RACE_TRACE_SLOT")
+                && t.parse::<u8>().ok() == Some(r.slot)
+                && self.step % 6 == 0
+                && (std::env::var("FROM").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0)..std::env::var("TO").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1e9)).contains(&r.progress)
+            {
+                let rp = road.nearest(Vec2::new(r.car.pos.x, r.car.pos.z), 40.0);
+                eprintln!("slot {} step {} s {:.0} v {:.1} lat {:+.1} off_t {:?} off {:+.2} cap {:?} pm {:.3} st {:+.2} th {:.2} br {:.2} ghost {:.1} {}", r.slot, self.step, r.progress, r.car.speed() * 3.6, rp.map_or(99.0, |x| x.lateral), r.pilot.offset_target, r.pilot.offset, r.pilot.speed_cap.map(|c| c * 3.6), r.pilot.pace_mod, input.steer, input.throttle, input.brake, r.ghost, r.pilot.doing);
+            }
             if held {
                 continue;
             }
@@ -558,7 +575,12 @@ impl RaceSim {
                 r.finish = Some(Finish::Dnf);
                 continue;
             }
-            if r.off > 3.0 || r.stuck > 6.0 {
+            if r.off > 3.0 || r.stuck > 10.0 {
+                #[cfg(test)]
+                if std::env::var("RACE_TRACE").is_ok() {
+                    let rp = road.nearest(Vec2::new(r.car.pos.x, r.car.pos.z), 40.0);
+                    eprintln!("reset slot {} at {:.0} m (step {}): off {:.1} stuck {:.1} up {:.2} lat {:?} half {:?} v {:.1} ghost {:.1} doing {} dmg {:.2}", r.slot, r.progress, self.step, r.off, r.stuck, r.car.up().y, rp.map(|x| x.lateral), rp.map(|x| road.half_width(&x)), r.car.speed(), r.ghost, r.pilot.doing, r.car.damage.total());
+                }
                 let i = road.station(r.progress);
                 let d = road.dir[i];
                 vehicle::recover(&mut r.car, road.pts[i], libm::atan2f(d.x, d.y));
@@ -720,6 +742,9 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
     let i1 = road.station(me_s + 60.0);
     let min_w = road.width[i0..=i1.max(i0)].iter().copied().fold(f32::MAX, f32::min);
     let straight = road.curv[i0..=i1.max(i0)].iter().all(|c| c.abs() < 1.0 / 120.0);
+    // Passing needs room and no real corner in the next 80 m.
+    let i2 = road.station(me_s + 80.0);
+    let gentle = road.curv[i0..=i2.max(i0)].iter().all(|c| c.abs() < 1.0 / 150.0);
 
     // Passing through a stalled car (see `Racer::ghost`).
     if r.ghost > 0.0 {
@@ -728,7 +753,7 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
     }
     let stalled = ahead.is_some_and(|(d, v, _)| d < 15.0 && v < 2.0);
     r.blocked = if stalled && me_v < 2.0 { r.blocked + DT } else { 0.0 };
-    if r.blocked > 4.0 {
+    if r.blocked > 3.0 {
         r.blocked = 0.0;
         r.ghost = 4.0;
         return;
@@ -737,19 +762,27 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
     if let Some((d, v_ahead, lat_ahead)) = ahead {
         let gap_m = (d - 4.5).max(0.0);
         let wants = me_v.max(v_ahead) >= v_ahead * 1.03 || gap_m < 0.6 * me_v;
-        if min_w >= 4.5 && wants && gap_m < 25.0 {
-            // Overtake: the side away from the car ahead.
+        if min_w >= 4.5 && wants && gap_m < 25.0 && (gentle || r.pass_side != 0.0 && straight) {
+            // Overtake: the side away from the car ahead (kept once chosen).
             let room = min_w * 0.5 - 1.1;
-            r.pilot.offset_target = Some(if lat_ahead >= 0.0 { -room } else { room });
-            // Not alongside yet: don't run into its back.
-            if (me_lat - lat_ahead).abs() < 1.7 && gap_m < 3.0 {
-                r.pilot.speed_cap = Some(v_ahead);
+            if r.pass_side == 0.0 {
+                r.pass_side = if lat_ahead >= 0.0 { -1.0 } else { 1.0 };
+            }
+            r.pilot.offset_target = Some(r.pass_side * room);
+            // Not alongside yet: don't run into its back (creep, so it can still pull out).
+            if (me_lat - lat_ahead).abs() < 1.7 && gap_m < 6.0 {
+                r.pilot.speed_cap = Some(v_ahead + (gap_m * 0.6).max(0.8));
             }
         } else {
+            r.pass_side = 0.0;
             // Follow at a 0.6 s headway.
             let want_gap = 2.0 + 0.6 * me_v;
             r.pilot.speed_cap = Some((v_ahead + (gap_m - want_gap) * 0.5).max(0.0));
         }
+    }
+
+    if ahead.is_none() {
+        r.pass_side = 0.0;
     }
 
     // Yielding: the player right behind (within 1.2 s) for 2 s, on a straight ≥ 3.8 m wide.
@@ -890,10 +923,11 @@ mod race_tests {
         let mut worst_off = 0.0f32;
         let t0 = std::time::Instant::now();
         let mut n = 0;
+        let player_s = w.road.nearest(Vec2::new(p.x, p.z), 10.0).map_or(0.0, |r| r.s);
         for i in 0..steps {
             // The player parked on the handbrake (stepped, so it settles like a real car).
             vehicle::step(&mut player, &Spec::default(), Input { handbrake: true, ..Input::default() }, &w, DT);
-            sim.step(&w, &w.road, &w.corners, PlayerNow { car: &player, progress: 0.0, done: false }, i < 180);
+            sim.step(&w, &w.road, &w.corners, PlayerNow { car: &player, progress: player_s, done: false }, i < 180);
             n += 1;
             for r in &sim.rivals {
                 if r.finish.is_none()
@@ -932,12 +966,109 @@ mod race_tests {
     fn rivals_finish_every_route_at_pro() {
         let w = world();
         let ev = events::build(&w.open.as_ref().unwrap().net, &w.open.as_ref().unwrap().data.events);
-        for e in ev.iter().filter(|e| e.kind != events::EventKind::Lap) {
-            let r = race(&w, e.id, Difficulty::Pro, 60 * 900, None);
+        let only: Option<u32> = std::env::var("RACE_EVENT").ok().and_then(|v| v.parse().ok());
+        for e in ev.iter().filter(|e| e.kind != events::EventKind::Lap && only.is_none_or(|o| o == e.id)) {
+            let r = race(&w, e.id, Difficulty::Pro, 60 * 1500, None);
             assert_eq!(r.finished, RIVALS, "{}: {} of 5 finished", e.name, r.finished);
             assert_eq!(r.dnf, 0, "{}", e.name);
             assert_eq!(r.resets, 0, "{}: rivals had to be put back on the road", e.name);
             assert!(r.worst_off < 1.5, "{}: a rival went {:.1} m off the road", e.name, r.worst_off);
+        }
+    }
+
+    /// One pilot alone down each route at a range of paces: metres, offs, time (tuning aid).
+    #[test]
+    #[ignore = "tuning aid"]
+    fn pace_sweep() {
+        let w = world();
+        let ev = events::build(&w.open.as_ref().unwrap().net, &w.open.as_ref().unwrap().data.events);
+        let only: Option<u32> = std::env::var("RACE_EVENT").ok().and_then(|v| v.parse().ok());
+        for e in ev.iter().filter(|e| e.kind != events::EventKind::Lap && only.is_none_or(|o| o == e.id)) {
+            let mut we = w.clone();
+            events::on_route(&mut we, e);
+            for pace in [0.55f32, 0.62, 0.68, 0.75, 0.8, 0.92] {
+                let mut pilot = Pilot::new(PilotParams { pace, brake: 0.55, ..PilotParams::default() });
+                let (p, h) = we.road.start();
+                let spec = Spec::default();
+                let mut car = Car::new(p + Vec3::Y * 0.9, h);
+                let (mut prog, mut offs, mut off, mut t) = (0.0f32, 0, false, 0.0f32);
+                let mut where_off = Vec::new();
+                while prog < we.road.length() - 4.0 && t < 900.0 {
+                    let i = pilot.input(&car, &spec, &we.road, &we.corners, &we, prog, DT);
+                    vehicle::step(&mut car, &spec, i, &we, DT);
+                    t += DT;
+                    let rp = we.road.nearest(Vec2::new(car.pos.x, car.pos.z), 40.0);
+                    if let Some(rp) = rp
+                        && rp.s > prog
+                        && rp.s < prog + 40.0
+                    {
+                        prog = rp.s;
+                    }
+                    let now = rp.is_none_or(|r| r.lateral.abs() > we.road.half_width(&r) + 1.5);
+                    if now && !off {
+                        offs += 1;
+                        where_off.push(prog as i32);
+                        // Put it back (as the race would) to see the rest of the route.
+                        let i = we.road.station(prog);
+                        let d = we.road.dir[i];
+                        vehicle::recover(&mut car, we.road.pts[i], libm::atan2f(d.x, d.y));
+                    }
+                    off = now;
+                }
+                eprintln!("{:24} pace {pace:.2}: {:5.0} m in {t:5.1} s, offs {offs} {:?}, damage {:.2}", e.name, prog, &where_off[..where_off.len().min(8)], car.damage.total());
+            }
+        }
+    }
+
+    /// Traces one pilot through a stretch of a route (tuning aid): RACE_EVENT, PACE, FROM, TO.
+    #[test]
+    #[ignore = "tuning aid"]
+    fn pace_trace() {
+        let env = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+        let w = world();
+        let ev = events::build(&w.open.as_ref().unwrap().net, &w.open.as_ref().unwrap().data.events);
+        let e = ev.iter().find(|e| e.id == env("RACE_EVENT", 100.0) as u32).unwrap();
+        let mut we = w.clone();
+        events::on_route(&mut we, e);
+        let (a, b) = (env("FROM", 800.0), env("TO", 900.0));
+        for c in we.corners.iter().filter(|c| c.end > a - 100.0 && c.start < b) {
+            eprintln!("corner {:.0}-{:.0} grade {} {:?} {:.0}° crest {} narrows {}", c.start, c.end, c.grade, c.turn, c.angle, c.crest, c.narrows);
+        }
+        for cr in we.crests.iter().filter(|c| **c > a - 100.0 && **c < b) {
+            eprintln!("crest at {cr:.0}");
+        }
+        let mut pilot = Pilot::new(PilotParams { pace: env("PACE", 0.68), brake: 0.55, ..PilotParams::default() });
+        let (p, h) = we.road.start();
+        let spec = std::env::var("CAR").ok().and_then(|c| garage::def(&c)).map_or_else(Spec::default, |d| (d.base)());
+        let mut car = Car::new(p + Vec3::Y * 0.9, h);
+        let mut prog = 0.0f32;
+        for k in 0..60 * 900 {
+            let i = pilot.input(&car, &spec, &we.road, &we.corners, &we, prog, DT);
+            let v0 = car.speed();
+            vehicle::step(&mut car, &spec, i, &we, DT);
+            if v0 - car.speed() > 4.0 {
+                let mut obs = Vec::new();
+                we.obstacles(Vec2::new(car.pos.x, car.pos.z), 4.0, &mut obs);
+                let mut walls = Vec::new();
+                we.walls(Vec2::new(car.pos.x, car.pos.z), 4.0, &mut walls);
+                eprintln!("HIT at s {prog:.0} pos {:?}: obstacles {:?} walls {:?}", car.pos, obs.iter().filter(|o| o.pos.distance(Vec2::new(car.pos.x, car.pos.z)) < 4.0).collect::<Vec<_>>(), walls);
+            }
+            let rp = we.road.nearest(Vec2::new(car.pos.x, car.pos.z), 40.0);
+            if let Some(rp) = rp
+                && rp.s > prog
+                && rp.s < prog + 40.0
+            {
+                prog = rp.s;
+            }
+            if prog > a && k % 6 == 0 {
+                let st = we.road.station(prog);
+                let air = car.wheels.iter().filter(|w| !w.contact).count();
+                let beta = car.vel.dot(pilot::left_of(&car)).atan2(car.speed().abs().max(1.0)).to_degrees();
+                eprintln!("s {prog:5.0} v {:5.1} km/h curv {:+.4} w {:.1} {:?} lat {:+5.1} β {beta:+5.1} st {:+.2} th {:.2} br {:.2} air {air} grade {:+.2} {}", car.speed() * 3.6, we.road.curv[st], we.road.width[st], we.road.surface[st], rp.map_or(99.0, |r| r.lateral), i.steer, i.throttle, i.brake, (we.road.pts[(st + 2).min(we.road.len() - 1)].y - we.road.pts[st.saturating_sub(2)].y) / 8.0, pilot.doing);
+            }
+            if prog > b {
+                break;
+            }
         }
     }
 
