@@ -283,6 +283,7 @@ fn sell(world: &mut World) {
 // ---------------------------------------------------------------- input and focus
 
 /// ←/→ on an Upgrades row previews the next or previous level.
+#[allow(clippy::too_many_arguments)]
 fn part_keys(screens: Option<Res<Screens>>, mut queue: ResMut<NavQueue>, focus: Res<Focus>, rows: Query<&PartRow>, garage: Option<Res<Garage>>, mut sel: ResMut<CarSel>, mut out: MessageWriter<RebuildScreen>, mut sound: MessageWriter<UiSound>) {
     if screens.and_then(|s| s.top()) != Some("upgrades") || queue.0.is_empty() {
         return;

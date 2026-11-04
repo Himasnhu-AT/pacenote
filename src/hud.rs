@@ -497,7 +497,7 @@ fn shift_pulse(
 }
 
 /// The Notes chip: in free roam, for 4 s after the balance changes ("12,400 N +750").
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn notes_chip(
     time: Res<Time<Real>>,
     stage: Res<StageWorld>,

@@ -383,3 +383,65 @@ race block → suppressed in races.
 **Verdict: NOT ASSESSED.** The spec is implementation-ready. Two dimensions have no criterion to
 check against: running `/ux-design accessibility` would make accessibility checkable, and GDD UI
 requirements would make GDD alignment checkable. Neither blocks implementation.
+
+## 9. Built (stream E, 4 Nov 2026)
+
+What shipped against this spec, the rulings it follows (`DECISIONS.md` U1-U7, E1-E12) and what
+is left for other streams.
+
+**Files.** `src/meta/hub.rs` (Service Park, top bar, route card, section jump, intro motion,
+menu sounds, drawn glyphs), `src/meta/showroom.rs` (3D diorama and framings),
+`src/meta/garage_ui.rs` (Garage, Upgrades, Dealership), `src/meta/confirm.rs` (confirm modal),
+`src/meta/screens.rs` (Events, Challenges, Logbook, settings with the top bar),
+`src/meta/mod.rs` (`Profile.last_pose`, `PendingStart`: Continue / Go now / Set route),
+`src/loading.rs` (briefing card, n/4, tips, region map and route), `src/hud.rs` (shift pulse,
+Notes chip), `src/meta/coach.rs` (no controls card in races), `src/audio/ui.rs` (`UiSound`),
+`src/prefs.rs` (`LAYOUT` only: camera rows to Camera; World, Camera, festival HUD rows).
+
+**Hub.** DRIVE: Continue, Events, Challenges, Play together · CAR: Garage, Upgrades,
+Dealership · YOU: Logbook, Settings, Quit · Credits in the footer. ↑/↓ wrap, Q/E and LB/RB
+jump sections, Esc does nothing, Quit asks first with focus on **Stay**. Every menu screen has
+the top bar: brand, active car chip (class plate + PI, name, number), Grade with 7 filled /
+hollow segments and xp in the grade, Notes (counts to a new balance over 0.6 s). Screen
+changes slide 24 px and fade 160 ms; a rebuild of the same screen (after a purchase) does not.
+
+**Showroom.** Gravel plinth in a canvas tent with contour rings on the floor, key / rim / fill
+lights. Orbit 9°/s with the car right of centre on the hub; 3/4 front for Garage and
+Dealership; low side turned toward the focused part on Upgrades. A veil (the 2D backdrop)
+covers it until the model is in and two frames have drawn, then fades 0.5 s.
+
+**Glyphs.** Barlow has no ✓ ✕ ★ ◆ ▶ ○ → or lock, so they are drawn once into small images
+(`hub::Glyph`, tinted per use): stars filled / hollow, kind glyphs, lock for "can't afford".
+
+**Car screens.** Upgrades rows `part:0..6` × Stock / Street / Gravel / Works (Turbo and
+Gearbox stop at Gravel); ←/→ preview, Enter fits (owned levels free, otherwise a confirm with
+the total of the missing levels); too few Notes shows a lock and red price and the dialog says
+"Need N more" with Buy disabled. Dealership rows `dealer:0..15`, stats compared with the car
+you drive. Garage: drive a car, paint (7 swatches; on the Saker paint 0 is its works livery),
+solid / metallic, number −/+, repair when damaged, sell (confirm; never the last car or the
+one you drive). All of it sends `CareerRequest`s; the screens rebuild when `Wallet` /
+`Garage` change.
+
+**Events.** Rows `ev:0..15`; details with top 3, mode Time trial / Race and rivals' level
+(stored in `screens::EventPick`), Go now (loads on the start line, the event running), Set
+route (free roam with the map waypoint set), Leaderboard.
+
+**Loading.** The real phase with "n/4", "taking longer than usual" after 20 s, briefing card
+(event: your best, record, mode; free roam: grade, Notes, events finished, route), tips
+shuffled per mode with device-named keys, every 7 s with a 300 ms crossfade, Left / Right or
+LB / RB step them. Open world: the painted region map in a frame, zoomed to the event route
+(dotted, drawn start → finish over 1.2 s, green start, chequered-red finish) or 1.4 km around
+the car ("you are here"); before it is painted, the contour backdrop. The screen fades in
+over 200 ms and dissolves into the stage over 250 ms after loading (visual only; the load
+logic is unchanged).
+
+**Accessibility.** Reduce motion: no orbit (3/4 front), no slides, count-ups or shift pulse,
+route shown at once, fades ≤ 150 ms. All menu text ≥ 18 design px (12 px at 720p). Nothing
+depends on colour alone (glyphs, filled / hollow, words).
+
+**Left for others.** F: apply `CareerRequest`s (the screens show the result), real
+`build_spec` (Upgrades' stat preview and PI change come from it), the other 7 cars, start a
+Race from `EventPick.mode`, career save of the parked pose (E reads `Profile.last_pose` until
+then). C / D: World and Camera rows (their keys are pre-placed in `LAYOUT`; unknown keys are
+ignored). Not built: the World / Camera side panels (sun-dial strip, chase still), HUD safe
+area setting, the loading ambience bed (audio).
