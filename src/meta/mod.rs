@@ -19,7 +19,7 @@ pub mod garage_ui;
 pub mod ghost;
 pub mod hub;
 pub mod netlink;
-pub(crate) mod screens;
+pub mod screens;
 pub mod showroom;
 pub mod stages;
 mod textfield;

@@ -263,6 +263,7 @@ pub fn on_menu(world: &mut World, id: &'static str) {
                 no: "Stay".into(),
                 on_yes: super::confirm::OnYes::Quit,
                 refused: None,
+                safe_default: true,
             },
         ),
         "confirm_yes" => super::confirm::yes(world),

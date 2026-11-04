@@ -196,12 +196,12 @@ fn fit(world: &mut World, p: usize) {
                 lines.push(format!("Includes the levels below it: {}.", below.join(", ")));
             }
             lines.push(format!("For the {name}. Owned levels refit for free."));
-            confirm::ask(world, Confirm { kicker: "Upgrades".into(), title: format!("Buy {what}?"), lines, yes: "Buy".into(), no: "Cancel".into(), on_yes: OnYes::Request(CareerRequest::FitPart { kind, level }), refused: None });
+            confirm::ask(world, Confirm { kicker: "Upgrades".into(), title: format!("Buy {what}?"), lines, yes: "Buy".into(), no: "Cancel".into(), on_yes: OnYes::Request(CareerRequest::FitPart { kind, level }), refused: None, safe_default: false });
             world.resource_mut::<CarSel>().preview[p] = None;
         }
         Err(r @ Refusal::Notes { .. }) => {
             let price = (car.bought.get(kind) + 1..=level).filter_map(|l| garage::part_price(kind, l, Class::of(garage::pi(&garage::spec_of(car))))).sum::<u32>();
-            confirm::ask(world, Confirm { kicker: "Upgrades".into(), title: format!("Buy {what}?"), lines: vec![format!("{} \u{b7} you have {}", notes(price), notes(w.balance))], yes: "Buy".into(), no: "Back".into(), on_yes: OnYes::Request(CareerRequest::FitPart { kind, level }), refused: Some(refusal_text(r)) });
+            confirm::ask(world, Confirm { kicker: "Upgrades".into(), title: format!("Buy {what}?"), lines: vec![format!("{} \u{b7} you have {}", notes(price), notes(w.balance))], yes: "Buy".into(), no: "Back".into(), on_yes: OnYes::Request(CareerRequest::FitPart { kind, level }), refused: Some(refusal_text(r)), safe_default: false });
             world.write_message(UiSound::Error);
         }
         Err(r) => {
@@ -225,13 +225,14 @@ fn buy_car(world: &mut World, k: usize) {
                 no: "Cancel".into(),
                 on_yes: OnYes::Request(CareerRequest::BuyCar(def.id.to_string())),
                 refused: None,
+                safe_default: false,
             },
         ),
         Err(r @ Refusal::Notes { .. }) => {
             world.write_message(UiSound::Error);
             confirm::ask(
                 world,
-                Confirm { kicker: "Dealership".into(), title: format!("Buy the {}?", def.name), lines: vec![format!("{} \u{b7} you have {}", notes(def.price), notes(w.balance))], yes: "Buy".into(), no: "Back".into(), on_yes: OnYes::Request(CareerRequest::BuyCar(def.id.to_string())), refused: Some(refusal_text(r)) },
+                Confirm { kicker: "Dealership".into(), title: format!("Buy the {}?", def.name), lines: vec![format!("{} \u{b7} you have {}", notes(def.price), notes(w.balance))], yes: "Buy".into(), no: "Back".into(), on_yes: OnYes::Request(CareerRequest::BuyCar(def.id.to_string())), refused: Some(refusal_text(r)), safe_default: false },
             );
         }
         Err(r) => {
@@ -274,6 +275,7 @@ fn sell(world: &mut World) {
             no: "Keep it".into(),
             on_yes: OnYes::Request(CareerRequest::SellCar(i)),
             refused,
+            safe_default: true,
         },
     );
 }

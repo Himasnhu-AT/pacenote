@@ -40,6 +40,8 @@ pub struct Confirm {
     pub on_yes: OnYes,
     /// Why the confirming button is off ("Need 3,200 N more"); `None` = it's on.
     pub refused: Option<String>,
+    /// Focus starts on the cancelling button (Quit: "Stay"). Purchases start on Buy.
+    pub safe_default: bool,
 }
 
 /// Opens the dialog over the current screen.
@@ -65,6 +67,21 @@ pub fn yes(world: &mut World) {
             info!("career request: {r:?}");
             world.write_message(r);
         }
+    }
+}
+
+/// Left / Right move between the dialog's two buttons (as Up / Down do).
+pub fn sideways(screens: Option<Res<Screens>>, mut q: ResMut<engine::ui::widgets::NavQueue>) {
+    use engine::ui::widgets::NavInput;
+    if screens.and_then(|s| s.top()) != Some(SCREEN) {
+        return;
+    }
+    for i in q.0.iter_mut() {
+        *i = match *i {
+            NavInput::Left => NavInput::Up,
+            NavInput::Right => NavInput::Down,
+            x => x,
+        };
     }
 }
 
@@ -129,8 +146,10 @@ pub fn build(world: &mut World, root: Entity) {
                 }
                 d.spawn(spacer(GAP_S));
                 d.spawn((Node { column_gap: px(GAP_M), ..default() }, Pickable::IGNORE)).with_children(|b| {
+                    // Focus starts on the lowest order.
+                    let (yes_order, no_order) = if c.safe_default || c.refused.is_some() { (2, 1) } else { (1, 2) };
                     if c.refused.is_none() {
-                        action_button(b, &t, &c.yes, MenuAction::Custom("confirm_yes"), Some(1), true, 300.0);
+                        action_button(b, &t, &c.yes, MenuAction::Custom("confirm_yes"), Some(yes_order), true, 300.0);
                     } else {
                         // Shown, but off: no action, not focusable.
                         b.spawn((
@@ -143,7 +162,7 @@ pub fn build(world: &mut World, root: Entity) {
                             x.spawn(text(c.yes.to_uppercase(), label(28.0), t.text_dim));
                         });
                     }
-                    cancel_button(b, &t, &c.no);
+                    cancel_button(b, &t, &c.no, no_order);
                 });
                 // Key hints inside the dialog (the screen underneath keeps its own footer).
                 d.spawn((Node { column_gap: px(GAP_L), margin: UiRect::top(px(GAP_XS)), ..default() }, Pickable::IGNORE)).with_children(|h| {
@@ -156,12 +175,12 @@ pub fn build(world: &mut World, root: Entity) {
     });
 }
 
-fn cancel_button(p: &mut ChildSpawnerCommands, t: &Theme, label_text: &str) {
+fn cancel_button(p: &mut ChildSpawnerCommands, t: &Theme, label_text: &str, order: u32) {
     p.spawn((
         Button,
         Hovered::default(),
         ActionButton(UiAction::Back),
-        Focusable { order: 2 },
+        Focusable { order },
         secondary_look(t),
         Node { width: px(220), height: px(64), justify_content: JustifyContent::Center, align_items: AlignItems::Center, border: UiRect::all(px(1)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
         BackgroundColor(Color::NONE),

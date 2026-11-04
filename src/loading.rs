@@ -267,6 +267,7 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
 
     let cat = world.resource::<crate::meta::stages::StageCatalog>();
     let info = cat.info(def.id).cloned();
+    let backdrop = cat.backdrop.clone();
     // Until the worker's map is in: stage 1's backdrop, else the catalog's road sketch.
     let (picture, is_map) = match (def.id == 1).then(|| cat.map.clone()).flatten() {
         Some(m) => (Some(m), true),
@@ -359,6 +360,13 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
                         Pickable::IGNORE,
                     ))
                     .with_children(|m| {
+                        // Until the region is painted: the contour backdrop, faint, and a note.
+                        if let Some(img) = backdrop.clone() {
+                            m.spawn((ImageNode { image: img, color: Color::srgba(1.0, 1.0, 1.0, 0.35), ..default() }, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE));
+                        }
+                        m.spawn((Node { position_type: PositionType::Absolute, left: px(0), right: px(0), bottom: px(GAP_M), justify_content: JustifyContent::Center, ..default() }, Pickable::IGNORE)).with_children(|n| {
+                            n.spawn(text("SURVEYING THE VALLEY", label(SIZE_LABEL), t.text_dim));
+                        });
                         m.spawn((RegionMap { built: None }, ImageNode { color: Color::NONE, ..default() }, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE));
                     });
                     r.spawn((Node { justify_content: JustifyContent::SpaceBetween, width: px(760), margin: UiRect::top(px(GAP_S)), ..default() }, Pickable::IGNORE)).with_children(|cap| {

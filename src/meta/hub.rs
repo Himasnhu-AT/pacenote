@@ -47,7 +47,7 @@ impl Plugin for HubPlugin {
             .init_resource::<NotesTicker>()
             .init_resource::<HubCards>()
             .init_resource::<BuiltScreen>()
-            .add_systems(Update, hub_nav.before(engine::ui::UiSet::Input).run_if(engine::ui::ui_visible))
+            .add_systems(Update, (hub_nav, super::confirm::sideways).before(engine::ui::UiSet::Input).run_if(engine::ui::ui_visible))
             .add_systems(Update, ui_sounds.after(engine::ui::UiSet::Screens))
             .add_systems(Update, (info_card, animate_intro, tick_notes, refresh_on_career_change).after(engine::ui::UiSet::Paint));
     }

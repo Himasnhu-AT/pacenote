@@ -208,3 +208,128 @@ fn assists_apply_before_a_run_never_during_it() {
     s.step(5);
     assert!(!s.world().resource::<CarSpec>().0.abs, "never changes mid-run");
 }
+
+// ---------------------------------------------------------------- festival menus (stream E)
+
+use engine::ui::prelude::{ScreenRequest, Screens};
+use pacenote::career::CareerRequest;
+use pacenote::career::garage::UpgradeKind;
+use pacenote::meta::{PendingStart, Profile};
+
+fn top(w: &World) -> Option<&'static str> {
+    w.resource::<Screens>().top()
+}
+
+/// Every screen of the Service Park is reachable from the menu and builds (headless runs
+/// don't draw screens, so each builder is also called by hand).
+#[test]
+fn every_service_park_screen_is_reachable_and_builds() {
+    let mut s = scenario(true);
+    s.wait_until(30, |w| state(w) == AppState::MainMenu).expect("main menu");
+    let reg = s.world().resource::<engine::ui::screens::ScreenRegistry>().clone();
+    for id in ["main", "events", "challenges", "logbook", "garage", "upgrades", "dealer", "settings", "together", "credits", "boards"] {
+        if id != "main" {
+            s.world_mut().write_message(ScreenRequest::Push(id));
+            s.step(2);
+            assert_eq!(top(s.world()), Some(id), "{id} opens");
+        }
+        let build = reg.get(id).unwrap_or_else(|| panic!("{id} registered"));
+        let root = s.world_mut().spawn(Node::default()).id();
+        build(s.world_mut(), root);
+        s.world_mut().flush();
+        assert!(s.world().get::<Children>(root).is_some_and(|c| !c.is_empty()), "{id} built something");
+        s.world_mut().entity_mut(root).despawn();
+        if id != "main" {
+            s.world_mut().write_message(ScreenRequest::Pop);
+            s.step(2);
+            assert_eq!(top(s.world()), Some("main"), "back from {id}");
+        }
+    }
+    // Quit asks first; Esc stays.
+    s.world_mut().write_message(MenuEvent("quit_ask"));
+    s.step(2);
+    assert_eq!(top(s.world()), Some("confirm"));
+    let build = reg.get("confirm").expect("confirm registered");
+    let root = s.world_mut().spawn(Node::default()).id();
+    build(s.world_mut(), root);
+    s.world_mut().flush();
+    s.world_mut().entity_mut(root).despawn();
+    s.world_mut().write_message(ScreenRequest::Pop);
+    s.step(2);
+    assert_eq!(top(s.world()), Some("main"));
+    assert_eq!(state(s.world()), AppState::MainMenu, "still running");
+}
+
+fn requests(s: &mut Scenario) -> Vec<CareerRequest> {
+    s.world_mut().resource_mut::<Messages<CareerRequest>>().drain().collect()
+}
+
+/// Upgrades: a level asks first and then sends the request (F applies it); with too few
+/// Notes the dialog says how many are missing and nothing is sent.
+#[test]
+fn buying_a_part_asks_first_and_too_few_notes_is_refused() {
+    let mut s = scenario(true);
+    s.wait_until(30, |w| state(w) == AppState::MainMenu).expect("main menu");
+    s.world_mut().write_message(ScreenRequest::Push("upgrades"));
+    s.step(2);
+    // Brakes, Street: 1,500 N of the 12,000 a fresh career has.
+    s.world_mut().resource_mut::<pacenote::meta::garage_ui::CarSel>().preview[3] = Some(1);
+    s.world_mut().write_message(MenuEvent("part:3"));
+    s.step(2);
+    assert_eq!(top(s.world()), Some("confirm"));
+    let c = s.world().resource::<pacenote::meta::confirm::Confirm>().clone();
+    assert!(c.refused.is_none() && c.title.contains("Street brakes"), "{c:?}");
+    requests(&mut s);
+    s.world_mut().write_message(MenuEvent("confirm_yes"));
+    s.step(1);
+    assert_eq!(requests(&mut s), vec![CareerRequest::FitPart { kind: UpgradeKind::Brakes, level: 1 }]);
+    s.step(2);
+    assert_eq!(top(s.world()), Some("upgrades"), "the dialog closed");
+
+    // Engine Works with 100 N: refused, with the shortfall.
+    s.world_mut().resource_mut::<pacenote::career::wallet::Wallet>().balance = 100;
+    s.world_mut().resource_mut::<pacenote::meta::garage_ui::CarSel>().preview[0] = Some(3);
+    s.world_mut().write_message(MenuEvent("part:0"));
+    s.step(2);
+    let c = s.world().resource::<pacenote::meta::confirm::Confirm>().clone();
+    assert_eq!(c.refused.as_deref(), Some("Need 23,900 N more"), "3,000 + 7,000 + 14,000 − 100");
+    s.world_mut().write_message(MenuEvent("confirm_yes"));
+    s.step(1);
+    assert!(requests(&mut s).is_empty(), "nothing bought");
+}
+
+/// Continue starts the open world where the car was parked; Go now starts an event on its
+/// start line.
+#[test]
+fn continue_restores_the_parked_pose_and_go_now_starts_on_the_line() {
+    let mut s = scenario(true);
+    s.wait_until(30, |w| state(w) == AppState::MainMenu).expect("main menu");
+    // First drive: from the service park (no pose yet).
+    s.world_mut().write_message(MenuEvent("continue"));
+    s.wait_until(3000, |w| w.get_resource::<StageWorld>().is_some_and(|s| s.open.is_some())).expect("the open world loads");
+    s.wait_until(60, |w| !w.resource::<Profile>().events.is_empty()).expect("events noted");
+    let home = s.query::<&DrivenCar, _>(|mut q| q.next().map(|c| c.car.pos)).expect("a car");
+    // Park somewhere else: 60 m east of home, facing north.
+    let spot = [home.x + 60.0, home.y, home.z, 0.0];
+    s.world_mut().write_message(MenuEvent("menu"));
+    s.wait_until(60, |w| state(w) == AppState::MainMenu).expect("menu");
+    s.world_mut().resource_mut::<Profile>().last_pose = Some(spot);
+    s.world_mut().write_message(MenuEvent("continue"));
+    s.wait_until(3000, |w| w.get_resource::<StageWorld>().is_some_and(|s| s.open.is_some()) && !w.contains_resource::<PendingStart>()).expect("loads and parks");
+    s.step(2);
+    let pos = s.query::<&DrivenCar, _>(|mut q| q.next().map(|c| c.car.pos)).expect("a car");
+    assert!(Vec2::new(pos.x - spot[0], pos.z - spot[2]).length() < 1.5, "parked where it was left: {pos} vs {spot:?}");
+
+    // Go now: the event's own start line, the event running.
+    let ev = s.world().resource::<Profile>().events[0].clone();
+    s.world_mut().write_message(MenuEvent("menu"));
+    s.wait_until(60, |w| state(w) == AppState::MainMenu).expect("menu");
+    s.world_mut().resource_mut::<pacenote::meta::screens::EventPick>().id = Some(ev.id);
+    s.world_mut().write_message(MenuEvent("go_now"));
+    s.wait_until(3000, |w| w.get_resource::<StageWorld>().is_some_and(|s| s.event.as_ref().is_some_and(|e| e.id == ev.id))).expect("the event starts");
+    s.step(2);
+    let start = s.world().resource::<StageWorld>().road.start().0;
+    let pos = s.query::<&DrivenCar, _>(|mut q| q.next().map(|c| c.car.pos)).expect("a car");
+    assert!(Vec2::new(pos.x - start.x, pos.z - start.z).length() < 3.0, "on the start line: {pos} vs {start}");
+    assert!(s.world().resource::<StageRun>().countdown > 0.0, "countdown before the start");
+}
