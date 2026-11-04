@@ -31,6 +31,15 @@ dev = ["engine/editor", "engine/devtools", "engine/devkit", "telemetry"]
 telemetry = ["engine/trace", "dep:ashlar-trace"]
 # The free demo: three stages, wishlist prompts (src/demo.rs). PACENOTE_STEAM_URL at build time.
 demo = []
+# No-op tags, one per parallel worktree: each gives the pacenote crate its own artifact hash in the
+# shared target dir (cargo ignores the checkout path), so worktrees stop running each other's builds.
+wt_world = []
+wt_roadside = []
+wt_look = []
+wt_carfeel = []
+wt_ui = []
+wt_style = []
+wt_career = []
 
 [profile.dev]
 opt-level = 1
