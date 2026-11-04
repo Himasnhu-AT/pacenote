@@ -1,10 +1,12 @@
-//! Every Pacenote screen on the engine UI kit: main menu (with the stage contour map behind
-//! it, a crew card and a credits link), play together (host / join / crew names), stage
-//! select (with each stage's leaderboard), join, leaderboards, results, credits, the pause
-//! menu header, and the game's settings rows.
+//! Every Pacenote screen on the engine UI kit: the Service Park hub ([`super::hub`]), Events,
+//! Challenges, Logbook, play together (host / join / crew names), stage select (with each
+//! stage's leaderboard), join, leaderboards, results, credits, the pause menu header, and the
+//! game's settings rows. The car screens are in [`super::garage_ui`], the confirm dialog in
+//! [`super::confirm`].
 //!
 //! Buttons send `MenuEvent`s with the ids below; [`on_menu`] is the one place they're
-//! handled.
+//! handled. Every menu screen shows the shared top bar ([`super::hub::top_bar`]): the Notes
+//! balance and the active car.
 
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
@@ -16,6 +18,7 @@ use bevy::ui_widgets::Button;
 use engine::ui::widgets::{ActionButton, Focus, Focusable, KeepColor, LookBg, ScrollList, nav_look, primary_look, secondary_look};
 
 use super::board::{self, Record};
+use super::hub::{self, Glyph, Glyphs, TOP_BAR_H, glyph};
 use super::stages::{self, StageCatalog};
 use super::textfield::{self, TextKey, text_field};
 use super::{Boards, LastResult, Profile, RunMode, StageNow, netlink};
@@ -92,14 +95,11 @@ impl Plugin for ScreensPlugin {
             .init_resource::<StageSel>()
             .insert_resource(BoardSel(1))
             .init_resource::<NetNote>()
+            .init_resource::<EventPick>()
             .insert_resource(MenuConfig {
                 eyebrow: "Open-world rally",
-                main_items: main_items(vec![
-                    ("Play", MenuAction::Custom("select")),
-                    ("Play together", MenuAction::Open("together")),
-                    ("Settings", MenuAction::Settings),
-                    ("Quit", MenuAction::Quit),
-                ]),
+                // The hub builds its own list (`hub::items`); this is the engine's fallback.
+                main_items: vec![("Continue", MenuAction::Custom("continue")), ("Settings", MenuAction::Settings), ("Quit", MenuAction::Custom("quit_ask"))],
                 pause_items: vec![
                     ("Resume", MenuAction::Resume),
                     ("Restart stage", MenuAction::Custom("restart")),
@@ -108,11 +108,16 @@ impl Plugin for ScreensPlugin {
                     ("Quit to menu", MenuAction::MainMenu),
                 ],
                 pause_note: "Restarting or quitting drops this run.",
-                main_panel: Some(crew_card),
+                main_panel: None,
                 pause_header: Some(pause_header),
                 pause_eyebrow: Some(pause_eyebrow),
             })
-            .register_screen("main", build_main)
+            .register_screen("main", hub::build)
+            .register_screen("events", build_events)
+            .register_screen("challenges", build_challenges)
+            .register_screen("logbook", build_logbook)
+            .register_screen(super::confirm::SCREEN, super::confirm::build)
+            .register_screen("settings", build_settings)
             .register_screen("pause", build_pause)
             .register_screen("stages", build_stages)
             .register_screen("together", build_together)
@@ -121,18 +126,10 @@ impl Plugin for ScreensPlugin {
             .register_screen("credits", build_credits)
             .register_sticky_screen("results", build_results)
             .settings_defaults::<Profile>()
-            .add_systems(Update, (keep_stage_focus, stage_details, join_status, pulse, camera_hint).chain().after(engine::ui::UiSet::Paint))
+            .add_systems(Update, (keep_stage_focus, stage_details, track_event, join_status, pulse, camera_hint).chain().after(engine::ui::UiSet::Paint))
             .add_systems(Update, stages_hotkeys.before(engine::ui::UiSet::Screens));
         register_settings(app);
     }
-}
-
-/// The demo adds the store button ("Wishlist on Steam" / "Follow on itch.io") under "Play".
-fn main_items(mut v: Vec<(&'static str, MenuAction)>) -> Vec<(&'static str, MenuAction)> {
-    if crate::demo::ACTIVE {
-        v.insert(1, (crate::demo::store_button(), MenuAction::Custom("wishlist")));
-    }
-    v
 }
 
 fn register_settings(app: &mut App) {
@@ -190,6 +187,23 @@ fn register_settings(app: &mut App) {
 
 /// Handles one menu event (from any screen).
 pub fn on_menu(world: &mut World, id: &'static str) {
+    if super::garage_ui::on_menu(world, id) {
+        return;
+    }
+    if let Some(k) = id.strip_prefix("ev:").and_then(|n| n.parse::<usize>().ok()) {
+        if let Some(e) = world.resource::<Profile>().events.get(k).cloned() {
+            world.resource_mut::<EventPick>().id = Some(e.id);
+            go_now(world);
+        }
+        return;
+    }
+    if let Some(k) = id.strip_prefix("diff:").and_then(|n| n.parse::<usize>().ok()) {
+        if let Some(d) = DIFFICULTIES.get(k) {
+            world.resource_mut::<EventPick>().mode = EventMode::Race(*d);
+            world.write_message(RebuildScreen);
+        }
+        return;
+    }
     if let Some(n) = id.strip_prefix("stage:").and_then(|n| n.parse::<u32>().ok()) {
         let mode = world.resource::<StageSel>().mode;
         super::start_stage(world, n, mode);
@@ -235,6 +249,53 @@ pub fn on_menu(world: &mut World, id: &'static str) {
         return;
     }
     match id {
+        "continue" => {
+            let pose = world.resource::<Profile>().last_pose;
+            super::start_open(world, pose.map(super::PendingStart::Pose));
+        }
+        "quit_ask" => super::confirm::ask(
+            world,
+            super::confirm::Confirm {
+                kicker: "Pacenote".into(),
+                title: "Quit to desktop?".into(),
+                lines: vec!["Notes and progress are saved as they change: nothing is lost.".into()],
+                yes: "Quit".into(),
+                no: "Stay".into(),
+                on_yes: super::confirm::OnYes::Quit,
+                refused: None,
+            },
+        ),
+        "confirm_yes" => super::confirm::yes(world),
+        "go_now" => go_now(world),
+        "set_route" => {
+            if let Some(id) = world.resource::<EventPick>().id {
+                super::start_open(world, Some(super::PendingStart::Route(id)));
+            }
+        }
+        "mode_tt" => {
+            world.resource_mut::<EventPick>().mode = EventMode::TimeTrial;
+            world.write_message(RebuildScreen);
+        }
+        "mode_race" => {
+            let kind = picked_event(world).map(|e| e.kind);
+            if kind.as_deref() == Some("Lap") {
+                world.write_message(crate::audio::ui::UiSound::Error);
+                world.write_message(Toast::new("Laps are time trials").body("Race rivals in the rallies and sprints."));
+            } else {
+                world.resource_mut::<EventPick>().mode = EventMode::Race(Difficulty::Pro);
+                world.write_message(RebuildScreen);
+            }
+        }
+        "event_board" => {
+            if let Some(id) = world.resource::<EventPick>().id {
+                world.insert_resource(BoardSel(id));
+                world.write_message(ScreenRequest::Push("boards"));
+            }
+        }
+        "classic" => {
+            *world.resource_mut::<StageSel>() = StageSel { mode: RunMode::Practice, shown: None, keep: None };
+            world.write_message(ScreenRequest::Push("stages"));
+        }
         "practice" => {
             let n = world.resource::<Profile>().last_stage;
             super::start_stage(world, n, RunMode::Practice);
@@ -461,46 +522,6 @@ fn my_team(p: &Profile, mode: RunMode) -> String {
 
 // ---------------------------------------------------------------- main
 
-fn build_main(world: &mut World, root: Entity) {
-    // Backdrop: faint contour lines of no stage in particular (no road, no start or finish).
-    let backdrop = world.resource::<StageCatalog>().backdrop.clone();
-    if let Some(img) = backdrop {
-        world.commands().entity(root).with_children(|p| {
-            p.spawn((
-                ImageNode { image: img, color: Color::srgba(1.0, 1.0, 1.0, 0.6), ..default() },
-                Node { position_type: PositionType::Absolute, right: px(-220), top: percent(-30), height: percent(160), aspect_ratio: Some(1.0), ..default() },
-                Pickable::IGNORE,
-            ));
-        });
-    }
-    engine::ui::menus::build_main(world, root);
-    // Credits: a small link bottom right (below the crew card), not a main item.
-    let t = world.resource::<Theme>().clone();
-    world.commands().entity(root).with_children(|p| {
-        p.spawn((Node { position_type: PositionType::Absolute, right: px(EDGE), bottom: px(10), ..default() }, Pickable::IGNORE)).with_children(|r| {
-            link_button(r, &t, "Credits", MenuAction::Open("credits"), 20);
-        });
-    });
-}
-
-/// A small outlined text button (footer links).
-fn link_button(p: &mut ChildSpawnerCommands, t: &Theme, label_text: &str, action: MenuAction, order: u32) {
-    p.spawn((
-        Button,
-        // Bevy 0.20: hover state for the engine's hot look (no more Interaction).
-        Hovered::default(),
-        ActionButton(action.into()),
-        Focusable { order },
-        secondary_look(t),
-        Node { height: px(30), padding: UiRect::horizontal(px(14)), align_items: AlignItems::Center, border: UiRect::all(px(1)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
-        BackgroundColor(Color::NONE),
-        BorderColor::all(t.line),
-    ))
-    .with_children(|b| {
-        b.spawn(text(label_text.to_uppercase(), label(SIZE_TINY + 1.0), t.text_muted));
-    });
-}
-
 /// The colour of an event kind ("Rally", "Sprint", "Lap"), as its marker in the world.
 pub(crate) fn kind_color(kind: &str) -> Color {
     match kind {
@@ -516,52 +537,363 @@ fn event_best(b: &board::Board, team: &str, id: u32) -> Option<f32> {
     b.records.iter().filter(|r| r.stage == id && r.team() == team && r.handling == hz).map(|r| r.total()).min_by(f32::total_cmp)
 }
 
-/// Main menu, bottom right: the open world's events and the driver's best time on each
-/// (the event list is remembered from the last drive, `Profile::events`).
-fn crew_card(world: &mut World, slot: Entity) {
+
+// ---------------------------------------------------------------- events
+
+/// Menu ids of the event rows.
+const EVENT_IDS: [&str; 16] = ["ev:0", "ev:1", "ev:2", "ev:3", "ev:4", "ev:5", "ev:6", "ev:7", "ev:8", "ev:9", "ev:10", "ev:11", "ev:12", "ev:13", "ev:14", "ev:15"];
+const DIFF_IDS: [&str; 4] = ["diff:0", "diff:1", "diff:2", "diff:3"];
+use crate::career::racers::{Difficulty, EventMode};
+const DIFFICULTIES: [Difficulty; 4] = [Difficulty::Rookie, Difficulty::Pro, Difficulty::Ace, Difficulty::Legend];
+
+fn difficulty_name(d: Difficulty) -> &'static str {
+    match d {
+        Difficulty::Rookie => "Rookie",
+        Difficulty::Pro => "Pro",
+        Difficulty::Ace => "Ace",
+        Difficulty::Legend => "Legend",
+    }
+}
+
+/// The event picked on the Events screen and how to drive it. Go now / Set route load the
+/// open world with it; `mode` is for the event start (F reads it when Race mode lands:
+/// DECISIONS U2).
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct EventPick {
+    pub id: Option<u32>,
+    pub mode: EventMode,
+}
+
+#[derive(Component, Clone, Copy)]
+struct EventRow(u32);
+
+fn picked_event(world: &World) -> Option<super::EventSeen> {
+    let id = world.resource::<EventPick>().id?;
+    world.resource::<Profile>().events.iter().find(|e| e.id == id).cloned()
+}
+
+/// Loads the open world with the picked event on its start line.
+fn go_now(world: &mut World) {
+    let Some(id) = world.resource::<EventPick>().id else { return };
+    let lap = picked_event(world).is_some_and(|e| e.kind == "Lap");
+    if lap {
+        world.resource_mut::<EventPick>().mode = EventMode::TimeTrial;
+    }
+    super::start_open(world, Some(super::PendingStart::Event(id)));
+}
+
+/// The glyph of an event kind (shape as well as colour).
+pub fn kind_glyph(kind: &str) -> Glyph {
+    match kind {
+        "Rally" => Glyph::Diamond,
+        "Sprint" => Glyph::Play,
+        _ => Glyph::Ring,
+    }
+}
+
+fn build_events(world: &mut World, root: Entity) {
     let t = world.resource::<Theme>().clone();
+    let gl = world.get_resource::<Glyphs>().cloned().unwrap_or_default();
     let p = world.resource::<Profile>().clone();
     let b = world.resource::<Boards>().0.clone();
     let me = board::team_key(&p.driver_name, "");
-    let rows: Vec<(super::EventSeen, Option<f32>)> = p.events.iter().map(|e| (e.clone(), event_best(&b, &me, e.id))).collect();
-    let done = rows.iter().filter(|(_, best)| best.is_some()).count();
-    // The engine's slot is 380 px wide; event names want a little more.
-    if let Some(mut n) = world.get_mut::<Node>(slot) {
-        n.width = px(460);
+    if world.resource::<EventPick>().id.is_none_or(|id| !p.events.iter().any(|e| e.id == id)) {
+        world.resource_mut::<EventPick>().id = p.events.first().map(|e| e.id);
     }
-    world.commands().entity(slot).with_children(|s| {
-        s.spawn((
-            Node { width: percent(100), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), padding: UiRect::all(px(22)), border: UiRect::left(px(3)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
-            BackgroundColor(t.panel),
-            BorderColor::all(t.accent),
+    let pick = *world.resource::<EventPick>();
+    let rows: Vec<(super::EventSeen, Option<f32>)> = p.events.iter().map(|e| (e.clone(), event_best(&b, &me, e.id))).collect();
+    let hints = engine::ui::device_hints(world, &[("W / S", "Event"), ("Enter", "Go now"), ("Esc", "Back")], &[("D-pad", "Event"), ("A", "Go now"), ("B", "Back")]);
+    let intro = hub::intro(world, root);
+    world.commands().entity(root).with_children(|r| {
+        menu_backdrop(r, &t, 0.35, 1.0);
+        let mut column = r.spawn((
+            Node { position_type: PositionType::Absolute, left: px(EDGE), top: px(TOP_BAR_H + 40.0), bottom: px(96), width: px(700), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), ..default() },
+            UiTransform::default(),
             Pickable::IGNORE,
-        ))
-            .with_children(|c| {
-                c.spawn((Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Baseline, ..default() }, Pickable::IGNORE)).with_children(|h| {
-                    h.spawn(eyebrow("Events", t.accent));
-                    if !rows.is_empty() {
-                        h.spawn(text(format!("{done} / {} finished", rows.len()), label(SIZE_LABEL), if done > 0 { t.text } else { t.text_muted }));
-                    }
+        ));
+        if let Some(i) = intro {
+            column.insert(i);
+        }
+        column.with_children(|c| {
+            eyebrow_bar(c, "Drive \u{b7} Events", t.accent);
+            c.spawn(title("Events", SIZE_H1, t.text));
+            let done = rows.iter().filter(|(_, best)| best.is_some()).count();
+            if rows.is_empty() {
+                c.spawn((text("Events appear as you discover them in the valley. Continue to start driving.", body(SIZE_BODY), t.text_muted), Node { max_width: px(620), ..default() }));
+                c.spawn(spacer(GAP_M));
+                action_button(c, &t, "Continue", MenuAction::Custom("continue"), Some(1), true, 300.0);
+            } else {
+                c.spawn(text(format!("{done} of {} finished \u{b7} closed roads, the clock and the co-driver", rows.len()), body(SIZE_BODY - 2.0), t.text_muted));
+            }
+            c.spawn(spacer(GAP_XS));
+            for (k, (e, best)) in rows.iter().enumerate().take(EVENT_IDS.len()) {
+                c.spawn((
+                    Button,
+                    Hovered::default(),
+                    ActionButton(MenuAction::Custom(EVENT_IDS[k]).into()),
+                    Focusable { order: 1 + k as u32 },
+                    EventRow(e.id),
+                    nav_look(&t),
+                    Node { width: px(700), height: px(58), align_items: AlignItems::Center, padding: UiRect::horizontal(px(18)), column_gap: px(GAP_M), margin: UiRect::left(px(-18)), ..default() },
+                    BackgroundColor(Color::NONE),
+                ))
+                .with_children(|row| {
+                    row.spawn((LookBg([Color::NONE, t.accent, Color::NONE]), Node { position_type: PositionType::Absolute, left: px(0), top: px(10), bottom: px(10), width: px(3), ..default() }, BackgroundColor(Color::NONE), Pickable::IGNORE));
+                    glyph(row, &gl, kind_glyph(&e.kind), 20.0, kind_color(&e.kind));
+                    row.spawn((Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|n| {
+                        n.spawn((text(e.name.to_uppercase(), label(27.0), t.text_muted), TextLayout::no_wrap()));
+                        n.spawn((text(format!("{} \u{b7} {:.1} km", e.kind, e.km), body(15.0), t.text_dim), KeepColor));
+                    });
+                    match best {
+                        Some(s) => row.spawn((text(board::clock(*s), body_bold(20.0), t.text), KeepColor)),
+                        None => row.spawn((text("no time yet", body(16.0), t.text_dim), KeepColor)),
+                    };
                 });
-                c.spawn(rule(t.line));
-                if rows.is_empty() {
-                    c.spawn((text("Events wait around the map. Drive into a glowing column and stop inside it to start one.", body(SIZE_BODY - 2.0), t.text_muted), Node { max_width: px(410), ..default() }));
-                }
-                for (e, best) in &rows {
-                    c.spawn((Node { column_gap: px(GAP_S + 4.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
-                        r.spawn((Node { width: px(3), height: px(18), ..default() }, BackgroundColor(kind_color(&e.kind)), Pickable::IGNORE));
-                        r.spawn((Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|n| {
-                            n.spawn((text(e.name.to_uppercase(), label(SIZE_LABEL + 4.0), t.text), TextLayout::no_wrap()));
-                            n.spawn(text(format!("{} \u{b7} {:.1} km", e.kind, e.km), body(SIZE_SMALL - 1.0), t.text_muted));
+            }
+        });
+        // Details of the picked event.
+        if let Some(e) = p.events.iter().find(|e| Some(e.id) == pick.id) {
+            let hash_rows: Vec<&Record> = b.records.iter().filter(|r| r.stage == e.id).collect();
+            let mut top: Vec<&Record> = hash_rows.clone();
+            top.sort_by(|a, b| a.total().total_cmp(&b.total()));
+            let best = event_best(&b, &me, e.id);
+            let lap = e.kind == "Lap";
+            r.spawn((Node { position_type: PositionType::Absolute, right: px(EDGE), top: px(TOP_BAR_H + 40.0), width: px(520), flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|col| {
+                col.spawn(panel(&t, 26.0, GAP_S + 2.0)).with_children(|c| {
+                    c.spawn((Node { column_gap: px(GAP_S), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|k| {
+                        glyph(k, &gl, kind_glyph(&e.kind), 16.0, kind_color(&e.kind));
+                        k.spawn(eyebrow(&e.kind, kind_color(&e.kind)));
+                    });
+                    c.spawn(text(e.name.to_uppercase(), display(48.0), t.text));
+                    c.spawn((Node { column_gap: px(GAP_L), ..default() }, Pickable::IGNORE)).with_children(|r| {
+                        stat(r, &t, format!("{:.1}", e.km), "km", t.text, 36.0);
+                        stat(r, &t, best.map_or("\u{2014}".into(), board::clock), "Your best", if best.is_some() { t.text } else { t.text_dim }, 36.0);
+                    });
+                    c.spawn(rule(t.line));
+                    c.spawn(text("TOP TIMES", label(16.0), t.text_dim));
+                    if top.is_empty() {
+                        c.spawn(text("No times yet: be the first.", body(SIZE_BODY - 2.0), t.text_muted));
+                    }
+                    for (k, rec) in top.iter().take(3).enumerate() {
+                        c.spawn((Node { justify_content: JustifyContent::SpaceBetween, ..default() }, Pickable::IGNORE)).with_children(|l| {
+                            l.spawn(text(format!("{}  {}", k + 1, rec.team_label()), body(SIZE_BODY - 1.0), if k == 0 { t.accent } else { t.text_muted }));
+                            l.spawn(text(board::clock(rec.total()), body_bold(SIZE_BODY - 1.0), if k == 0 { t.accent } else { t.text }));
                         });
-                        match best {
-                            Some(s) => r.spawn(text(board::clock(*s), body_bold(SIZE_BODY), t.text)),
-                            None => r.spawn(text("\u{2014}", body(SIZE_BODY), t.text_dim)),
-                        };
+                    }
+                    c.spawn(rule(t.line));
+                    // How to drive it: Time Trial, or a Race against rivals at a difficulty.
+                    c.spawn((Node { column_gap: px(GAP_XS + 2.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|m| {
+                        m.spawn((text("MODE", label(SIZE_LABEL), t.text_dim), Node { width: px(96), ..default() }));
+                        chip(m, &t, "Time trial", "mode_tt", pick.mode == EventMode::TimeTrial, false);
+                        if !lap {
+                            chip(m, &t, "Race", "mode_race", matches!(pick.mode, EventMode::Race(_)), false);
+                        }
+                    });
+                    if let EventMode::Race(d) = pick.mode {
+                        c.spawn((Node { column_gap: px(GAP_XS + 2.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|m| {
+                            m.spawn((text("RIVALS", label(SIZE_LABEL), t.text_dim), Node { width: px(96), ..default() }));
+                            for (k, x) in DIFFICULTIES.iter().enumerate() {
+                                chip(m, &t, difficulty_name(*x), DIFF_IDS[k], d == *x, false);
+                            }
+                        });
+                        c.spawn(text("Five rivals on the road with you. Race runs set no board time.", body(SIZE_SMALL), t.text_dim));
+                    } else {
+                        c.spawn(text(if lap { "Laps are solo: your ghost and the board." } else { "Solo against the clock, your ghost and the board." }, body(SIZE_SMALL), t.text_dim));
+                    }
+                    c.spawn(spacer(GAP_S));
+                    c.spawn((Node { column_gap: px(GAP_S), ..default() }, Pickable::IGNORE)).with_children(|b| {
+                        action_button(b, &t, "Go now", MenuAction::Custom("go_now"), Some(30), true, 230.0);
+                        action_button(b, &t, "Set route", MenuAction::Custom("set_route"), Some(31), false, 210.0);
+                    });
+                    action_button(c, &t, "Leaderboard", MenuAction::Custom("event_board"), Some(32), false, 230.0);
+                    c.spawn(text("Go now puts you on the start line. Set route drops you in free roam with the way there on the map.", body(SIZE_SMALL), t.text_dim));
+                });
+            });
+        }
+        spawn_footer(r, &t, &hints);
+    });
+    world.flush();
+    hub::top_bar(world, root);
+}
+
+/// The focused event row picks the event the panel shows.
+fn track_event(world: &mut World) {
+    if world.get_resource::<Screens>().and_then(|s| s.top()) != Some("events") {
+        return;
+    }
+    let Some(id) = world.get_resource::<Focus>().and_then(|f| f.0).and_then(|e| world.get::<EventRow>(e)).map(|r| r.0) else { return };
+    if world.resource::<EventPick>().id != Some(id) {
+        world.resource_mut::<EventPick>().id = Some(id);
+        world.write_message(RebuildScreen);
+    }
+}
+
+// ---------------------------------------------------------------- challenges
+
+/// The challenges as F stores them (`open::challenges::CHALLENGES_FILE`); empty until the
+/// file exists.
+pub fn challenges(world: &World) -> Vec<crate::open::challenges::ChallengeDef> {
+    let Some(dir) = world.get_resource::<engine::paths::AssetsDir>() else { return Vec::new() };
+    let path = dir.0.join(crate::open::challenges::CHALLENGES_FILE);
+    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+    ron::from_str(&text).unwrap_or_default()
+}
+
+pub fn challenge_count(world: &World) -> usize {
+    challenges(world).len()
+}
+
+fn build_challenges(world: &mut World, root: Entity) {
+    use crate::open::challenges::ChallengeKind;
+    let t = world.resource::<Theme>().clone();
+    let gl = world.get_resource::<Glyphs>().cloned().unwrap_or_default();
+    let list = challenges(world);
+    let kinds: [(ChallengeKind, &str, &str, &str); 4] = [
+        (ChallengeKind::RadarPost, "Radar Post", "Your speed at the gate line.", "km/h"),
+        (ChallengeKind::PaceSection, "Pace Section", "Your average speed between the start and end gates.", "km/h"),
+        (ChallengeKind::SlideSection, "Slide Section", "Slide and switch between the gates: the angle and speed of every slide count.", "points"),
+        (ChallengeKind::YumpBoard, "Yump Board", "How far you fly from the crest.", "m"),
+    ];
+    let intro = hub::intro(world, root);
+    world.commands().entity(root).with_children(|r| {
+        menu_backdrop(r, &t, 0.35, 1.0);
+        let mut column = r.spawn((
+            Node { position_type: PositionType::Absolute, left: px(EDGE), right: px(EDGE), top: px(TOP_BAR_H + 40.0), bottom: px(96), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), ..default() },
+            UiTransform::default(),
+            Pickable::IGNORE,
+        ));
+        if let Some(i) = intro {
+            column.insert(i);
+        }
+        column.with_children(|c| {
+            eyebrow_bar(c, "Drive \u{b7} Challenges", t.accent);
+            c.spawn(title("Challenges", SIZE_H1, t.text));
+            c.spawn((
+                text("Tests by the road, in four kinds. No menu, no stopping: drive through the first gate and it starts. One to three stars for each; a new star pays Notes once.", body(SIZE_BODY), t.text_muted),
+                Node { max_width: px(900), ..default() },
+            ));
+            c.spawn(spacer(GAP_S));
+            c.spawn((Node { column_gap: px(GAP_M), ..default() }, Pickable::IGNORE)).with_children(|row| {
+                for (kind, name, what, unit) in kinds {
+                    let n = list.iter().filter(|x| x.kind == kind).count();
+                    row.spawn(accent_panel(&t, t.line_strong, 22.0, GAP_S)).insert(Node { width: px(400), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), padding: UiRect::all(px(22)), border: UiRect::left(px(3)), border_radius: BorderRadius::all(px(RADIUS)), ..default() }).with_children(|card| {
+                        card.spawn(text(name.to_uppercase(), display(34.0), t.text));
+                        card.spawn((text(what, body(SIZE_BODY - 2.0), t.text_muted), Node { min_height: px(52), ..default() }));
+                        card.spawn((Node { column_gap: px(4), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|s| {
+                            for k in 0..3 {
+                                glyph(s, &gl, if k < 2 { Glyph::StarFull } else { Glyph::StarHollow }, 20.0, t.accent);
+                            }
+                            s.spawn((text(format!("  higher {unit}, more stars"), body(15.0), t.text_dim), Node { margin: UiRect::left(px(6)), ..default() }));
+                        });
+                        if n > 0 {
+                            card.spawn(text(format!("{n} in the valley"), label(18.0), t.text));
+                        }
                     });
                 }
             });
+            c.spawn(spacer(GAP_M));
+            let count = if list.is_empty() { "They stand by the roads around the valley.".to_string() } else { format!("{} challenges stand by the roads. The map shows each one.", list.len()) };
+            c.spawn(text(count, body(SIZE_BODY), t.text_muted));
+            c.spawn(spacer(GAP_S));
+            c.spawn((Node { column_gap: px(GAP_M), ..default() }, Pickable::IGNORE)).with_children(|b| {
+                action_button(b, &t, "Drive", MenuAction::Custom("continue"), Some(1), true, 260.0);
+                action_button(b, &t, "Back", UiAction::Back, Some(2), false, 180.0);
+            });
+        });
+        spawn_footer(r, &t, &[("Enter", "Select"), ("Esc", "Back")]);
     });
+    world.flush();
+    hub::top_bar(world, root);
+}
+
+// ---------------------------------------------------------------- logbook
+
+fn build_logbook(world: &mut World, root: Entity) {
+    let t = world.resource::<Theme>().clone();
+    let p = world.resource::<Profile>().clone();
+    let b = world.resource::<Boards>().0.clone();
+    let w = world.resource::<crate::career::wallet::Wallet>().clone();
+    let xp = world.resource::<crate::career::grade::Grade>().xp;
+    let cars = world.resource::<crate::career::garage::Garage>().owned.len();
+    let (g, lo, hi) = hub::grade_span(xp);
+    let me = board::team_key(&p.driver_name, "");
+    let mine: Vec<&Record> = b.records.iter().filter(|r| r.team() == me || r.driver == p.driver_name).collect();
+    let events_done = p.events.iter().filter(|e| mine.iter().any(|r| r.stage == e.id)).count();
+    let stages_done: std::collections::BTreeSet<u32> = mine.iter().filter(|r| r.stage >= 1 && r.stage <= 20).map(|r| r.stage).collect();
+    let rows: Vec<(String, String, Option<f32>)> = p.events.iter().map(|e| (e.name.clone(), e.kind.clone(), event_best(&b, &me, e.id))).collect();
+    let intro = hub::intro(world, root);
+    world.commands().entity(root).with_children(|r| {
+        menu_backdrop(r, &t, 0.45, 1.0);
+        let mut column = r.spawn((
+            Node { position_type: PositionType::Absolute, left: px(EDGE), right: px(EDGE), top: px(TOP_BAR_H + 40.0), bottom: px(96), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), ..default() },
+            UiTransform::default(),
+            Pickable::IGNORE,
+        ));
+        if let Some(i) = intro {
+            column.insert(i);
+        }
+        column.with_children(|c| {
+            eyebrow_bar(c, "You \u{b7} Logbook", t.accent);
+            c.spawn(title(&p.driver_name, SIZE_H1, t.text));
+            c.spawn((Node { column_gap: px(GAP_S + 2.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|gr| {
+                gr.spawn(text(format!("DRIVER GRADE {g}"), label(24.0), t.text));
+                hub::segments(gr, &t, hi.map_or(1.0, |h| (xp - lo) as f32 / (h - lo).max(1) as f32), 7);
+                gr.spawn(text(match hi { Some(h) => format!("{} xp to grade {}", hub::thousands(h - xp), g + 1), None => "Top grade".into() }, body(SIZE_BODY - 2.0), t.text_muted));
+            });
+            c.spawn(spacer(GAP_S));
+            c.spawn((Node { column_gap: px(GAP_XL), ..default() }, Pickable::IGNORE)).with_children(|s| {
+                stat(s, &t, hub::thousands(w.balance), "Notes", t.text, 44.0);
+                stat(s, &t, hub::thousands(w.earned), "Notes earned", t.text, 44.0);
+                stat(s, &t, hub::thousands(w.spent), "Notes spent", t.text, 44.0);
+                stat(s, &t, hub::thousands(xp), "Style banked (xp)", t.text, 44.0);
+                stat(s, &t, mine.len().to_string(), "Times set", t.text, 44.0);
+                stat(s, &t, format!("{events_done} / {}", p.events.len()), "Events finished", t.text, 44.0);
+                stat(s, &t, cars.to_string(), if cars == 1 { "Car" } else { "Cars" }, t.text, 44.0);
+            });
+            c.spawn(spacer(GAP_S));
+            c.spawn((Node { column_gap: px(GAP_XL), align_items: AlignItems::FlexStart, ..default() }, Pickable::IGNORE)).with_children(|cols| {
+                cols.spawn(panel(&t, 22.0, GAP_XS + 2.0)).insert(Node { width: px(760), flex_direction: FlexDirection::Column, row_gap: px(GAP_XS + 2.0), padding: UiRect::all(px(22)), border: UiRect::all(px(1)), border_radius: BorderRadius::all(px(RADIUS)), ..default() }).with_children(|list| {
+                    list.spawn(eyebrow("Your best in the valley", t.text_dim));
+                    if rows.is_empty() {
+                        list.spawn(text("Drive an event and your times show here.", body(SIZE_BODY - 1.0), t.text_muted));
+                    }
+                    for (name, kind, best) in &rows {
+                        list.spawn((Node { justify_content: JustifyContent::SpaceBetween, column_gap: px(GAP_M), ..default() }, Pickable::IGNORE)).with_children(|l| {
+                            l.spawn((Node { column_gap: px(GAP_S), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|n| {
+                                n.spawn((Node { width: px(3), height: px(18), ..default() }, BackgroundColor(kind_color(kind)), Pickable::IGNORE));
+                                n.spawn(text(name.to_uppercase(), label(22.0), t.text));
+                                n.spawn(text(kind.clone(), body(15.0), t.text_dim));
+                            });
+                            match best {
+                                Some(s) => l.spawn(text(board::clock(*s), body_bold(SIZE_BODY), t.text)),
+                                None => l.spawn(text("\u{2014}", body(SIZE_BODY), t.text_dim)),
+                            };
+                        });
+                    }
+                    list.spawn(rule(t.line));
+                    list.spawn(text(format!("Classic stages: {} of 20 with a time.", stages_done.len()), body(SIZE_BODY - 2.0), t.text_muted));
+                });
+                cols.spawn(col(GAP_S)).with_children(|btns| {
+                    action_button(btns, &t, "Leaderboards", MenuAction::Custom("boards"), Some(1), true, 320.0);
+                    action_button(btns, &t, "Classic stages", MenuAction::Custom("classic"), Some(2), false, 320.0);
+                    action_button(btns, &t, "Back", UiAction::Back, Some(3), false, 320.0);
+                    btns.spawn((text("Leaderboards hold every time on this machine and any boards you import from friends.", body(SIZE_SMALL), t.text_dim), Node { max_width: px(320), ..default() }));
+                });
+            });
+        });
+        spawn_footer(r, &t, &[("W / S", "Move"), ("Enter", "Select"), ("Esc", "Back")]);
+    });
+    world.flush();
+    hub::top_bar(world, root);
+}
+
+// ---------------------------------------------------------------- settings
+
+/// The engine's settings screen with the top bar (in the menus).
+fn build_settings(world: &mut World, root: Entity) {
+    engine::ui::settings_screen::build(world, root);
+    world.flush();
+    hub::top_bar(world, root);
 }
 
 // ---------------------------------------------------------------- stage select
@@ -594,7 +926,7 @@ fn build_stages(world: &mut World, root: Entity) {
     world.commands().entity(root).with_children(|p| {
         menu_backdrop(p, &t, 0.25, 1.0);
         p.spawn((
-            Node { position_type: PositionType::Absolute, left: px(EDGE), top: px(64), bottom: px(96), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), ..default() },
+            Node { position_type: PositionType::Absolute, left: px(EDGE), top: px(TOP_BAR_H + 40.0), bottom: px(96), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), ..default() },
             Pickable::IGNORE,
         ))
         .with_children(|c| {
@@ -646,6 +978,8 @@ fn build_stages(world: &mut World, root: Entity) {
         ));
         spawn_footer(p, &t, &[("W / S", "Stage"), ("A / D", "Weather"), ("T", "Time"), ("C", "View"), ("Enter", verb), ("Tab", "Leaderboard"), ("Esc", "Back")]);
     });
+    world.flush();
+    hub::top_bar(world, root);
 }
 
 /// Stage select: Tab (or E / RT, the "next tab" keys) opens the shown stage's leaderboard;
@@ -893,6 +1227,8 @@ fn build_join(world: &mut World, root: Entity) {
         });
         spawn_footer(r, &t, &[("Enter", "Edit / select"), ("Esc", "Back")]);
     });
+    world.flush();
+    hub::top_bar(world, root);
 }
 
 fn join_status(world: &mut World) {
@@ -955,6 +1291,8 @@ fn build_together(world: &mut World, root: Entity) {
         });
         spawn_footer(r, &t, &[("W / S", "Move"), ("Enter", "Edit / select"), ("Esc", "Back")]);
     });
+    world.flush();
+    hub::top_bar(world, root);
 }
 
 // ---------------------------------------------------------------- leaderboards
@@ -963,6 +1301,7 @@ fn build_boards(world: &mut World, root: Entity) {
     let t = world.resource::<Theme>().clone();
     let stage = world.resource::<BoardSel>().0;
     let def = crate::stage::stages().into_iter().find(|d| d.id == stage);
+    let event_name = world.resource::<Profile>().events.iter().find(|e| e.id == stage).map(|e| e.name.clone());
     let hash = super::board_hash_for(world, stage);
     let shown = super::stage_def(world, stage);
     let b = world.resource::<Boards>().0.clone();
@@ -980,13 +1319,18 @@ fn build_boards(world: &mut World, root: Entity) {
     world.commands().entity(root).with_children(|r| {
         menu_backdrop(r, &t, 0.45, 1.0);
         r.spawn((
-            Node { position_type: PositionType::Absolute, left: px(EDGE), right: px(EDGE), top: px(64), bottom: px(96), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), ..default() },
+            Node { position_type: PositionType::Absolute, left: px(EDGE), right: px(EDGE), top: px(TOP_BAR_H + 40.0), bottom: px(96), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), ..default() },
             Pickable::IGNORE,
         ))
         .with_children(|c| {
             eyebrow_bar(c, "Leaderboards", t.accent);
             c.spawn((Node { column_gap: px(GAP_L), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|h| {
-                h.spawn(title(&format!("{stage:02} {}", def.as_ref().map_or("", |d| d.name.as_str())), SIZE_H1, t.text));
+                let name = match (&event_name, &def) {
+                    (Some(e), _) => e.clone(),
+                    (None, Some(d)) => format!("{stage:02} {}", d.name),
+                    (None, None) => format!("{stage:02}"),
+                };
+                h.spawn(title(&name, SIZE_H1, t.text));
                 action_button(h, &t, "< Prev", MenuAction::Custom("board_prev"), Some(1), false, 130.0);
                 action_button(h, &t, "Next >", MenuAction::Custom("board_next"), Some(2), false, 130.0);
             });
@@ -1072,6 +1416,8 @@ fn build_boards(world: &mut World, root: Entity) {
         });
         spawn_footer(r, &t, &[("W / S", "Move"), ("Enter", "Race ghost / select"), ("Esc", "Back")]);
     });
+    world.flush();
+    hub::top_bar(world, root);
 }
 
 // ---------------------------------------------------------------- results
@@ -1390,13 +1736,13 @@ fn build_credits(world: &mut World, root: Entity) {
     world.commands().entity(root).with_children(|r| {
         menu_backdrop(r, &t, 0.45, 1.0);
         r.spawn((
-            Node { position_type: PositionType::Absolute, left: px(EDGE), right: px(EDGE), top: px(64), bottom: px(96), flex_direction: FlexDirection::Column, row_gap: px(GAP_M), ..default() },
+            Node { position_type: PositionType::Absolute, left: px(EDGE), right: px(EDGE), top: px(TOP_BAR_H + 40.0), bottom: px(96), flex_direction: FlexDirection::Column, row_gap: px(GAP_M), ..default() },
             Pickable::IGNORE,
         ))
         .with_children(|c| {
             eyebrow_bar(c, "Pacenote", t.accent);
             c.spawn(title("Credits", SIZE_H1, t.text));
-            c.spawn((Node { column_gap: px(GAP_XL), flex_grow: 1.0, min_height: px(0), ..default() }, Pickable::IGNORE)).with_children(|cols| {
+            c.spawn((Node { column_gap: px(GAP_XL), align_items: AlignItems::FlexStart, ..default() }, Pickable::IGNORE)).with_children(|cols| {
                 cols.spawn((
                     ScrollList,
                     RelativeCursorPosition::default(),
@@ -1427,6 +1773,8 @@ fn build_credits(world: &mut World, root: Entity) {
         });
         spawn_footer(r, &t, &[("Wheel", "Scroll"), ("Esc", "Back")]);
     });
+    world.flush();
+    hub::top_bar(world, root);
 }
 
 #[cfg(test)]
