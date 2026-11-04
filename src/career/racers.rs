@@ -270,7 +270,7 @@ pub fn slot_spot(format: StartFormat, slot: u8) -> (f32, f32, u32) {
     let k = slot.clamp(1, 6) as u32 - 1;
     match format {
         // 2 wide (±1.5 m), 3 rows 8 m apart; one launch.
-        StartFormat::Grid => (2.0 + 8.0 * (2 - k / 2) as f32, if k % 2 == 0 { 1.5 } else { -1.5 }, 0),
+        StartFormat::Grid => (2.0 + 8.0 * (2 - k / 2) as f32, if k.is_multiple_of(2) { 1.5 } else { -1.5 }, 0),
         // Single file 10 m apart, released 1.5 s apart from the front.
         StartFormat::Pursuit => (2.0 + 10.0 * (5 - k) as f32, 0.0, k * RELEASE_STEPS),
     }
@@ -549,7 +549,7 @@ impl RaceSim {
             #[cfg(test)]
             if let Ok(t) = std::env::var("RACE_TRACE_SLOT")
                 && t.parse::<u8>().ok() == Some(r.slot)
-                && self.step % 6 == 0
+                && self.step.is_multiple_of(6)
                 && (std::env::var("FROM").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0)..std::env::var("TO").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1e9)).contains(&r.progress)
             {
                 let rp = road.nearest(Vec2::new(r.car.pos.x, r.car.pos.z), 40.0);

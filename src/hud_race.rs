@@ -324,7 +324,9 @@ fn results_keys(world: &mut World) {
     }
 }
 
-fn despawn_all(mut commands: Commands, q: Query<Entity, Or<(With<RaceHud>, With<ResultsCard>)>>) {
+type RaceUi = Or<(With<RaceHud>, With<ResultsCard>)>;
+
+fn despawn_all(mut commands: Commands, q: Query<Entity, RaceUi>) {
     for e in &q {
         commands.entity(e).despawn();
     }

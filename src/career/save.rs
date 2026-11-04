@@ -230,8 +230,7 @@ mod tests {
     fn round_trip() {
         let p = tmp("rt");
         assert_eq!(load(&p), Loaded::Fresh);
-        let mut f = CareerFile::default();
-        f.wallet = Wallet { balance: 4_321, earned: 10_000, spent: 17_679 };
+        let mut f = CareerFile { wallet: Wallet { balance: 4_321, earned: 10_000, spent: 17_679 }, ..default() };
         f.garage.owned.push(OwnedCar::stock(def("vale").unwrap()));
         f.garage.owned[1].bought.engine = 2;
         f.garage.owned[1].fitted.engine = 1;

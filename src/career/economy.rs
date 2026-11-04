@@ -12,7 +12,7 @@ use engine::flow::AppState;
 use engine::paths::DataDir;
 use engine::ui::prelude::Toast;
 
-use super::garage::{self, CARS, Garage, OwnedCar, Refusal, UpgradeKind, round100};
+use super::garage::{self, Garage, OwnedCar, Refusal, round100};
 use super::grade::Grade;
 use super::racers::{Difficulty, Finish, RaceResult};
 use super::save::{self, CareerFile, CareerProgress, Loaded};
@@ -382,6 +382,7 @@ fn pay_race(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// A finished Time Trial in an event pays 15 % of its purse (+10 % for a team best).
 fn pay_trial(
     run: Option<Res<StageRun>>,
@@ -570,6 +571,7 @@ pub fn heading_of(fwd: Vec3) -> f32 {
 
 #[cfg(feature = "dev")]
 mod dev {
+    use super::super::garage::{CARS, UpgradeKind};
     use engine::devtools::{AddControlCommand, params};
     use serde_json::{Value, json};
 
@@ -637,7 +639,7 @@ mod dev {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::career::garage::{Paint, def};
+    use crate::career::garage::{Paint, UpgradeKind, def};
 
     #[test]
     fn purses_match_the_doc() {
