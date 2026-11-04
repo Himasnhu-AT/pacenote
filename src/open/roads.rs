@@ -60,6 +60,9 @@ pub struct NetRoad {
     pub bridge: Vec<bool>,
     /// Culverts in the inside ditch: (apex station, lateral offset m).
     pub culverts: Vec<(usize, f32)>,
+    /// How fast the land falls away beside the road (rise per metre, left and right), per
+    /// station, averaged along it (`open::profile::dress`; empty before): sets the fill bank.
+    pub fall: Vec<[f32; 2]>,
     /// Bounding box (XZ) grown by the widest reach anyone asks for, for quick rejects.
     lo: Vec2,
     hi: Vec2,
@@ -91,7 +94,7 @@ pub struct NetPos {
     pub at: RoadPos,
 }
 
-const REACH: f32 = 60.0;
+const REACH: f32 = super::profile::REACH_MAX + 10.0;
 
 impl NetRoad {
     pub(crate) fn new(kind: RoadKind, road: Road, closed: bool) -> NetRoad {
@@ -100,7 +103,7 @@ impl NetRoad {
             lo = lo.min(Vec2::new(p.x, p.z));
             hi = hi.max(Vec2::new(p.x, p.z));
         }
-        NetRoad { kind, road, closed, limit: None, ditch: Vec::new(), dusty: Vec::new(), bridge: Vec::new(), culverts: Vec::new(), lo: lo - REACH, hi: hi + REACH }
+        NetRoad { kind, road, closed, limit: None, ditch: Vec::new(), dusty: Vec::new(), bridge: Vec::new(), culverts: Vec::new(), fall: Vec::new(), lo: lo - REACH, hi: hi + REACH }
     }
 }
 
@@ -452,9 +455,40 @@ struct Builder<'a> {
 }
 
 impl Builder<'_> {
+    /// Whether a planned centreline runs over a road already built (more than 24 m from its
+    /// ends, where it joins one).
+    fn crosses_a_road(&self, pts: &[Vec2]) -> bool {
+        let skip = (24.0 / STEP) as usize;
+        let inner = pts.len().saturating_sub(skip);
+        pts.iter().take(inner).skip(skip).any(|p| self.roads.iter().any(|r| r.road.nearest(*p, 2.5).is_some()))
+    }
+
     /// Plans a road through `via` (start, waypoints, end), leaving `from` (if attached) across
     /// its road and arriving on `to`.
     fn road(&mut self, kind: RoadKind, rules: Rules, from: Option<Attach>, via: &[Vec2], to: Option<Attach>) -> Option<usize> {
+        self.road_opts(kind, rules, &[from], via, &[to])
+    }
+
+    /// [`road`](Self::road) with a choice of places to leave and to arrive (best first): the
+    /// first pair that gets through without running over another road, else the first pair
+    /// crossing where it must.
+    fn road_opts(&mut self, kind: RoadKind, rules: Rules, froms: &[Option<Attach>], via: &[Vec2], tos: &[Option<Attach>]) -> Option<usize> {
+        for f in froms {
+            for t in tos {
+                if let Some(pts) = self.plan(rules, *f, via, *t, true) {
+                    return Some(self.finish(kind, rules, *f, *t, pts));
+                }
+            }
+        }
+        let (f, t) = (froms[0], tos[0]);
+        let pts = self.plan(rules, f, via, t, false)?;
+        Some(self.finish(kind, rules, f, t, pts))
+    }
+
+    /// The centreline (stations every STEP m) of a road through `via` from `from` to `to`,
+    /// with its cells taken in the planner; `None` (the planner as it was) if there is no way,
+    /// or with `no_cross` none that keeps off the roads already built.
+    fn plan(&mut self, rules: Rules, from: Option<Attach>, via: &[Vec2], to: Option<Attach>, no_cross: bool) -> Option<Vec<Vec2>> {
         // Leave and arrive straight across (or along) the joined road: the planner runs between
         // points LEAD m out, and the last few metres are added straight.
         const LEAD: f32 = 16.0;
@@ -469,12 +503,16 @@ impl Builder<'_> {
         if stops.len() < 2 {
             return None;
         }
+        let saved = self.planner.snapshot();
         let mut cells: Vec<Vec2> = Vec::new();
         let mut dir = from.map(|a| a.out);
         let legs = stops.len() - 1;
         for (li, w) in stops.windows(2).enumerate() {
             let arrive = if li + 1 == legs { to.map(|b| -b.out) } else { None };
-            let leg = self.planner.route(w[0], dir, w[1], arrive, rules, 90.0)?;
+            let Some(leg) = self.planner.route(w[0], dir, w[1], arrive, rules, 90.0, no_cross) else {
+                self.planner.restore(saved);
+                return None;
+            };
             if let (Some(a), Some(b)) = (leg.get(leg.len().saturating_sub(2)), leg.last()) {
                 dir = Some(*b - *a);
             }
@@ -493,9 +531,15 @@ impl Builder<'_> {
         }
         // (Untangled again after smoothing, and the cut rounded off.)
         let pts = resample(&plan::chaikin(&plan::untangle(&plan::chaikin(&plan::untangle(&cells), 4)), 2), false);
-        if pts.len() < 4 {
+        if pts.len() < 4 || (no_cross && self.crosses_a_road(&pts)) {
+            self.planner.restore(saved);
             return None;
         }
+        Some(pts)
+    }
+
+    /// Heights, widths, surfaces and banking along a planned centreline; the road is added.
+    fn finish(&mut self, kind: RoadKind, rules: Rules, from: Option<Attach>, to: Option<Attach>, pts: Vec<Vec2>) -> usize {
         let k = self.roads.len();
         let sseed = self.seed ^ (0xA0 + k as u64);
         let mut y = road_heights(self.land, &pts, rules.max_grade, from.map(|a| a.y), to.map(|b| b.y));
@@ -511,8 +555,39 @@ impl Builder<'_> {
         road.bank = banking(&road, kind, sseed);
         self.planner.take(&pts, 40.0);
         self.roads.push(NetRoad::new(kind, road, false));
-        Some(k)
+        k
     }
+}
+
+/// Up to `n` stations of `roads[k]` to attach to near `near` (best first, as [`attach`] scores
+/// them, at least 80 m apart along the road), each heading out towards `toward`.
+fn attach_options(roads: &[NetRoad], k: usize, near: Vec2, toward: Vec2, n: usize) -> Vec<Option<Attach>> {
+    let r = &roads[k].road;
+    let keep = (40.0 / STEP) as usize;
+    let bend = |i: usize| r.curv[i.saturating_sub(15)..(i + 15).min(r.len())].iter().fold(0.0f32, |a, k| a.max(k.abs()));
+    let score = |i: usize| Vec2::new(r.pts[i].x, r.pts[i].z).distance(near) + if bend(i) > 1.0 / 60.0 { 400.0 } else { 0.0 };
+    let mut order: Vec<usize> = (keep..r.len().saturating_sub(keep)).collect();
+    order.sort_by(|a, b| score(*a).total_cmp(&score(*b)).then(a.cmp(b)));
+    let gap = (80.0 / STEP) as usize;
+    let mut picked: Vec<usize> = Vec::new();
+    for i in order {
+        if picked.len() >= n {
+            break;
+        }
+        if picked.iter().all(|p| p.abs_diff(i) >= gap) {
+            picked.push(i);
+        }
+    }
+    picked
+        .into_iter()
+        .map(|i| {
+            let p = r.pts[i];
+            let pos = Vec2::new(p.x, p.z);
+            let side = r.dir[i].perp();
+            let out = if side.dot(toward - pos) >= 0.0 { side } else { -side };
+            Some(Attach { pos, y: p.y, out })
+        })
+        .collect()
 }
 
 /// Builds the network for `seed` (once per seed; later calls share it).
@@ -551,14 +626,15 @@ fn build(seed: u64) -> RoadNet {
     let escarp = b.road(RoadKind::Forest, Rules::FOREST, Some(v_at), &[pl.camp], to);
     // A logging track from the camp west to the hillclimb (a loop with both).
     if let (Some(e), Some(c)) = (escarp, climb) {
-        let west = attach(&b.roads, c, pl.camp + Vec2::new(-700.0, 100.0), pl.camp);
-        let a = attach(&b.roads, e, pl.camp, west.pos);
-        b.road(RoadKind::Forest, Rules::FOREST, Some(a), &[], Some(west));
+        let west = attach_options(&b.roads, c, pl.camp + Vec2::new(-700.0, 100.0), pl.camp, 4);
+        let at = west[0].map_or(pl.camp, |w| w.pos);
+        let a = attach_options(&b.roads, e, pl.camp, at, 4);
+        b.road_opts(RoadKind::Forest, Rules::FOREST, &a, &[], &west);
     }
     // The gully road from the service park up between escarpment and basin to the basin road.
     let p_at = attach(&b.roads, valley, pl.park, pl.park + Vec2::Y * 100.0);
-    let to = basin.map(|k| attach(&b.roads, k, pl.quarry + Vec2::new(-150.0, 450.0), pl.park));
-    b.road(RoadKind::Gravel, Rules::GRAVEL, Some(p_at), &[], to);
+    let to = basin.map_or(vec![None], |k| attach_options(&b.roads, k, pl.quarry + Vec2::new(-150.0, 450.0), pl.park, 10));
+    b.road_opts(RoadKind::Gravel, Rules::GRAVEL, &[Some(p_at)], &[], &to);
     // The southern loop: over the river, through the hills, back over the river.
     let s0 = attach(&b.roads, valley, pl.ford_w + Vec2::Y * 150.0, pl.ford_w);
     let s1 = attach(&b.roads, valley, pl.ford_e + Vec2::Y * 150.0, pl.ford_e);
@@ -578,18 +654,95 @@ fn build(seed: u64) -> RoadNet {
     net
 }
 
-/// A point's height in the finished world (the 2 m terrain): the land, shaped by the nearest
-/// road (`open::profile::shaped`).
+/// The nearest road to `p` within `max` m and the next nearest (another road, or another leg
+/// of the same road more than 60 m along it), each with its position.
+pub fn nearest_two(net: &RoadNet, p: Vec2, max: f32) -> (Option<NetPos>, Option<NetPos>) {
+    let (mut a, mut b): (Option<NetPos>, Option<NetPos>) = (None, None);
+    let mut offer = |c: NetPos| {
+        if a.is_none_or(|x| c.at.lateral.abs() < x.at.lateral.abs()) {
+            b = a.take();
+            a = Some(c);
+        } else if b.is_none_or(|x| c.at.lateral.abs() < x.at.lateral.abs()) {
+            b = Some(c);
+        }
+    };
+    for (k, r) in net.roads.iter().enumerate() {
+        if p.x < r.lo.x || p.y < r.lo.y || p.x > r.hi.x || p.y > r.hi.y {
+            continue;
+        }
+        let (x, y) = r.road.nearest_two(p, max, 60.0);
+        for at in [x, y].into_iter().flatten() {
+            offer(NetPos { road: k, at });
+        }
+    }
+    (a, b)
+}
+
+/// A point's height in the finished world, before the last smoothing ([`terrain`]): the land,
+/// shaped by the nearest road (`open::profile::shaped`). Where a second road (or the next leg
+/// of a switchback) is nearly as near, the two shapes blend, so there's no crease half way
+/// between them (WORLD_PASS T10c).
 pub fn height(net: &RoadNet, x: f32, z: f32) -> f32 {
+    use super::profile::{REACH_MAX, shaped};
     let p = Vec2::new(x, z);
     let base = net.land.height(p);
-    match net.nearest(p, super::profile::REACH.1) {
-        Some(n) => {
-            let nr = &net.roads[n.road];
-            super::profile::shaped(base, &nr.road, &nr.ditch, &n.at)
-        }
-        None => base,
+    let (Some(a), b) = nearest_two(net, p, REACH_MAX) else { return base };
+    let ra = &net.roads[a.road];
+    let sa = shaped(base, ra, &a.at);
+    let Some(b) = b else { return sa };
+    let (la, lb) = (a.at.lateral.abs(), b.at.lateral.abs());
+    if lb - la >= 16.0 {
+        return sa;
     }
+    // Not inside the first road's own formation (road, shoulder, ditch): that stays exact.
+    let own = ra.road.half_width(&a.at) + 3.0;
+    let w = (0.5 - 0.5 * smooth01((lb - la) / 16.0)) * smooth01((la - own) / 4.0);
+    if w <= 0.0 {
+        return sa;
+    }
+    let sb = shaped(base, &net.roads[b.road], &b.at);
+    sa + (sb - sa) * w
+}
+
+fn smooth01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Lateral distance (m) from a centreline within which [`terrain`]'s last smoothing leaves the
+/// ground alone (beyond the road's half width): the formation the car and the mesh share.
+pub const FROZEN: f32 = 3.0;
+
+/// The steepest slope [`terrain`] leaves beyond the roads (a little under the land's talus,
+/// so no 2 m step reaches 1.5 m).
+const SMOOTH_TALUS: f32 = 0.72;
+
+/// The finished 2 m terrain of the region (what `--bake-world` writes): [`height`] everywhere,
+/// then a few thermal passes (slope ≤ the land's talus) that take out the steps the corridor
+/// shaping leaves, the ground within [`FROZEN`] m of a road's edge held as it is (WORLD_PASS
+/// T11).
+pub fn terrain(net: &RoadNet, spacing: f32) -> engine::world::Heightfield {
+    use engine::world::Heightfield;
+    let n = (2.0 * HALF / spacing) as u32 + 1;
+    let origin = Vec2::splat(-HALF);
+    let hf = Heightfield::from_fn(n, n, spacing, origin, |x, z| height(net, x, z));
+    // Per sample: the talus to hold it to (steeper in the crags, away from roads), or -1
+    // where it is frozen.
+    let talus = Heightfield::from_fn(n, n, spacing, origin, |x, z| {
+        let p = Vec2::new(x, z);
+        let near = net.nearest(p, 70.0);
+        if let Some(at) = near
+            && at.at.lateral.abs() <= net.roads[at.road].road.half_width(&at.at) + FROZEN
+        {
+            return -1.0;
+        }
+        let away = near.map_or(1.0, |at| smooth01((at.at.lateral.abs() - 50.0) / 20.0));
+        SMOOTH_TALUS + (land::CRAG_TALUS - SMOOTH_TALUS) * net.land.crag(p) * away
+    });
+    let mut h = hf.heights().to_vec();
+    let tl = talus.heights();
+    land::thermal(&mut h, n as usize, n as usize, spacing, &|i| if tl[i] < 0.0 { SMOOTH_TALUS } else { tl[i] }, &|i| tl[i] < 0.0, 16);
+    Heightfield::from_heights(n, n, spacing, origin, h)
 }
 
 /// What the tyres are on at (x, z). On a gravel road: the two worn wheel tracks (full grip)

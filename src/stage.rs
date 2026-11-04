@@ -349,6 +349,25 @@ impl Road {
         best.filter(|(d2, _)| *d2 <= max * max).map(|(_, r)| r)
     }
 
+    /// [`nearest`](Self::nearest), and the nearest point on a part of the road more than `gap`
+    /// m further along or back (the other leg of a switchback), each within `max`.
+    pub fn nearest_two(&self, p: Vec2, max: f32, gap: f32) -> (Option<RoadPos>, Option<RoadPos>) {
+        let Some(a) = self.nearest(p, max) else { return (None, None) };
+        let mut best: Option<(f32, RoadPos)> = None;
+        self.grid.visit(p, max, |i| {
+            let (u, v) = (xz(self.pts[i]), xz(self.pts[i + 1]));
+            let ab = v - u;
+            let t = ((p - u).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
+            let s = (i as f32 + t) * STEP;
+            let d2 = (u + ab * t).distance_squared(p);
+            if (s - a.s).abs() > gap && best.is_none_or(|(bd, _)| d2 < bd) {
+                let side = (p - u).dot(Vec2::new(ab.y, -ab.x)).signum();
+                best = Some((d2, RoadPos { i, t, s, lateral: side * d2.sqrt() }));
+            }
+        });
+        (Some(a), best.filter(|(d2, _)| *d2 <= max * max).map(|(_, r)| r))
+    }
+
     /// Road surface height at a road position: banking, crown and wheel tracks applied (the
     /// edges stay at the banked line; the crown lifts the middle).
     pub fn height_at(&self, r: &RoadPos) -> f32 {

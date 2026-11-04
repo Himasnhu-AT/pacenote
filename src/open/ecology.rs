@@ -76,8 +76,22 @@ pub fn clearcuts(net: &RoadNet, count: usize) -> Vec<Rect> {
             let c = p + d.perp() * side * (road.width[i] * 0.5 + rng.range(8.0, 20.0) + half.x);
             let h = land.coarse(c);
             let ok = (150.0..350.0).contains(&h) && land.slope(c) < 0.35 && !alpine(land, c) && out.iter().all(|o| o.center.distance(c) > 600.0) && c.x.abs() < HALF - 200.0 && c.y.abs() < HALF - 200.0;
-            if ok {
-                out.push(Rect { center: c, half, yaw: libm::atan2f(d.x, d.y), y: h, tag: "clearcut".into() });
+            let rect = Rect { center: c, half, yaw: libm::atan2f(d.x, d.y), y: h, tag: "clearcut".into() };
+            // Over no other road (another leg of this one, a road nearby): points every 6 m over it.
+            let clear = || {
+                let k = rect.corners();
+                let mid = (k[0] + k[1] + k[2] + k[3]) * 0.25;
+                let (na, nb) = ((k[0].distance(k[1]) / 6.0).ceil() as i32, (k[0].distance(k[3]) / 6.0).ceil() as i32);
+                (0..=na).all(|a| {
+                    (0..=nb).all(|b| {
+                        let (u, v) = (a as f32 / na as f32, b as f32 / nb as f32);
+                        let q = k[0].lerp(k[1], u).lerp(k[3].lerp(k[2], u), v);
+                        net.nearest(mid + (q - mid) * 0.97, 5.0).is_none()
+                    })
+                })
+            };
+            if ok && clear() {
+                out.push(rect);
                 i += 300;
             } else {
                 i += 40;

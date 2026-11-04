@@ -227,7 +227,7 @@ fn follow_events(old: &RoadNet, new: &mut WorldData) {
 /// Shapes the ground again in `boxes` (grown by the road's reach): samples within reach of a
 /// road in `old` or `new` there get the generator's height for `new`; the rest stays.
 fn reshape(world: &mut World, old: &RoadNet, new: &RoadNet, boxes: &[(Vec2, Vec2)]) -> Result<(), String> {
-    let reach = crate::stage::SHAPE_REACH;
+    let reach = super::profile::REACH_MAX;
     let Some(t) = world.get_resource::<Terrain>() else { return Ok(()) };
     let hf = t.heightfield();
     let (spacing, origin, nx, nz) = (hf.spacing(), hf.origin(), hf.nx(), hf.nz());

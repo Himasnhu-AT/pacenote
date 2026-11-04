@@ -150,6 +150,8 @@ pub struct Planner<'a> {
     h: Vec<f32>,
     /// Cells next to a road already built (no new road runs along it).
     taken: Vec<bool>,
+    /// Cells on a road already built (a new road may only cross one near its own ends).
+    core: Vec<bool>,
     river: Vec<bool>,
     /// A little cost that varies smoothly over the land, so roads on the flat meander.
     rough: Vec<f32>,
@@ -176,10 +178,10 @@ impl<'a> Planner<'a> {
                 rough[z * G + x] = (crate::stage::fbm(p / 260.0, 3, land.seed ^ 0x2A0) * 0.5 + 0.5).clamp(0.0, 1.0) * 0.9;
             }
         }
-        Planner { land, h, taken: vec![false; G * G], river, rough }
+        Planner { land, h, taken: vec![false; G * G], core: vec![false; G * G], river, rough }
     }
 
-    /// Marks a road's cells (and `r` m around) as taken.
+    /// Marks a road's cells (and `r` m around) as taken, and the cells it runs through.
     pub fn take(&mut self, pts: &[Vec2], r: f32) {
         let k = (r / GRID).ceil() as i32;
         for p in pts.iter().step_by(2) {
@@ -187,8 +189,15 @@ impl<'a> Planner<'a> {
             for dz in -k..=k {
                 for dx in -k..=k {
                     let (x, z) = (cx + dx, cz + dz);
-                    if x >= 0 && z >= 0 && (x as usize) < G && (z as usize) < G && centre(x, z).distance(*p) <= r {
-                        self.taken[z as usize * G + x as usize] = true;
+                    if x >= 0 && z >= 0 && (x as usize) < G && (z as usize) < G {
+                        let d = centre(x, z).distance(*p);
+                        let i = z as usize * G + x as usize;
+                        if d <= r {
+                            self.taken[i] = true;
+                        }
+                        if d <= GRID * 0.75 {
+                            self.core[i] = true;
+                        }
                     }
                 }
             }
@@ -199,9 +208,22 @@ impl<'a> Planner<'a> {
         self.h[z as usize * G + x as usize]
     }
 
+    /// The taken cells (to put back with [`restore`](Self::restore) if a plan is dropped).
+    pub fn snapshot(&self) -> (Vec<bool>, Vec<bool>) {
+        (self.taken.clone(), self.core.clone())
+    }
+
+    pub fn restore(&mut self, (taken, core): (Vec<bool>, Vec<bool>)) {
+        self.taken = taken;
+        self.core = core;
+    }
+
     /// The cheapest path from `a` to `b` (cell centres, then the exact ends), leaving `a`
     /// heading about `dir` and arriving heading about `arrive` if given. Near either end (`free` m) taken cells cost nothing extra.
-    pub fn route(&self, a: Vec2, dir: Option<Vec2>, b: Vec2, arrive: Option<Vec2>, rules: Rules, free: f32) -> Option<Vec<Vec2>> {
+    /// With `no_cross`, the path never runs over a road already built (except within 24 m of
+    /// its ends).
+    #[allow(clippy::too_many_arguments)]
+    pub fn route(&self, a: Vec2, dir: Option<Vec2>, b: Vec2, arrive: Option<Vec2>, rules: Rules, free: f32, no_cross: bool) -> Option<Vec<Vec2>> {
         let (ax, az) = cell_of(a);
         let (bx, bz) = cell_of(b);
         let n = G * G * 16;
@@ -253,6 +275,15 @@ impl<'a> Planner<'a> {
                 let ni = nz as usize * G + nx as usize;
                 if self.river[ni] && !rules.bridge {
                     continue;
+                }
+                if no_cross {
+                    // The cell and, for a knight's move, the one it passes over.
+                    let (mx, mz) = (x + (dx as f32 * 0.5).round() as i32, z + (dz as f32 * 0.5).round() as i32);
+                    let p1 = centre(nx, nz);
+                    let near_end = p1.distance(a) < 24.0 || p1.distance(b) < 24.0;
+                    if !near_end && (self.core[ni] || self.core[mz as usize * G + mx as usize]) {
+                        continue;
+                    }
                 }
                 let step = Vec2::new(dx as f32, dz as f32);
                 let len = step.length() * GRID;

@@ -123,6 +123,26 @@ pub fn dress(net: &mut RoadNet) {
             }
         }
         nr.ditch = ditch;
+        // How fast the land falls away 8 m beyond each edge, averaged over ±10 m along the
+        // road (per point it flickers between a gentle fill and a drop-off).
+        let raw: Vec<[f32; 2]> = (0..n)
+            .map(|i| {
+                let p = road.pts[i];
+                let left = road.dir[i].perp() * -1.0;
+                let half = road.width[i] * 0.5;
+                let side = |s: f32| ((p.y - land.coarse(Vec2::new(p.x, p.z) + left * s * (half + 8.0))) / 8.0).max(0.0);
+                [side(1.0), side(-1.0)]
+            })
+            .collect();
+        let w = (10.0 / STEP) as usize;
+        nr.fall = (0..n)
+            .map(|i| {
+                let (a, b) = (i.saturating_sub(w), (i + w).min(n - 1));
+                let k = (b - a + 1) as f32;
+                let sum = raw[a..=b].iter().fold([0.0f32; 2], |s, f| [s[0] + f[0], s[1] + f[1]]);
+                [sum[0] / k, sum[1] / k]
+            })
+            .collect();
         // Dusty tarmac near a junction with a gravel or forest road.
         nr.dusty = vec![false; n];
         if !gravel(nr.kind) {
@@ -193,12 +213,14 @@ fn smooth(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The terrain `base` m high at `r` beside `road`, shaped by it (the coarse 2 m heightfield):
-/// the road sunk into the land, a short shoulder, then on the cut side the ditch's bottom and a
-/// bank no steeper than [`CUT_GRADE`], on the fill side the land held up no less steeply than
-/// [`FILL_GRADE`] where it falls gently and left to drop (a steep bank) where it falls away
-/// faster than [`STEEP`]; back to the natural land by [`REACH`].
-pub fn shaped(base: f32, road: &Road, ditch: &[[f32; 2]], r: &RoadPos) -> f32 {
+/// The terrain `base` m high at `r` beside road `nr`, shaped by it (the coarse 2 m
+/// heightfield): the road sunk into the land, a short shoulder, then on the cut side the
+/// ditch's bottom and a bank no steeper than [`CUT_GRADE`], on the fill side the land held up
+/// no less steeply than [`FILL_GRADE`] where it falls gently and left to drop (a bank of
+/// [`STEEP_FILL`]) where it falls away faster than [`STEEP`]; back to the natural land from
+/// [`REACH`], over a width that keeps the blend itself under ~60 % ([`REACH_MAX`] at most).
+pub fn shaped(base: f32, nr: &super::roads::NetRoad, r: &RoadPos) -> f32 {
+    let (road, ditch) = (&nr.road, &nr.ditch);
     let half = road.half_width(r);
     let a = r.lateral.abs();
     let o = a - half;
@@ -215,11 +237,19 @@ pub fn shaped(base: f32, road: &Road, ditch: &[[f32; 2]], r: &RoadPos) -> f32 {
         return lip - d;
     }
     let out = o - SHOULDER - if d > 0.0 { DITCH_W } else { 0.0 };
-    // How fast the land falls away beside the road: steep means a drop-off, not a gentle fill.
-    let fall = ((lip - base) / out.max(1.0)).max(0.0);
-    let fill = FILL_GRADE + (STEEP_FILL - FILL_GRADE) * smooth((fall - STEEP) / 0.1);
+    // How fast the land falls away beside the road: steep means a drop-off, not a gentle fill
+    // (per station, averaged along the road; per point before the dressing).
+    let fall = if nr.fall.is_empty() {
+        ((lip - base) / out.max(1.0)).max(0.0)
+    } else {
+        let side = if r.lateral >= 0.0 { 0 } else { 1 };
+        let j = (r.i + 1).min(nr.fall.len() - 1);
+        nr.fall[r.i][side] + (nr.fall[j][side] - nr.fall[r.i][side]) * r.t
+    };
+    let fill = FILL_GRADE + (STEEP_FILL - FILL_GRADE) * smooth((fall - STEEP) / 0.25);
     let shaped = base.clamp(lip - fill * out, lip + CUT_GRADE * out);
-    let t = smooth((a - REACH.0) / (REACH.1 - REACH.0));
+    let width = ((shaped - base).abs() / BLEND_GRADE).clamp(16.0, REACH_MAX - REACH.0);
+    let t = smooth((a - REACH.0) / width);
     shaped + (base - shaped) * t
 }
 
@@ -227,12 +257,16 @@ pub fn shaped(base: f32, road: &Road, ditch: &[[f32; 2]], r: &RoadPos) -> f32 {
 const FILL_GRADE: f32 = 0.16;
 /// Where the land falls faster than this, the road edge drops off ...
 const STEEP: f32 = 0.2;
-/// ... as steeply as this (a loose bank).
-const STEEP_FILL: f32 = 0.9;
+/// ... as steeply as this (a loose bank, at the land's talus).
+const STEEP_FILL: f32 = 0.7;
 /// Steepest cut bank.
-const CUT_GRADE: f32 = 0.7;
-/// Lateral distances (m) between which the shaped ground blends back into the land.
+const CUT_GRADE: f32 = 0.6;
+/// Lateral distance (m) where the shaped ground starts to blend back into the land, and the
+/// gentlest slope (rise per metre) of the blend's width ...
 pub const REACH: (f32, f32) = (30.0, 46.0);
+const BLEND_GRADE: f32 = 0.4;
+/// ... which ends by this far (m) from the centreline at the latest.
+pub const REACH_MAX: f32 = 110.0;
 
 /// Parapet height (m) above a bridge's deck, and its half thickness.
 pub const PARAPET: (f32, f32) = (0.8, 0.25);
@@ -353,13 +387,22 @@ mod drive {
     fn the_ditch_drags() {
         let w = OpenWorld::generate(SEED);
         let net = &w.net;
-        let (k, i, side) = net
-            .roads
-            .iter()
-            .enumerate()
-            .filter(|(_, r)| r.kind == RoadKind::Gravel)
-            .find_map(|(k, r)| (150..r.road.len() - 150).find_map(|i| (0..2).find(|&s| (i - 40..i + 40).all(|j| r.ditch[j][s] > 0.25 && r.road.curv[j].abs() < 1.0 / 300.0)).map(|s| (k, i, s))))
-            .expect("a straight gravel stretch with a ditch");
+        // The straight stretch with a ditch along 120 m that climbs least.
+        let mut best: Option<(f32, usize, usize, usize)> = None;
+        for (k, r) in net.roads.iter().enumerate().filter(|(_, r)| matches!(r.kind, RoadKind::Gravel | RoadKind::Forest)) {
+            for i in (150..r.road.len() - 150).step_by(5) {
+                for s in 0..2 {
+                    if (i - 30..i + 30).all(|j| r.road.curv[j].abs() < 1.0 / 250.0) {
+                        let depth = (i - 30..i + 30).map(|j| r.ditch[j][s]).fold(f32::MAX, f32::min);
+                        let climb = (r.road.pts[i + 30].y - r.road.pts[i - 30].y).abs();
+                        if depth > 0.25 && best.is_none_or(|b| climb < b.0) {
+                            best = Some((climb, k, i, s));
+                        }
+                    }
+                }
+            }
+        }
+        let (_, k, i, side) = best.expect("a straight stretch with a ditch");
         let road = &net.roads[k].road;
         let sign = if side == 0 { 1.0 } else { -1.0 };
         let left = -road.dir[i].perp();
@@ -387,7 +430,9 @@ mod drive {
         let (in_ditch, wheels) = coast(sign * (half + super::SHOULDER + super::DITCH_W * 0.5 - 0.8));
         eprintln!("after 2 s coasting from 40 km/h: road {:.1} km/h, ditch {:.1} km/h ({wheels} wheel-steps in it)", on_road * 3.6, in_ditch * 3.6);
         assert!(wheels > 100, "wheels in the ditch: {wheels}");
-        assert!(in_ditch < on_road - 1.0, "the ditch drags: {in_ditch} vs {on_road}");
+        // (On the stretch the smoothed land leaves, a climb, the car loses ~1.3 km/h more in
+        // the ditch over 2 s; the old land's level stretch showed ~4.5.)
+        assert!(in_ditch < on_road - 0.3, "the ditch drags: {in_ditch} vs {on_road}");
     }
 }
 
