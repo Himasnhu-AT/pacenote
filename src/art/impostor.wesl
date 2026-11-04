@@ -41,6 +41,10 @@ fn vertex(v_in: Vertex) -> VertexOutput {
     let level = dither_level(length(view.lod_view_world_position.xyz - base));
     out.uv = v.uv;
     out.uv_b = vec2<f32>(f32(level), 0.0);
+#ifdef VERTEX_COLORS
+    // The tree's colour variation (`trees.rs` TINTS), as its near versions have.
+    out.color = v.color;
+#endif
     if level <= -16 || level >= 16 {
         // Out of range: all four corners on one point, nothing rasterised.
         out.position = vec4<f32>(0.0, 0.0, 0.0, 1.0);

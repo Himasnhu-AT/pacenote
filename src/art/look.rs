@@ -2,7 +2,7 @@
 //! sky; weather sets cloud cover (gradient sky), fog distance and the wet look. Built on
 //! `engine::look` presets, as data.
 
-use engine::look::{FogMode, GradeSection, Look, Rgb, SkyMode, SunLook};
+use engine::look::{FogMode, GradeSection, Look, Rgb, SkyMode, SunLook, ToneMap};
 
 use crate::stage::{StageDef, TimeOfDay, Weather};
 
@@ -61,9 +61,22 @@ pub fn stage_look(def: &StageDef, vis: f32) -> Look {
         TimeOfDay::Dusk => 10.8,
     };
     look.fog.visibility = vis;
+    // Tony McMapface keeps a clear sky blue and the grass green where AgX greys both out
+    // (AgX turned the afternoon sky lavender-grey).
+    look.tonemapping = ToneMap::TonyMcMapface;
     match def.weather {
         Weather::Clear => {
             look.fog.mode = FogMode::Atmospheric;
+            // A touch warmer and crisper in sun, a little brighter.
+            look.grading.temperature = 0.02;
+            look.grading.midtones = GradeSection { contrast: 1.08, ..GradeSection::default() };
+            look.exposure.ev100 -= 0.4;
+            if def.time != TimeOfDay::Dusk {
+                // Neutral haze: the default's sky-blue fog and extinction turned the far
+                // ground between distant trunks into a bright blue band under the treeline.
+                look.fog.color = Rgb::new(0.66, 0.71, 0.78);
+                look.fog.extinction = Rgb::new(0.45, 0.52, 0.6);
+            }
         }
         Weather::Overcast | Weather::Rain | Weather::Fog => {
             let (grey, bright, sun_k, ev) = match def.weather {

@@ -527,8 +527,19 @@ struct Kind {
 struct SpeciesKit {
     variants: Vec<Kind>,
     trunk_mat: Option<Handle<StandardMaterial>>,
-    crown_mat: Handle<StandardMaterial>,
+    /// The crown in each of the [`TINTS`].
+    crown_mats: Vec<Handle<StandardMaterial>>,
     imp_mat: Handle<ImpostorMat>,
+}
+
+/// Per-tree colour variation of the foliage (a multiplier on the species' tint): as built,
+/// darker and bluer (shaded, older), lighter and yellower (younger, sunlit). Impostors get the
+/// same through vertex colours, so a tree keeps its colour across the LOD crossfade.
+pub const TINTS: [[f32; 3]; 3] = [[1.0, 1.0, 1.0], [0.8, 0.87, 0.84], [1.1, 1.08, 0.9]];
+
+/// Which of the [`TINTS`] a tree with PCG seed `seed` gets.
+pub fn tint_of(seed: u64) -> u8 {
+    ((seed >> 23) % TINTS.len() as u64) as u8
 }
 
 /// Distances of the LOD chain for a stage (m from the camera; scaled by the quality preset).
@@ -581,6 +592,8 @@ struct Tree {
     scale: Vec3,
     species: Species,
     variant: usize,
+    /// Index into [`TINTS`].
+    tint: u8,
     /// Has an impostor (all of them, or every other one on Low).
     far: bool,
 }
@@ -622,6 +635,13 @@ pub struct TreeField {
     /// Cells / chunks in range still waiting for their trees (after this frame's spawns).
     waiting: usize,
     pub stats: TreeStats,
+}
+
+impl TreeField {
+    /// Every tree known (base points), near and far.
+    pub fn positions(&self) -> impl Iterator<Item = Vec3> + '_ {
+        self.cells.values().flat_map(|c| c.trees.iter().map(|t| t.pos))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -672,7 +692,14 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32, q: usize) {
             Species::Birch => (ATLAS_BIRCH.set, Color::srgb(0.95, 1.0, 0.88)),
             Species::Olive => (ATLAS_OLIVE.set, Color::srgb(0.95, 0.98, 0.88)),
         };
-        let crown_mat = pbr(world, set, |m| foliage(m, tint, wet));
+        let crown_mats = TINTS
+            .iter()
+            .map(|k| {
+                let c = tint.to_srgba();
+                let t = Color::srgb(c.red * k[0], c.green * k[1], c.blue * k[2]);
+                pbr(world, set, |m| foliage(m, t, wet))
+            })
+            .collect();
         let far = pbr(world, set, |m| {
             foliage(m, tint, wet);
             m.normal_map_texture = None;
@@ -699,7 +726,7 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32, q: usize) {
             Species::Spruce | Species::SnowSpruce => Some(spruce_bark.clone()),
             Species::Pine => Some(bark.clone()),
         };
-        species.insert(sp, SpeciesKit { variants, trunk_mat, crown_mat, imp_mat });
+        species.insert(sp, SpeciesKit { variants, trunk_mat, crown_mats, imp_mat });
     }
     // Every road (the open world has many), a point every ~20 m.
     let road = s.roads().into_iter().flat_map(|r| r.pts.iter().step_by(10).map(|p| Vec2::new(p.x, p.z))).collect();
@@ -718,7 +745,7 @@ pub fn near_parts(kit: &TreeKit, seed: u64) -> Vec<(Handle<Mesh>, Handle<Standar
     if let (Some(m), Some(mat)) = (&kind.trunk, &sk.trunk_mat) {
         out.push((m.clone(), mat.clone()));
     }
-    out.push((kind.crown.clone(), sk.crown_mat.clone()));
+    out.push((kind.crown.clone(), sk.crown_mats[tint_of(seed) as usize].clone()));
     out
 }
 
@@ -827,7 +854,7 @@ pub fn ingest(mut commands: Commands, mut events: MessageReader<PcgEmitted>, kit
         for k in 0..p.len() {
             let (species, variant) = pick(kit.mix, p.seed[k]);
             let (yaw, _, _) = p.rot[k].to_euler(EulerRot::YXZ);
-            cell.trees.push(Tree { pos: p.pos[k], yaw, scale: p.scale[k], species, variant, far: keeps_far(p.seed[k], kit.lods.thin) });
+            cell.trees.push(Tree { pos: p.pos[k], yaw, scale: p.scale[k], species, variant, tint: tint_of(p.seed[k]), far: keeps_far(p.seed[k], kit.lods.thin) });
         }
         if cell.trees.is_empty() {
             continue;
@@ -857,6 +884,7 @@ struct Quads {
     pos: Vec<[f32; 3]>,
     uv: Vec<[f32; 2]>,
     off: Vec<[f32; 2]>,
+    col: Vec<[f32; 4]>,
     idx: Vec<u32>,
     lo: Vec3,
     hi: Vec3,
@@ -888,6 +916,8 @@ fn build_chunk(commands: &mut Commands, meshes: &mut Assets<Mesh>, kit: &TreeKit
             q.pos.extend([base.to_array(); 4]);
             q.uv.extend([[f.u0, f.v1], [f.u1, f.v1], [f.u1, f.v0], [f.u0, f.v0]]);
             q.off.extend([[-hw, y0], [hw, y0], [hw, y1], [-hw, y1]]);
+            let k = TINTS[t.tint as usize];
+            q.col.extend([[k[0], k[1], k[2], 1.0]; 4]);
             q.idx.extend_from_slice(&[i, i + 1, i + 2, i, i + 2, i + 3]);
             q.lo = q.lo.min(base + Vec3::new(-hw, y0, -hw));
             q.hi = q.hi.max(base + Vec3::new(hw, y1, hw));
@@ -901,6 +931,7 @@ fn build_chunk(commands: &mut Commands, meshes: &mut Assets<Mesh>, kit: &TreeKit
         m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0f32, 1.0, 0.0]; n]);
         m.insert_attribute(Mesh::ATTRIBUTE_UV_0, q.uv);
         m.insert_attribute(Mesh::ATTRIBUTE_UV_1, q.off);
+        m.insert_attribute(Mesh::ATTRIBUTE_COLOR, q.col);
         m.insert_indices(Indices::U32(q.idx));
         let h = meshes.add(m);
         // GPU-only (no CPU copy kept), and the quads turn: bounds by hand.
@@ -967,9 +998,9 @@ pub fn stream(
             let tf = Transform { translation: t.pos, rotation: Quat::from_rotation_y(t.yaw), scale: t.scale };
             let (out, trunk, crown, range) = if one { (&mut c.lod1, &kind.trunk1, &kind.lod1, &r1) } else { (&mut c.lod0, &kind.trunk, &kind.crown, &r0) };
             if let (Some(m), Some(mat)) = (trunk, &sk.trunk_mat) {
-                out.push(commands.spawn((Mesh3d(m.clone()), MeshMaterial3d(mat.clone()), tf, range.clone(), Scenery, KeepDetail)).id());
+                out.push(commands.spawn((Mesh3d(m.clone()), MeshMaterial3d(mat.clone()), tf, range.clone(), Scenery, KeepDetail, super::mirror::seen())).id());
             }
-            out.push(commands.spawn((Mesh3d(crown.clone()), MeshMaterial3d(sk.crown_mat.clone()), tf, range.clone(), Scenery, KeepDetail)).id());
+            out.push(commands.spawn((Mesh3d(crown.clone()), MeshMaterial3d(sk.crown_mats[t.tint as usize].clone()), tf, range.clone(), Scenery, KeepDetail, super::mirror::seen())).id());
         }
     }
     // Impostor chunks: drop the ones out of reach, build the nearest missing or stale ones.
