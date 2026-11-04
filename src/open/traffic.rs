@@ -190,7 +190,26 @@ pub struct Node {
 pub struct LaneGraph {
     pub lanes: Vec<Lane>,
     pub nodes: Vec<Node>,
+    /// How often cars start on each lane, relative (town streets 0.3, the B-road 1).
+    pub weight: Vec<f32>,
 }
+
+/// Fernhollow's speed limit on the B-road through the town (m/s): 50 km/h.
+pub const TOWN_LIMIT: f32 = 50.0 / 3.6;
+/// The posted speed limit (m/s) at station `i` of road `road`: the data's limit if set, else
+/// by kind, and 50 km/h on the B-road through Fernhollow's core (`town::in_core`). What the
+/// traffic lanes use; signs should show the same.
+pub fn posted_limit(net: &RoadNet, road: usize, i: usize) -> f32 {
+    let nr = &net.roads[road];
+    if let Some(l) = nr.limit {
+        return l;
+    }
+    let p = nr.road.pts[i.min(nr.road.len() - 1)];
+    if nr.kind == RoadKind::BRoad && super::town::in_core(Vec2::new(p.x, p.z)) { TOWN_LIMIT } else { limit(nr.kind) }
+}
+
+/// Relative chance a car starts on a town street rather than the B-road.
+pub const STREET_WEIGHT: f32 = 0.3;
 
 /// One end of a road segment at a node: the lane leaving the node and the one arriving.
 #[derive(Clone, Copy)]
@@ -323,7 +342,6 @@ impl LaneGraph {
                 segs.push((a.0, b.0 + n, a.1, b.1));
             }
             let off = lane_offset(nr.kind);
-            let lim = nr.limit.unwrap_or_else(|| limit(nr.kind));
             for (a, b, na, nb) in segs {
                 let ta = (trim[na] / STEP).ceil() as usize;
                 let tb = (trim[nb] / STEP).ceil() as usize;
@@ -345,6 +363,8 @@ impl LaneGraph {
                         let y = road.pts[i].y + road.bank[i] * lat;
                         pts.push(Vec3::new(p.x, y, p.y));
                         let k = road.curv[i].abs().max(1e-5);
+                        // 50 through Fernhollow (unless the data sets a limit).
+                        let lim = posted_limit(net, r, i);
                         limits.push(lim.min((A_LAT / k).sqrt()).max(V_MIN));
                     }
                     if !forward {
@@ -458,7 +478,14 @@ impl LaneGraph {
             let (lim, cum) = (&lanes[i].limit, &lanes[i].cum);
             lanes[i].advisory = advisory(lim, cum, end.min(*lim.last().unwrap()));
         }
-        LaneGraph { lanes, nodes: out_nodes }
+        let weight = lanes
+            .iter()
+            .map(|l| match l.kind {
+                LaneKind::Road { road, .. } if net.roads[road].kind == RoadKind::Street => STREET_WEIGHT,
+                _ => 1.0,
+            })
+            .collect();
+        LaneGraph { lanes, nodes: out_nodes, weight }
     }
 
     /// Point and unit direction (3D, along the lane) at `s` on `lane`, reading on into `next`
@@ -629,11 +656,13 @@ impl Traffic {
                 continue;
             }
             let len = l.length();
-            // Not near the ends: room to brake for the stop line, and for a car turning in.
+            // Not near the ends: room to brake for the stop line, and for a car turning in. Fewer
+            // spots where fewer cars start.
+            let step = SPOT_STEP / graph.weight.get(i).copied().unwrap_or(1.0).max(0.05);
             let mut s = 25.0;
             while s < len - 40.0 {
                 spots.push(Spot { lane: i as u32, s, pos: xz(l.point(s)) });
-                s += SPOT_STEP;
+                s += step;
             }
         }
         let cells_n = (2.0 * super::roads::HALF / CELL).ceil() as i32 + 1;
@@ -1520,7 +1549,9 @@ mod tests {
                     .iter()
                     .filter_map(|r| r.road.nearest(p, 30.0).map(|at| at.lateral.abs() - r.road.half_width(&at)))
                     .fold(f32::MAX, f32::min);
-                assert!(out < 0.0, "car {} off the road at {p} ({:?}): {out} m out", a.id, lane.kind);
+                // (A tight right turn in town crosses the corner of the two ribbons: that's the
+                // junction's tarmac, its kerb rounded at 7 m.)
+                assert!(out < 0.0 || lane.is_turn() && out < 0.3, "car {} off the road at {p} ({:?}): {out} m out", a.id, lane.kind);
                 // Near the player.
                 assert!(p.distance(xz(p_pos(&walker, &g))) < t.config.despawn + 5.0);
             }

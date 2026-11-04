@@ -311,3 +311,48 @@ means and the 2 m step count, and gives these numbers one command.
   may need a new line: flag to audio).
 - **Docs drift**: update `GAME_OVERVIEW.md` §4.3/4.4 and `RALLY_MAP.md` status after the merge (cut
   70 %, blend adaptive, building counts).
+
+## 9. As built (stream A, 5 Nov 2026)
+
+Measured on the committed bake (`open::land::tests::slope_report`, `buildings::tests`,
+`roads::yump`):
+
+| Metric | Before | Target | Built |
+|---|---|---|---|
+| Area > 100 % slope | 3.4 % | ≤ 0.8 %, ≥ 70 % in crags | 0.01 %, 98 % in crags |
+| > 150 % outside crags | 1.0 % | ≤ 0.05 % | 0 |
+| 2 m neighbours > 3 m apart, outside crags | 40k (both axes) | < 1,000 | 0 |
+| Worst 20 m band mean slope | 71 % (300 m) | ≤ 50 % | 46 % (260 m) |
+| Area at 180-340 m | 16.4 % | ≥ 20 % | 21.4 % |
+| Area < 10 % slope | 41.1 % | 30-38 % | 36.8 % |
+| Town lots slope p90 | 10.7 % | ≤ 6 % | 5.1 % |
+| > 70 % at 30-46 m vs 60-90 m from a road | 6.0 vs 6.2 % | near ≤ far | 3.0 vs 3.7 % |
+| 2 m steps > 1.5 m within 50 m of a road | 21k | 0 | 22 (ditch edges and two crag-side spots) |
+| Buildings | 110 | core 380-520, outskirts 80-130, steadings 25-35, huts 8-12 | 486, 101, 34, 10 (654 in all) |
+| Building meshes / triangles | 110 / — | ≤ 60 / < 600k | 53 tiles / 240k |
+| Jumps | 0 | 3, ≥ 0.3 s in the air | 3: 0.65, 0.53, 0.63 s |
+| Two bakes | — | same bytes | same bytes; 10 s (dev build) |
+
+Where it differs from §2-§5:
+- **T1-T9** as specified, plus: ramps half linear (more land at mid heights); the crag mask is
+  the plateau rim where the zones' base climbs over ~20 %, in patches (no quarry face yet);
+  thermal is Gauss-Seidel sweeps (Jacobi barely moves a long over-steep slope); no river
+  terraces through the town.
+- **T10:** cut 60 % (was 70), drop-off fill 70 % (was 90), blend width `|shaped − base| / 0.4`
+  clamped to 16-80 m. **T11:** talus 0.72, frozen within 3 m of a road's edge (12 m froze the
+  banks it was meant to fix).
+- **Town:** 13 streets (roads 8-20). The spine is road 8, a 6 m street from Main Street to
+  Upper Road; the forestry road (road 4) now starts at its top (the "Fernhollow escarpment"
+  start moved there). Rows by ring: tall continuous terraces round the square, lower rows,
+  semis towards the edge. Hill Lane and the team awnings are not built.
+- **Jumps:** no crest on the new roads is a straight one (they top out in hairpins), so each
+  Yump is a kicker on a straight, level stretch (+5.6 % over 50 m, down ≤ 15 % over 20 m,
+  crest R_v 55 / 45 m): road 1 station 128 (−1719, −997), road 3 station 190 (−981, 1560),
+  road 6 station 261 (98, −826). `WorldData::yumps` holds them for the challenge placer. The §5
+  anchors all moved with the roads: F re-measures them on this bake.
+- **Southern loop** runs out through the south hills (on the new land it was 2.2 km and River
+  crossings 2.9 km; now 3.8 km and 4.4 km).
+- **Known:** the droplets leave a fine streak ripple (8-16 m) on open slopes, visible from the
+  air and on the map; blurring it out pushes the < 10 % share to 47 % and the road steps up, so
+  it stays. `open.check` (now against the crowned surface) leaves 5-8 cm at a few junctions and
+  a jump crest (2 m sampling).

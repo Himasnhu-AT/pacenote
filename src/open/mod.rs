@@ -18,6 +18,7 @@ pub mod live;
 pub mod placeable;
 pub mod roads;
 pub mod tour;
+pub mod town;
 pub mod traffic;
 pub mod walls;
 
@@ -140,7 +141,7 @@ impl OpenWorld {
                 }
                 h
             }
-            None => Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z)),
+            None => roads::terrain(&net, SPACING),
         };
         let layout = buildings::layout_baked(&net, &data.lots, &data.buildings);
         // Every straight wall the car can hit: facades now; parapets and barriers go here too.

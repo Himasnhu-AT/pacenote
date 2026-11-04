@@ -370,20 +370,36 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
             rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: libm::atan2f(d.x, d.y), y: mid.y, tag: "road".into() });
         }
     }
-    // The open world's village and service park: no forest, rocks or bushes (gardens go there);
-    // none through any building either.
+    // Fernhollow: nothing grows on its sidewalks, the square or the car park, nor against a
+    // building (the back yards keep a few garden trees: the valley's scattered field trees);
+    // the service park stays clear; houses out in the country keep a garden.
     if let Some(o) = &w.open {
-        let pl = o.net.places();
-        for c in [pl.village, pl.park] {
-            rects.push(Rect { center: c, half: Vec2::splat(crate::open::buildings::VILLAGE_R * 0.7), yaw: 0.0, y: o.net.town_y, tag: "road".into() });
+        use crate::open::buildings::{LotKind, SIDEWALK, Use};
+        let road = |center: Vec2, half: Vec2, yaw: f32| Rect { center, half, yaw, y: o.net.town_y, tag: "road".into() };
+        for blk in o.buildings.blocks.iter().filter(|b| b.cell.is_some()) {
+            let (lo, hi) = (blk.min - Vec2::splat(SIDEWALK + 0.5), blk.max + Vec2::splat(SIDEWALK + 0.5));
+            if matches!(blk.kind, LotKind::Plaza | LotKind::Parking) {
+                rects.push(road((lo + hi) * 0.5, (hi - lo) * 0.5, 0.0));
+                continue;
+            }
+            // The sidewalk and 3 m inside it, round the block.
+            let strip = SIDEWALK + 3.5;
+            let c = (lo + hi) * 0.5;
+            let h = (hi - lo) * 0.5;
+            rects.push(road(Vec2::new(c.x, lo.y + strip * 0.5), Vec2::new(h.x, strip * 0.5), 0.0));
+            rects.push(road(Vec2::new(c.x, hi.y - strip * 0.5), Vec2::new(h.x, strip * 0.5), 0.0));
+            rects.push(road(Vec2::new(lo.x + strip * 0.5, c.y), Vec2::new(strip * 0.5, h.y), 0.0));
+            rects.push(road(Vec2::new(hi.x - strip * 0.5, c.y), Vec2::new(strip * 0.5, h.y), 0.0));
         }
+        rects.push(road(o.net.places().park, Vec2::splat(150.0), 0.0));
         // Nothing grows in the river (`art::water` lays the water in its bed).
         let hf = &w.heights;
         for (c, h, yaw) in crate::art::water::channel(&o.net.land.river, |x, z| hf.height_at(x, z)) {
             rects.push(Rect { center: c, half: h, yaw, y: hf.height_at(c.x, c.y), tag: "road".into() });
         }
         for b in &o.buildings.buildings {
-            rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(4.0), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
+            let garden = if b.use_ == Use::House && !crate::open::town::in_core(b.centre) { 7.0 } else { 3.0 };
+            rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(garden), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
         }
     }
     // The open world's ecology (`open::ecology`): above the treeline, valley fields, clear-cuts.

@@ -46,6 +46,11 @@ pub struct WorldData {
     /// streets and lots (`buildings::layout_with`).
     #[serde(default)]
     pub buildings: Vec<buildings::Building>,
+    /// The jump crests the generator built (road, station), for the Yump challenges. (Missing in
+    /// levels baked before them: none.)
+    #[serde(default)]
+    #[reflect(default)]
+    pub yumps: Vec<(u32, u32)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Reflect)]
@@ -103,6 +108,7 @@ impl WorldData {
             grades: Vec::new(),
             lots: buildings::town_lots(seed),
             buildings: Vec::new(),
+            yumps: net.yumps.iter().map(|&(k, i)| (k as u32, i as u32)).collect(),
         }
     }
 
@@ -112,7 +118,8 @@ impl WorldData {
     pub fn net(&self) -> RoadNet {
         let roads: Vec<NetRoad> = self.roads.iter().map(net_road).collect();
         let junctions = roads::find_junctions(&roads);
-        let mut net = RoadNet { seed: self.seed, roads, junctions, town_y: self.town_y, land: super::land::land(self.seed) };
+        let yumps = self.yumps.iter().map(|&(k, i)| (k as usize, i as usize)).filter(|&(k, i)| roads.get(k).is_some_and(|r| i < r.road.len())).collect();
+        let mut net = RoadNet { seed: self.seed, roads, junctions, town_y: self.town_y, land: super::land::land(self.seed), yumps };
         super::profile::dress(&mut net);
         net
     }
@@ -186,6 +193,9 @@ impl WorldData {
             if len(g.road).is_none_or(|n| g.station as usize >= n) || g.grade > 6 {
                 return Err(format!("grade {g:?}"));
             }
+        }
+        if self.yumps.len() > 64 || self.yumps.iter().any(|&(k, _)| k as usize >= self.roads.len()) {
+            return Err(format!("jumps {:?}", self.yumps));
         }
         if self.lots.len() > 1_000 {
             return Err(format!("{} lots", self.lots.len()));

@@ -60,7 +60,7 @@ What the level holds (`src/open/level.rs`):
 | `road N (kind)` | `Spline`, `RoadSpline { kind, speed_kmh }` (kinds `Street`, `BRoad`, `Gravel`, `Forest`) | a road. Control points where needed (every station within 10 cm sideways, 3 cm in height of the curve); `tags` = surface + kind (`data::tags`), `bank` = roll in radians. Loading samples it every 2 m. Roads are numbered in stable-id order (events and grades use the number). |
 | `open world` | `WorldDoc { data, terrain }` | seed, town height, time of day, events (road, start/finish station), town lots; the terrain folder |
 | `home`, `event start: …`, grade notes | `HomePoint`, `EventStart`, `GradeNote` | the placeables (`placeable.rs`): moved in the editor, snapped to the road on load |
-| `house 12`, `shop 40`, … | `Building` | one building each (110): kind, size, floors, storey height, roof, colours; its Transform places it. The game builds its mesh as a child |
+| `house 12`, `terrace 40`, … | `Building` | one building each (654): kind, size, floors, storey height, roof, colours; its Transform places it. In play the town draws as merged tiles (`buildings::BuildingTile`); in the editor the game builds each one's mesh as a child |
 | `Trees`, `Dressing` | `Foliage`, `PcgOverrides`, `PcgFollowTerrain` | hand edits of the trees and of the rocks / bushes; the game puts the `PcgVolume` on them |
 
 Edit it with the game's own binary: `cargo run -- --editor --level assets/levels/open.level.ron`
