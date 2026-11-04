@@ -210,7 +210,9 @@ fn controls_card(
     mut save: MessageWriter<engine::settings::SaveSettings>,
     mut was_loading: Local<bool>,
     mut cards: Query<(Entity, &mut ControlsCard, &mut Visibility)>,
+    race_field: Option<Res<crate::career::racers::RaceField>>,
 ) {
+    let race = race_field.is_some();
     let loaded = std::mem::replace(&mut *was_loading, loading.is_some()) && loading.is_none();
     if !driver_view(stage.is_some(), &role, &loading) {
         return;
@@ -222,6 +224,13 @@ fn controls_card(
     // What to do with the card: keep, drop, or (re)draw it with a time limit.
     let mut want: Option<Option<f32>> = None;
     let mut drop = false;
+    // Never over the race position block (UX_PASS §3.3).
+    if race {
+        for (e, ..) in &cards {
+            commands.entity(e).despawn();
+        }
+        return;
+    }
     match cards.single_mut() {
         Ok((_, mut c, mut vis)) => {
             c.age += time.delta_secs();

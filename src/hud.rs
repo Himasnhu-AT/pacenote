@@ -9,6 +9,10 @@
 //! The controls card, the event-start prompt, the roof hint and short notices are in
 //! `meta::coach`.
 //!
+//! Festival additions (stream E, `docs/festival/UX_PASS.md` §3.4-§3.5): the gear box border
+//! pulses accent ↔ white at 2 Hz at the shift point (steady with reduce motion), and in free
+//! roam a Notes chip top right shows the balance and the change for 4 s after it moves.
+//!
 //! Each readout can be turned off in Settings > HUD ([`crate::prefs::Prefs`]). Cheap: values
 //! are cached and text / colours / widths are only written when they change (no per-frame
 //! formatting or allocation while nothing changes).
@@ -27,6 +31,23 @@ pub const REV_SEGMENTS: usize = 24;
 
 #[derive(Component)]
 struct HudRoot;
+
+/// The gear box (its border pulses at the shift point).
+#[derive(Component)]
+struct GearBox;
+
+/// The Notes chip (top right, free roam) and its two texts.
+#[derive(Component)]
+struct NotesChip;
+#[derive(Component)]
+struct NotesValue;
+#[derive(Component)]
+struct NotesDelta;
+
+/// How long the Notes chip stays after a change (s).
+const NOTES_CHIP_S: f32 = 4.0;
+/// The shift point as a share of the redline.
+const SHIFT_AT: f32 = 0.93;
 
 /// Which value a text shows.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +93,7 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_hud, update_hud, hide_under_screens).chain().run_if(resource_exists::<StageWorld>));
+        app.add_systems(Update, (spawn_hud, update_hud, shift_pulse, notes_chip, hide_under_screens).chain().run_if(resource_exists::<StageWorld>));
     }
 }
 
@@ -144,6 +165,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
                         u.spawn(text("GEAR", label(SIZE_TINY), t.text_dim));
                     });
                     r.spawn((
+                        GearBox,
                         Node { width: px(78), height: px(92), justify_content: JustifyContent::Center, align_items: AlignItems::Center, border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
                         BorderColor::all(t.accent),
                         Pickable::IGNORE,
@@ -152,6 +174,18 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
                         g.spawn((HudText::Gear, text("1", display(76.0), t.accent)));
                     });
                 });
+            });
+            // Top right: the Notes chip (free roam, after a change).
+            root.spawn((
+                NotesChip,
+                Node { position_type: PositionType::Absolute, right: px(40), top: px(34), column_gap: px(10), align_items: AlignItems::Baseline, padding: UiRect::new(px(16), px(16), px(6), px(8)), border_radius: BorderRadius::all(px(RADIUS)), display: Display::None, ..default() },
+                plate(),
+                Pickable::IGNORE,
+            ))
+            .with_children(|c| {
+                c.spawn((NotesValue, text("0", display(40.0), t.text)));
+                c.spawn(text("N", label(SIZE_LABEL + 4.0), t.text_muted));
+                c.spawn((NotesDelta, text("", body_bold(SIZE_BODY + 2.0), t.good)));
             });
             // Bottom left: stage, clock, progress.
             root.spawn((
@@ -437,6 +471,72 @@ fn update_hud(
 }
 
 /// `83.4` → "1:23.400".
+/// The gear box border: accent ↔ white at 2 Hz at the shift point; accent otherwise (and
+/// always with reduce motion).
+fn shift_pulse(
+    time: Res<Time<Real>>,
+    spec: Res<CarSpec>,
+    theme: Res<Theme>,
+    a11y: Option<Res<engine::actions::Accessibility>>,
+    cars: Query<&DrivenCar>,
+    mut boxes: Query<&mut BorderColor, With<GearBox>>,
+) {
+    let Ok(c) = cars.single() else { return };
+    let at_shift = c.car.gear > 0 && c.car.rpm >= spec.0.redline * SHIFT_AT && !a11y.is_some_and(|a| a.reduce_motion);
+    let want = if at_shift {
+        let k = (time.elapsed_secs() * std::f32::consts::TAU * 2.0).sin() * 0.5 + 0.5;
+        engine::ui::widgets::mix(theme.accent, theme.text, k)
+    } else {
+        theme.accent
+    };
+    for mut b in &mut boxes {
+        if b.top != want {
+            *b = BorderColor::all(want);
+        }
+    }
+}
+
+/// The Notes chip: in free roam, for 4 s after the balance changes ("12,400 N +750").
+#[allow(clippy::type_complexity)]
+fn notes_chip(
+    time: Res<Time<Real>>,
+    stage: Res<StageWorld>,
+    wallet: Option<Res<crate::career::wallet::Wallet>>,
+    theme: Res<Theme>,
+    mut chip: Query<&mut Node, With<NotesChip>>,
+    mut value: Query<&mut Text, (With<NotesValue>, Without<NotesDelta>)>,
+    mut delta: Query<(&mut Text, &mut TextColor), (With<NotesDelta>, Without<NotesValue>)>,
+    mut last: Local<Option<(u32, f32)>>,
+) {
+    let Some(w) = wallet else { return };
+    let now = time.elapsed_secs();
+    let before = last.map(|(b, _)| b);
+    if before != Some(w.balance) {
+        // The first look only notes the balance; a change shows the chip.
+        if let Some(b) = before {
+            let d = w.balance as i64 - b as i64;
+            for mut t in &mut value {
+                t.0 = crate::meta::hub::thousands(w.balance);
+            }
+            for (mut t, mut c) in &mut delta {
+                t.0 = if d >= 0 { format!("+{}", crate::meta::hub::thousands(d as u32)) } else { format!("\u{2212}{}", crate::meta::hub::thousands((-d) as u32)) };
+                c.0 = if d >= 0 { theme.good } else { theme.bad };
+            }
+            *last = Some((w.balance, now));
+        } else {
+            *last = Some((w.balance, f32::NEG_INFINITY));
+        }
+    }
+    let since = last.map_or(f32::NEG_INFINITY, |(_, t)| t);
+    let show = stage.free_roam() && stage.event.is_none() && now - since < NOTES_CHIP_S;
+    let want = if show { Display::Flex } else { Display::None };
+    for mut n in &mut chip {
+        if n.display != want {
+            n.display = want;
+        }
+    }
+}
+
 fn clock_into(s: &mut String, t: f32) {
     let t = t.max(0.0);
     let m = (t / 60.0).floor();
