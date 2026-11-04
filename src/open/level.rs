@@ -162,19 +162,45 @@ impl Building {
 #[derive(Component)]
 pub struct BuildingShape;
 
-/// Builds the mesh child of every level [`Building`] that is new or changed, and drops the
-/// loose (generated) building meshes once the level's buildings exist.
+/// Whether the level is open in the editor (buildings then draw one by one, to be picked and
+/// moved; in play the town draws in merged tiles, `buildings::BuildingTile`).
+pub fn editing(world: &World) -> bool {
+    #[cfg(feature = "dev")]
+    return world.contains_resource::<engine::editor::EditorMode>();
+    #[cfg(not(feature = "dev"))]
+    {
+        let _ = world;
+        false
+    }
+}
+
+/// In the editor: the mesh child of every level [`Building`] that is new, changed or has none,
+/// and the merged tiles hidden. In play: the tiles shown and no per-building meshes (the
+/// level's buildings are data there; collision is their facades, `buildings::walls`).
 #[allow(clippy::type_complexity)]
 fn sync_buildings(world: &mut World) {
-    let mut q = world.query_filtered::<(Entity, &Building, &Transform, Option<&Children>), (With<LevelEntity>, Or<(Changed<Building>, Changed<Transform>)>)>();
-    let todo: Vec<(Entity, Building, Transform, Vec<Entity>)> = q.iter(world).map(|(e, b, t, c)| (e, *b, *t, c.map(|c| c.iter().collect()).unwrap_or_default())).collect();
-    let any = world.query_filtered::<(), (With<Building>, With<LevelEntity>)>().iter(world).next().is_some();
-    if any {
-        let loose: Vec<Entity> = world.query_filtered::<Entity, With<buildings::LooseBuilding>>().iter(world).collect();
-        for e in loose {
-            world.entity_mut(e).despawn();
+    let editing = editing(world);
+    let want = if editing { Visibility::Hidden } else { Visibility::Inherited };
+    let mut q = world.query_filtered::<&mut Visibility, With<buildings::BuildingTile>>();
+    for mut v in q.iter_mut(world) {
+        if *v != want {
+            *v = want;
         }
     }
+    if !editing {
+        let shapes: Vec<Entity> = world.query_filtered::<Entity, With<BuildingShape>>().iter(world).collect();
+        for e in shapes {
+            world.entity_mut(e).despawn();
+        }
+        return;
+    }
+    let mut q = world.query_filtered::<(Entity, &Building, &Transform, Option<&Children>, Ref<Building>, Ref<Transform>), With<LevelEntity>>();
+    let shaped: std::collections::HashSet<Entity> = world.query_filtered::<&ChildOf, With<BuildingShape>>().iter(world).map(|c| c.parent()).collect();
+    let todo: Vec<(Entity, Building, Transform, Vec<Entity>)> = q
+        .iter(world)
+        .filter(|(e, _, _, _, b, t)| b.is_changed() || t.is_changed() || !shaped.contains(e))
+        .map(|(e, b, t, c, _, _)| (e, *b, *t, c.map(|c| c.iter().collect()).unwrap_or_default()))
+        .collect();
     if todo.is_empty() || !crate::art::visual(world) {
         return;
     }

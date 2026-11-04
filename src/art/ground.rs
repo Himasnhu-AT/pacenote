@@ -123,7 +123,9 @@ pub fn spawn_road(world: &mut World, s: &StageWorld) {
     let Some(open) = s.open.clone() else {
         let last = s.road.len() - 1;
         let mut mats = Mats::default();
-        spawn_one_road(world, s, &mut mats, &s.road, s.def.surface, &[(0..=last).collect()]);
+        let mut parts = Parts::default();
+        spawn_one_road(world, s, &mut mats, &s.road, s.def.surface, &[(0..=last).collect()], &mut parts);
+        parts.spawn(world);
         // The stage's road runs on a little past both ends and fades into the ground, so there
         // is no hard edge behind the car at the start line.
         let set = surface_sets(s.def.surface, s.def.biome).0;
@@ -142,11 +144,53 @@ pub fn spawn_road(world: &mut World, s: &StageWorld) {
     let inside = junctions::trimmed(net, &geoms);
     // One material per texture set for the whole network (so road chunks batch).
     let mut mats = Mats::default();
+    let mut parts = Parts::default();
     for (k, nr) in net.roads.iter().enumerate() {
         let runs = junctions::kept_runs(nr.road.len(), nr.closed, &inside[k]);
-        spawn_one_road(world, s, &mut mats, &nr.road, majority(&nr.road.surface), &runs);
+        spawn_one_road(world, s, &mut mats, &nr.road, majority(&nr.road.surface), &runs, &mut parts);
     }
+    parts.spawn(world);
     super::junctions::spawn(world, s, &mut mats, &open, &geoms, &inside);
+}
+
+/// Road pieces (ribbon chunks, verges, patches) waiting to be merged: one mesh per kind,
+/// material and 512 m tile, so the town's many short runs between junctions (and the network's
+/// chunks) don't each cost a draw (TECH_PASS §4).
+#[derive(Default)]
+pub(super) struct Parts {
+    /// (name, material, casts shadows, tile) → (origin, merged mesh), in first-seen order.
+    groups: Vec<((&'static str, Handle<StandardMaterial>, bool, (i32, i32)), Vec3, Mesh)>,
+}
+
+/// Side (m) of the tiles road pieces merge in.
+const PART_TILE: f32 = 512.0;
+
+impl Parts {
+    pub(super) fn add(&mut self, name: &'static str, mat: &Handle<StandardMaterial>, shadow: bool, center: Vec3, mesh: Mesh) {
+        let tile = ((center.x / PART_TILE).floor() as i32, (center.z / PART_TILE).floor() as i32);
+        let key = (name, mat.clone(), shadow, tile);
+        match self.groups.iter_mut().find(|g| g.0 == key) {
+            Some((_, origin, m)) => {
+                let moved = mesh.translated_by(center - *origin);
+                if m.merge(&moved).is_err() {
+                    warn!("road mesh pieces don't merge ({name})");
+                }
+            }
+            None => self.groups.push((key, center, mesh)),
+        }
+    }
+
+    pub(super) fn spawn(self, world: &mut World) {
+        for ((name, mat, shadow, _), origin, mesh) in self.groups {
+            let (h, aabb) = add_mesh(world, mesh);
+            let mut e = world.spawn((Name::new(name), Mesh3d(h), MeshMaterial3d(mat), Transform::from_translation(origin), Scenery, KeepDetail));
+            if !shadow {
+                e.insert(NotShadowCaster);
+            }
+            let id = e.id();
+            bounds(world, id, aabb);
+        }
+    }
 }
 
 /// Road materials by texture set: opaque surfaces, blended patches and verges.
@@ -228,7 +272,7 @@ pub(super) fn brake_wear(road: &Road) -> Vec<f32> {
     wear
 }
 
-fn spawn_one_road(world: &mut World, s: &StageWorld, mats: &mut Mats, road: &Road, main: Surface, runs: &[Vec<usize>]) {
+fn spawn_one_road(world: &mut World, s: &StageWorld, mats: &mut Mats, road: &Road, main: Surface, runs: &[Vec<usize>], parts: &mut Parts) {
     let wear = if s.open.is_some() { brake_wear(road) } else { Vec::new() };
     let (main_set, verge_set) = surface_sets(main, s.def.biome);
     let main_mat = mats.surface(world, main_set, false);
@@ -244,14 +288,11 @@ fn spawn_one_road(world: &mut World, s: &StageWorld, mats: &mut Mats, road: &Roa
             let part = &run[c..=d];
             let p0 = st0 + c as f32 * stage::STEP;
             let (center, mesh) = ribbon(road, part, p0, main, 0.04, &wear, |_, _, _| 1.0);
-            let (h, aabb) = add_mesh(world, mesh);
-            let id = world.spawn((Name::new("road"), Mesh3d(h), MeshMaterial3d(main_mat.clone()), Transform::from_translation(center), Scenery, KeepDetail)).id();
-            bounds(world, id, aabb);
+            // (A ribbon on the ground casts no shadow worth its draws in every cascade.)
+            parts.add("road", &main_mat, false, center, mesh);
             for side in [-1.0f32, 1.0] {
                 let (center, mesh) = verge(s, road, part, p0, side);
-                let (h, aabb) = add_mesh(world, mesh);
-                let id = world.spawn((Name::new("verge"), Mesh3d(h), MeshMaterial3d(vmat.clone()), Transform::from_translation(center), Scenery, KeepDetail, NotShadowCaster)).id();
-                bounds(world, id, aabb);
+                parts.add("verge", &vmat, false, center, mesh);
             }
             c = d;
         }
@@ -280,9 +321,7 @@ fn spawn_one_road(world: &mut World, s: &StageWorld, mats: &mut Mats, road: &Roa
                 while k < b {
                     let l = (k + CHUNK).min(b);
                     let (center, mesh) = ribbon(road, &run[k..=l], st0 + k as f32 * stage::STEP, surf, 0.055, &wear, |st, lat, at| fade(st, lat, road.width[at].min(9.0) * 0.5 + 0.4));
-                    let (h, aabb) = add_mesh(world, mesh);
-                    let id = world.spawn((Name::new("road patch"), Mesh3d(h), MeshMaterial3d(pm.clone()), Transform::from_translation(center), Scenery, KeepDetail, NotShadowCaster)).id();
-                    bounds(world, id, aabb);
+                    parts.add("road patch", &pm, false, center, mesh);
                     k = l;
                 }
             }

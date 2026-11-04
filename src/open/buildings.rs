@@ -370,10 +370,16 @@ struct RowStyle {
     yard: (f32, f32),
 }
 
-const SHOPS: RowStyle = RowStyle { use_: Use::Shop, frontage: (7.0, 12.0), depth: (12.0, 16.0), setback: (0.0, 1.0), row: (30.0, 55.0), alley: 0.55, yard: (6.0, 14.0) };
-const TERRACES: RowStyle = RowStyle { use_: Use::Terrace, frontage: (5.5, 7.5), depth: (9.0, 12.0), setback: (0.0, 1.5), row: (20.0, 40.0), alley: 0.2, yard: (20.0, 40.0) };
+/// Main Street: shops, 2-4 storeys, wide fronts, a near-continuous row.
+const SHOPS: RowStyle = RowStyle { use_: Use::Shop, frontage: (9.0, 14.0), depth: (12.0, 16.0), setback: (0.0, 0.8), row: (40.0, 70.0), alley: 0.85, yard: (5.0, 10.0) };
+/// The centre (within ~200 m of the square): tall terraces, wide fronts, rows broken only by
+/// alleys.
+const CENTRE_ROWS: RowStyle = RowStyle { use_: Use::Terrace, frontage: (8.0, 12.0), depth: (10.0, 13.0), setback: (0.0, 0.5), row: (35.0, 70.0), alley: 0.85, yard: (6.0, 12.0) };
+/// The inner ring: 2-3 storey terraces in shorter rows.
+const INNER_ROWS: RowStyle = RowStyle { use_: Use::Terrace, frontage: (7.5, 10.5), depth: (9.0, 12.0), setback: (0.5, 2.0), row: (25.0, 45.0), alley: 0.5, yard: (10.0, 18.0) };
 const APARTMENTS: RowStyle = RowStyle { use_: Use::Apartment, frontage: (18.0, 30.0), depth: (12.0, 14.0), setback: (4.0, 6.0), row: (18.0, 30.0), alley: 0.0, yard: (8.0, 16.0) };
-const SEMIS: RowStyle = RowStyle { use_: Use::House, frontage: (7.5, 9.0), depth: (8.5, 10.0), setback: (3.0, 5.0), row: (15.0, 18.0), alley: 0.0, yard: (14.0, 24.0) };
+/// Towards the town's edge: semi-detached pairs with front gardens and a gap between pairs.
+const SEMIS: RowStyle = RowStyle { use_: Use::House, frontage: (8.0, 10.0), depth: (8.5, 10.0), setback: (3.0, 6.0), row: (16.0, 20.0), alley: 0.0, yard: (7.0, 12.0) };
 
 /// Fernhollow: every block of its plan (`open::town`), rows of buildings along the edges that
 /// face a street, fronts on the sidewalk; the church, the town hall and the mill first.
@@ -396,15 +402,19 @@ fn town(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
             let len = |e: usize| if e < 2 { pb.max.y - pb.min.y } else { pb.max.x - pb.min.x };
             edges.sort_by(|a, b| len(*b).total_cmp(&len(*a)).then(a.cmp(b)));
             for e in edges {
-                // Main Street's frontage is shops; elsewhere the block's kind, shops near the
-                // spine on the cross streets.
+                // Main Street's frontage is shops; elsewhere rows by how central the block is:
+                // tall terraces in the centre, lower ones round it, semis towards the edge.
                 let main = e == 2 && (pb.min.y - (land::MAIN_Z + super::town::MAIN_HALF + SIDEWALK)).abs() < 0.5 || pb.name == "riverside";
+                let rows = match ring_of((pb.min + pb.max) * 0.5) {
+                    _ if pb.min.y > super::town::MILL.0 => SEMIS,
+                    0 => CENTRE_ROWS,
+                    _ => INNER_ROWS,
+                };
                 let style = match u {
                     Use::Shop if main => SHOPS,
-                    Use::Shop => TERRACES,
                     Use::Apartment => APARTMENTS,
                     Use::House => SEMIS,
-                    _ => TERRACES,
+                    _ => rows,
                 };
                 row_edge(net, &mut rng, buildings, pb.min, pb.max, e, style, roof);
             }
@@ -828,7 +838,7 @@ fn on_line(w: &Wall, d: Vec2, t: f32) -> Vec2 {
 
 // ---------------------------------------------------------------- rendering
 
-pub use render::{BuildingMesh, LooseBuilding, building_mesh, material, spawn};
+pub use render::{BuildingTile, building_mesh, material, spawn, tile_of};
 
 mod render {
     use bevy::asset::RenderAssetUsages;
@@ -863,12 +873,6 @@ mod render {
     const TILE_PX: u32 = 256;
     /// Texels kept clear at each tile's edge (mip bleeding).
     const MARGIN: f32 = 6.0 / TILE_PX as f32;
-
-    /// Marks a spawned block mesh (one per town block or farm).
-    #[derive(Component, Clone, Copy, Debug)]
-    pub struct BuildingMesh {
-        pub block: usize,
-    }
 
     #[derive(Default)]
     pub(super) struct Buf {
@@ -1505,22 +1509,6 @@ mod render {
         }
     }
 
-    /// Builds a block's mesh (local to the block's centre) or `None` if it has nothing.
-    #[cfg(test)]
-    pub(super) fn block_mesh(layout: &Layout, k: usize, height: &dyn Fn(f32, f32) -> f32) -> Option<(Vec3, Buf)> {
-        let blk = &layout.blocks[k];
-        let c = blk.centre();
-        let origin = Vec3::new(c.x, layout.town_y, c.y);
-        let mut buf = Buf { origin, ..default() };
-        if blk.cell.is_some() {
-            add_lot(&mut buf, blk, height);
-        }
-        for &i in &blk.buildings {
-            add_building(&mut buf, &layout.buildings[i]);
-        }
-        (!buf.idx.is_empty()).then_some((origin, buf))
-    }
-
     /// The shared building material (the facade / roof atlas), made once.
     #[derive(Resource, Clone)]
     struct BuildingMaterial(Handle<StandardMaterial>);
@@ -1558,48 +1546,79 @@ mod render {
         buf.into_mesh()
     }
 
-    /// A building's mesh spawned on its own (no level entity holds it: a generated world, or
-    /// before the level's building entities exist). Dropped once they do.
-    #[derive(Component)]
-    pub struct LooseBuilding;
+    /// The town drawn in tiles: one merged mesh of every building and lot (sidewalks, paving)
+    /// whose centre is in it (WORLD_PASS §3, TECH_PASS §4: a draw per tile, not per building).
+    /// In the editor the level's buildings draw themselves one by one (`level::sync_buildings`)
+    /// and the tiles hide.
+    #[derive(Component, Clone, Copy, Debug)]
+    pub struct BuildingTile {
+        pub key: (i32, i32),
+    }
 
-    /// Spawns the town: one entity per town block or farm for its lot (sidewalks, paving) and
-    /// one per building, all sharing one material. Static scenery kept at full detail. `height`
-    /// is the rendered terrain's height (`OpenWorld::heights`). Returns the entities (for
-    /// despawning). Nothing in headless runs.
+    /// Tile side (m) in the town's core and out in the country (fewer, emptier tiles there).
+    pub const TILE: f32 = 128.0;
+    pub const COUNTRY_TILE: f32 = 512.0;
+
+    /// The tile a point falls in: 128 m cells in the core, 512 m cells (keyed apart) outside.
+    pub fn tile_of(p: Vec2) -> (i32, i32) {
+        if crate::open::town::in_core(p) {
+            ((p.x / TILE).floor() as i32, (p.y / TILE).floor() as i32)
+        } else {
+            (10_000 + (p.x / COUNTRY_TILE).floor() as i32, (p.y / COUNTRY_TILE).floor() as i32)
+        }
+    }
+
+    /// Every tile's geometry, sorted by key (lots first, then buildings, each in layout order),
+    /// local to the tile's origin. `height` is the rendered terrain's height.
+    pub(super) fn tiles(layout: &Layout, height: &dyn Fn(f32, f32) -> f32) -> Vec<((i32, i32), Vec3, Buf)> {
+        let mut keys: Vec<(i32, i32)> = layout.blocks.iter().filter(|b| b.cell.is_some()).map(|b| tile_of(b.centre())).chain(layout.buildings.iter().map(|b| tile_of(b.centre))).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        let mut out = Vec::new();
+        for key in keys {
+            // The tile's origin: the first thing in it, at the town's height (positions stay
+            // small in f32).
+            let first = layout.blocks.iter().filter(|b| b.cell.is_some()).map(|b| b.centre()).chain(layout.buildings.iter().map(|b| b.centre)).find(|c| tile_of(*c) == key).unwrap_or_default();
+            let origin = Vec3::new(first.x, layout.town_y, first.y);
+            let mut buf = Buf { origin, ..default() };
+            for blk in layout.blocks.iter().filter(|b| b.cell.is_some() && tile_of(b.centre()) == key) {
+                add_lot(&mut buf, blk, height);
+            }
+            for b in layout.buildings.iter().filter(|b| tile_of(b.centre) == key) {
+                // The plinth reaches down to the ground drawn under it.
+                let mut b = *b;
+                let low = b.corners().iter().chain(std::iter::once(&b.centre)).map(|p| height(p.x, p.y)).fold(b.ground, f32::min);
+                b.base = low.min(b.ground);
+                add_building(&mut buf, &b);
+            }
+            if !buf.idx.is_empty() {
+                out.push((key, origin, buf));
+            }
+        }
+        out
+    }
+
+    /// Spawns the town as merged tiles ([`BuildingTile`]), all sharing one material: static
+    /// scenery kept at full detail (seen from the hills). `height` is the rendered terrain's
+    /// height (`OpenWorld::heights`). Returns the entities (for despawning). Nothing in headless
+    /// runs.
     pub fn spawn(world: &mut World, layout: &Layout, height: &dyn Fn(f32, f32) -> f32) -> Vec<Entity> {
         if !crate::art::visual(world) {
             return Vec::new();
         }
         let mat = material(world);
+        let editing = crate::open::level::editing(world);
         let mut out = Vec::new();
-        let mut add = |world: &mut World, mesh: Mesh, at: Vec3, name: String, extra: Option<usize>| {
+        for (key, origin, buf) in tiles(layout, height) {
+            let mesh = buf.into_mesh();
             let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&mesh);
             let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
-            let mut e = world.spawn((Name::new(name), Mesh3d(h), MeshMaterial3d(mat.clone()), Transform::from_translation(at), Scenery, KeepDetail));
-            match extra {
-                Some(k) => e.insert((BuildingMesh { block: k }, engine::level::GeneratedBy("pacenote::town (sidewalks, paving)"))),
-                None => e.insert((LooseBuilding, engine::level::GeneratedBy("pacenote::buildings"))),
-            };
+            let vis = if editing { Visibility::Hidden } else { Visibility::Inherited };
+            let mut e = world.spawn((Name::new(format!("town tile {} {}", key.0, key.1)), Mesh3d(h), MeshMaterial3d(mat.clone()), Transform::from_translation(origin), vis, Scenery, KeepDetail, BuildingTile { key }, engine::level::GeneratedBy("pacenote::buildings (merged tiles)")));
             if let Some(a) = aabb {
                 e.insert((a, bevy::camera::visibility::NoAutoAabb));
             }
             out.push(e.id());
-        };
-        for (k, blk) in layout.blocks.iter().enumerate() {
-            if blk.cell.is_none() {
-                continue;
-            }
-            let c = blk.centre();
-            let origin = Vec3::new(c.x, layout.town_y, c.y);
-            let mut buf = Buf { origin, ..default() };
-            add_lot(&mut buf, blk, height);
-            if !buf.idx.is_empty() {
-                add(world, buf.into_mesh(), origin, "town block".into(), Some(k));
-            }
-        }
-        for (i, b) in layout.buildings.iter().enumerate() {
-            add(world, building_mesh(b, height), Vec3::new(b.centre.x, b.ground, b.centre.y), format!("{} {i}", b.use_.label()), None);
         }
         out
     }
@@ -1609,12 +1628,10 @@ mod render {
         let mut tris = 0;
         let mut verts = 0;
         let mut meshes = 0;
-        for k in 0..layout.blocks.len() {
-            if let Some((_, b)) = block_mesh(layout, k, &|_, _| layout.town_y) {
-                tris += b.idx.len() / 3;
-                verts += b.pos.len();
-                meshes += 1;
-            }
+        for (_, _, b) in tiles(layout, &|_, _| layout.town_y) {
+            tris += b.idx.len() / 3;
+            verts += b.pos.len();
+            meshes += 1;
         }
         (meshes, tris, verts)
     }
@@ -1890,9 +1907,9 @@ mod tests {
     fn mesh_budget() {
         let l = layout(&net());
         let (meshes, tris, verts) = render::triangles(&l);
-        eprintln!("meshes {meshes}, triangles {tris}, vertices {verts}");
-        // One mesh a building (no town blocks any more).
-        assert!(meshes <= 250, "{meshes} meshes");
+        eprintln!("meshes {meshes} (tiles), triangles {tris}, vertices {verts}");
+        // Merged per tile: a draw each, not one a building (TECH_PASS §4).
+        assert!(meshes <= 60, "{meshes} meshes");
         assert!(tris < 600_000, "{tris} triangles");
     }
 }

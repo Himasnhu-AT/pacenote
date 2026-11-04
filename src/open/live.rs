@@ -351,6 +351,22 @@ pub mod dev {
     use serde_json::json;
 
     pub fn register(app: &mut App) {
+        app.add_control_command("open.meshes", "Distinct meshes the main camera sees this frame, by entity name (each one a draw before shadows)", params(&[]), |w, _| {
+            use std::any::TypeId;
+            use std::collections::{BTreeMap, BTreeSet};
+            let mut cams = w.query_filtered::<&bevy::camera::visibility::VisibleEntities, With<engine::gfx::MainCamera>>();
+            let visible: Vec<Entity> = cams.iter(w).flat_map(|v| v.get(TypeId::of::<Mesh3d>()).to_vec()).collect();
+            let mut q = w.query::<(&Mesh3d, Option<&Name>)>();
+            let mut by: BTreeMap<String, BTreeSet<AssetId<Mesh>>> = BTreeMap::new();
+            for e in &visible {
+                if let Ok((m, n)) = q.get(w, *e) {
+                    by.entry(n.map_or("(unnamed)".into(), |n| n.as_str().split(' ').next().unwrap_or("").to_string())).or_default().insert(m.0.id());
+                }
+            }
+            let mut rows: Vec<(String, usize)> = by.into_iter().map(|(k, v)| (k, v.len())).collect();
+            rows.sort_by_key(|r| std::cmp::Reverse(r.1));
+            Ok(json!({"distinct": rows.iter().map(|r| r.1).sum::<usize>(), "by_name": rows.into_iter().take(30).collect::<Vec<_>>()}))
+        });
         app.add_control_command(
             "open.check",
             "Roads more than 5 cm above or below the live terrain anywhere: the worst place of each",
