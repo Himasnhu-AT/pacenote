@@ -1,11 +1,15 @@
 //! The car and its inside/outside mix. The parts:
 //! - [`super::powertrain`]: the engine from recorded loops (engine bay and exhaust mics,
-//!   crossfaded by rpm and load), recorded backfire pops, the limiter, misfires when damaged.
+//!   crossfaded by rpm and load), the limiter, misfires when damaged.
+//! - [`super::pops`]: exhaust pops and bangs (decided on the main thread, sent as
+//!   [`CarEvent::Pop`]), scaled to the engine's own loudness and rendered on their own so the
+//!   stream can mix them after its compressor.
 //! - [`super::tyres`]: recorded rolling and sliding loops per surface, stones on the arches
 //!   and floor.
 //! - [`super::body`]: recorded impacts, ground hits, snaps and scrapes; suspension thumps and
 //!   bottoming, rattles, gear clunks.
-//! - here: wind, and the mix for the chase camera (outside) or the cockpit and bonnet cameras
+//! - here: wind (brighter with [`crate::camera::speed_feel`], the same value as the FOV kick
+//!   and the motion blur), and the mix for the chase camera (outside) or the cockpit and bonnet cameras
 //!   (inside: the engine bay mic through the bulkhead, the exhaust dark and boomy, tyres
 //!   muffled, stones and rattles up).
 //!
@@ -15,6 +19,7 @@
 
 use super::body::Body;
 use super::dsp::{Biquad, Noise, RATE, Smooth, Wander};
+use super::pops::{PopKind, PopVoices};
 use super::powertrain::Engine;
 use super::samples::{self, Bank};
 use super::tyres::Tyres;
@@ -103,6 +108,20 @@ pub enum CarEvent {
     Bottom(f32, f32),
     /// Gear change (`true` = up).
     Shift(bool),
+    /// An exhaust pop (from `pops::PopScheduler`): intensity 0..1, kind, seed (every layer is
+    /// drawn from it), pan −1..1 (where the tail pipe is from the camera).
+    Pop { intensity: f32, kind: PopKind, seed: u32, pan: f32 },
+}
+
+/// Level of the wind's high "air" band (6 kHz) for a [`crate::camera::SpeedFeel`] value:
+/// `0.4 × feel²` (AUDIO_PASS §5).
+pub fn wind_air_for(feel: f32) -> f32 {
+    0.4 * feel * feel
+}
+
+/// [`wind_air_for`] at `speed` m/s (the same speed feel the FOV kick and the blur use).
+pub fn wind_air(speed: f32) -> f32 {
+    wind_air_for(crate::camera::speed_feel(speed))
 }
 
 /// The whole car sound. `render` writes stereo frames.
@@ -114,8 +133,13 @@ pub struct CarSynth {
     pub engine: Engine,
     pub tyres: Tyres,
     pub body: Body,
+    pub pops: PopVoices,
+    /// The engine's own loudness (mean square over ~50 ms; pops are scaled to it).
+    eng_ms: f32,
     wind_lp: Biquad,
     wind_hiss: Biquad,
+    /// The high "air" band of the wind (6 kHz), up with [`crate::camera::speed_feel`].
+    wind_air: Biquad,
     buffet: Biquad,
     seal: Biquad,
     gust: Wander,
@@ -143,8 +167,11 @@ impl CarSynth {
             engine: Engine::new(seed),
             tyres: Tyres::new(seed),
             body: Body::new(seed),
+            pops: PopVoices::default(),
+            eng_ms: 0.0,
             wind_lp: Biquad::lowpass(600.0, 0.6),
             wind_hiss: Biquad::bandpass(2500.0, 0.6),
+            wind_air: Biquad::bandpass(6000.0, 0.7),
             buffet: Biquad::lowpass(160.0, 0.9),
             seal: Biquad::bandpass(3300.0, 5.0),
             gust: Wander::new(0.4),
@@ -183,7 +210,6 @@ impl CarSynth {
             c.roll = ok(c.roll, 0.0, 3.0, 0.0);
             c.slide = ok(c.slide, 0.0, 4.0, 0.0);
         }
-        self.engine.set(&p);
         self.p = p;
     }
 
@@ -196,9 +222,23 @@ impl CarSynth {
             CarEvent::Bottom(s, p) => self.body.bottom(s, p),
             CarEvent::Shift(up) => {
                 self.body.shift();
-                self.engine.shift(up, &self.p);
+                self.engine.shift(up);
+            }
+            CarEvent::Pop { intensity, kind, seed, pan } => {
+                let ok = |v: f32, lo: f32, hi: f32| if v.is_finite() { v.clamp(lo, hi) } else { 0.0 };
+                let (intensity, pan) = (ok(intensity, 0.0, 1.0), ok(pan, -1.0, 1.0));
+                self.pops.trigger(intensity, kind, seed, pan, self.eng_rms(), self.bank);
+                // Inside, a bang knocks the shell.
+                if kind != PopKind::Crackle && self.p.interior > 0.5 {
+                    self.body.thump(intensity * 0.5, 0.4);
+                }
             }
         }
+    }
+
+    /// The engine's own RMS over the last ~50 ms (as heard from the current camera).
+    pub fn eng_rms(&self) -> f32 {
+        self.eng_ms.sqrt()
     }
 
     /// Updates filter coefficients from the smoothed state (every 32 samples: small enough
@@ -207,23 +247,40 @@ impl CarSynth {
         let speed = self.speed.v;
         self.wind_lp.set_lowpass(180.0 + 28.0 * speed, 0.6);
         self.wind_hiss.set_bandpass(1500.0 + 40.0 * speed, 0.5);
-        self.seal.set_bandpass(2900.0 + 12.0 * speed, 5.0);
+        // The door seal whistles higher the faster it feels (AUDIO_PASS §5).
+        self.seal.set_bandpass(2200.0 + 1500.0 * crate::camera::speed_feel(speed), 5.0);
     }
 
-    /// Renders `frames` stereo frames, adding into `out` (interleaved L R).
+    /// Renders `frames` stereo frames, adding into `out` (interleaved L R), pops included.
     pub fn render(&mut self, out: &mut [f32]) {
         if self.bank.is_none() {
             self.bank = samples::bank();
         }
         for fr in out.chunks_exact_mut(2) {
-            let (l, r) = self.sample();
-            fr[0] += l;
-            fr[1] += r;
+            let (l, r, pl, pr) = self.sample();
+            fr[0] += l + pl;
+            fr[1] += r + pr;
         }
     }
 
+    /// Renders into `out` (everything but the pops) and `pops` (the pops alone, for the
+    /// stream to mix after its compressor). Both interleaved L R, same length; added into.
+    pub fn render_split(&mut self, out: &mut [f32], pops: &mut [f32]) {
+        if self.bank.is_none() {
+            self.bank = samples::bank();
+        }
+        for (fr, pf) in out.chunks_exact_mut(2).zip(pops.chunks_exact_mut(2)) {
+            let (l, r, pl, pr) = self.sample();
+            fr[0] += l;
+            fr[1] += r;
+            pf[0] += pl;
+            pf[1] += pr;
+        }
+    }
+
+    /// One frame: (left, right) of the car without the pops, then the pops (left, right).
     #[inline]
-    fn sample(&mut self) -> (f32, f32) {
+    fn sample(&mut self) -> (f32, f32, f32, f32) {
         let p = self.p;
         if self.coef_timer == 0 {
             self.update_coeffs();
@@ -241,25 +298,27 @@ impl CarSynth {
         // Wind. Outside: rushing air. Inside: low buffeting and a door-seal whistle.
         let gust = 0.8 + 0.2 * self.gust.next(&mut self.n);
         let wn = self.n.white();
-        let v2 = (speed / 40.0).powi(2).min(1.5) * gust;
-        let rush = (self.wind_lp.run(wn) * 1.4 + self.wind_hiss.run(wn) * 0.35) * v2 * 0.22;
+        // Keeps growing to ~220 km/h (AUDIO_PASS §5).
+        let v2 = (speed / 40.0).powi(2).min(2.0) * gust;
+        let air = self.wind_air.run(wn) * wind_air(speed);
+        let rush = (self.wind_lp.run(wn) * 1.4 + self.wind_hiss.run(wn) * 0.35 + air) * v2 * 0.22;
         let cabin_wind = (self.buffet.run(wn) * 2.2 + self.seal.run(wn) * 0.08) * v2 * 0.2;
         // Engine. Outside: mostly the exhaust, some engine bay. Inside: the engine bay through
         // the bulkhead (intake, valve train), the exhaust dark and boomy through the body.
         let ex_out = eng.exhaust * 0.9 + eng.bay * 0.4;
         let ex_in = self.cabin_bay.run(eng.bay) * 0.85 + self.cabin_eng.run(eng.exhaust) * 0.75 + self.cabin_boom.run(eng.exhaust) * 0.5;
         let engine = ex_out * out + ex_in * inside;
-        // Pops: direct outside, softer inside.
-        let pop_g = out + 0.5 * inside;
-        let (pop_l, pop_r) = (eng.pops.0 * pop_g, eng.pops.1 * pop_g);
+        // The engine's loudness over ~50 ms, the reference the pops are levelled against.
+        self.eng_ms += (engine * engine * act - self.eng_ms) * (1.0 / (0.05 * RATE));
+        let (pop_l, pop_r) = self.pops.sample(inside, bank);
         // Tyres (drift): full band outside, muffled inside.
         let tl = ty.l * out + self.cabin_l.run(ty.l + rush) * 0.6 * inside;
         let tr = ty.r * out + self.cabin_r.run(ty.r + rush) * 0.6 * inside;
         let shell = body.shell * (0.6 * inside);
         let mono = engine + rush * out + cabin_wind * inside + shell;
-        let l = (mono + pop_l + tl + body.l) * act;
-        let r = (mono + pop_r + tr + body.r) * act;
-        (l, r)
+        let l = (mono + tl + body.l) * act;
+        let r = (mono + tr + body.r) * act;
+        (l, r, pop_l * act, pop_r * act)
     }
 }
 
@@ -419,34 +478,49 @@ mod tests {
         assert!(rev(6500.0) > rev(1200.0) * 2.0);
     }
 
+    /// The scheduler's lift-off pops reach the synth: each `Pop` plays, over the engine's own
+    /// level (AUDIO_PASS §8.1/§8.3 at the synth: Crackle +6..+10 dB, Bang +11..+15 dB over the
+    /// engine's 50 ms RMS, the pops alone measured against it).
     #[test]
-    fn lift_off_pops() {
-        let mut pops = 0;
+    fn lift_off_pops_play_over_the_engine() {
+        use crate::audio::pops::{PopInput, PopScheduler};
+        use crate::career::garage::PopProfile;
         for seed in 0..6 {
             let mut s = CarSynth::new(seed);
-            s.set(driving(6500.0, 1.0));
-            run(&mut s, 0.5);
-            s.set(driving(6000.0, 0.0));
-            assert!(s.engine.crackle > 0.9);
-            for _ in 0..40 {
-                run(&mut s, 0.02);
-                pops += s.engine.popping() as u32;
+            let mut sched = PopScheduler::new(seed, PopProfile::Rally);
+            let mut pops = Vec::new();
+            let (mut events, mut played_kinds) = (0, Vec::new());
+            for f in 0..120 {
+                let th = if f < 60 { 1.0 } else { 0.0 };
+                let p = driving(6000.0, th);
+                s.set(p);
+                pops.clear();
+                sched.update(1.0 / 60.0, &PopInput { throttle: th, rpm: 6000.0, gear: 3, ..PopInput::default() }, &mut pops);
+                for pop in &pops {
+                    let rms = s.eng_rms();
+                    // This pop alone: with it minus without it (earlier pops still ring).
+                    let (mut a, mut b) = (s.clone(), s.clone());
+                    let (mut o1, mut p1, mut p2) = (vec![0.0; 9600], vec![0.0; 9600], vec![0.0; 9600]);
+                    a.event(CarEvent::Pop { intensity: pop.intensity, kind: pop.kind, seed: pop.seed, pan: 0.0 });
+                    a.render_split(&mut o1, &mut p1);
+                    b.render_split(&mut o1, &mut p2);
+                    let pk = p1.iter().zip(&p2).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+                    let over = 20.0 * (pk / rms).log10();
+                    let (lo, hi) = if pop.kind == PopKind::Crackle { (5.5, 10.5) } else { (10.5, 15.5) };
+                    assert!(over > lo && over < hi, "seed {seed} {:?} at {:.2}: {over:.1} dB over the engine", pop.kind, pop.intensity);
+                    s.event(CarEvent::Pop { intensity: pop.intensity, kind: pop.kind, seed: pop.seed, pan: 0.0 });
+                    events += 1;
+                    played_kinds.push(pop.kind);
+                }
+                run(&mut s, 1.0 / 60.0);
             }
+            assert!((2..=6).contains(&events), "seed {seed}: {events} pops");
+            assert_eq!(s.pops.played, events, "every scheduled pop played");
         }
-        assert!(pops > 0, "some backfire pops in the first 0.8 s of overrun");
     }
 
     #[test]
-    fn upshift_under_power_bangs_and_downshift_blips() {
-        let mut bangs = 0;
-        for seed in 0..8 {
-            let mut s = CarSynth::new(seed);
-            s.set(driving(7000.0, 1.0));
-            run(&mut s, 0.3);
-            s.event(CarEvent::Shift(true));
-            bangs += s.engine.popping() as u32;
-        }
-        assert!(bangs >= 4, "upshift bangs {bangs}/8");
+    fn downshift_blips() {
         // Downshift: a short blip of load on the overrun.
         let mut s = CarSynth::new(1);
         s.set(driving(4000.0, 0.0));
@@ -519,7 +593,6 @@ mod tests {
             let mut e = crate::audio::powertrain::Engine::new(3);
             let mut p = driving(3000.0, 1.0);
             p.engine_damage = dmg;
-            e.set(&p);
             let bank = crate::audio::samples::bank();
             let ex: Vec<f32> = (0..144_000).map(|_| e.sample(&p, bank).exhaust).collect();
             // 100 Hz firing → 480 samples per firing; 2 firings per window.
