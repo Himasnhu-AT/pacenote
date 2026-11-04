@@ -3,8 +3,11 @@
 //! - bottom right: rev bar (segments light up to the red line), speed in km/h or mph, gear;
 //! - bottom left: stage name, stage clock (+ penalties), progress bar with km done / total;
 //! - top right: damage per part, once the car is hurt;
-//! - centre: countdown, GO, FINISH with the time, and the RETIRED, NOT DRIVABLE and YOU'RE
-//!   DEAD plates.
+//! - centre: countdown, GO, FINISH with the time, and the RETIRED, NOT DRIVABLE and CAR
+//!   WRECKED (one big crash) plates.
+//!
+//! The controls card, the event-start prompt, the roof hint and short notices are in
+//! `meta::coach`.
 //!
 //! Each readout can be turned off in Settings > HUD ([`crate::prefs::Prefs`]). Cheap: values
 //! are cached and text / colours / widths are only written when they change (no per-frame
@@ -69,7 +72,18 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_hud, update_hud).chain().run_if(resource_exists::<StageWorld>));
+        app.add_systems(Update, (spawn_hud, update_hud, hide_under_screens).chain().run_if(resource_exists::<StageWorld>));
+    }
+}
+
+/// The HUD hides while a screen (pause, results, settings) is over the game: the results'
+/// own big time and the HUD's FINISH time no longer show on top of each other.
+fn hide_under_screens(screens: Option<Res<engine::ui::prelude::Screens>>, mut q: Query<&mut Visibility, With<HudRoot>>) {
+    let want = if screens.is_some_and(|s| s.top().is_some()) { Visibility::Hidden } else { Visibility::Inherited };
+    for mut v in &mut q {
+        if *v != want {
+            *v = want;
+        }
     }
 }
 
@@ -214,7 +228,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
                     c.spawn(spacer(GAP_XS));
                     c.spawn((Node { column_gap: px(GAP_L), ..default() }, Pickable::IGNORE)).with_children(|k| {
                         key_hint(k, t, "R", "Recover");
-                        key_hint(k, t, "Esc", "Menu");
+                        key_hint(k, t, "Esc", "Pause");
                     });
                 });
             });
@@ -226,8 +240,8 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
             ))
             .with_children(|w| {
                 w.spawn(accent_panel(t, t.bad, 26.0, GAP_S)).with_children(|c| {
-                    c.spawn(eyebrow("Fatal crash", t.bad));
-                    c.spawn(title("You're dead", SIZE_H1, t.text));
+                    c.spawn(eyebrow("Big crash", t.bad));
+                    c.spawn(title("Car wrecked", SIZE_H1, t.text));
                     c.spawn((HudText::DeadNote, text("", body(SIZE_BODY), t.text_muted)));
                 });
             });
@@ -407,7 +421,7 @@ fn update_hud(
                 }
             }),
             HudText::DeadNote if shown.dead_route != Some(route) => set_text(&mut txt, |s| {
-                s.push_str(if route { "Back to the start line…" } else { "Back home…" });
+                s.push_str(if route { "Run over. Back to the start line\u{2026}" } else { "Towing you home\u{2026}" });
             }),
             _ => {}
         }

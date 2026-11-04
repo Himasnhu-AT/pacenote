@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use engine::flow::AppState;
-use engine::ui::toast::Toast;
 
 use super::roads::{RoadKind, RoadNet};
 use crate::drive::DrivenCar;
@@ -360,11 +359,12 @@ pub struct Events(pub Vec<EventDef>);
 #[derive(Component)]
 struct Marker;
 
-/// Free-roam state near markers: which one the car is in, and for how long it's been still.
+/// Free-roam state near markers: which one the car is in, and for how long it's been still
+/// (`meta::coach` shows the "stop here to start" prompt from it).
 #[derive(Resource, Default)]
-struct Approach {
-    inside: Option<u32>,
-    still: f32,
+pub struct Approach {
+    pub inside: Option<u32>,
+    pub still: f32,
 }
 
 pub struct EventsPlugin;
@@ -520,7 +520,7 @@ fn setup(world: &mut World) {
     world.insert_resource(Events(events));
 }
 
-/// In free roam: entering a marker says what it is; stopping in it starts the event.
+/// In free roam: notes which marker the car is in; stopping in it starts the event.
 fn approach(world: &mut World) {
     let Some(stage) = world.get_resource::<StageWorld>() else { return };
     if !stage.free_roam() || crate::loading::is_loading(world) {
@@ -529,7 +529,7 @@ fn approach(world: &mut World) {
     let mut q = world.query::<&DrivenCar>();
     let Some((pos, speed)) = q.iter(world).next().map(|c| (c.car.pos, c.car.vel.length())) else { return };
     let Some(events) = world.get_resource::<Events>() else { return };
-    let here = events.0.iter().find(|e| e.route.pts[0].distance(pos) < MARKER_R).map(|e| (e.id, e.name.clone(), e.kind, e.route.length()));
+    let here = events.0.iter().find(|e| e.route.pts[0].distance(pos) < MARKER_R).map(|e| e.id);
     let dt = world.resource::<Time>().delta_secs();
     let mut a = world.resource_mut::<Approach>();
     match here {
@@ -537,11 +537,11 @@ fn approach(world: &mut World) {
             a.inside = None;
             a.still = 0.0;
         }
-        Some((id, name, kind, len)) => {
+        Some(id) => {
+            // The HUD names the event and says to stop (`meta::coach`).
             if a.inside != Some(id) {
                 a.inside = Some(id);
                 a.still = 0.0;
-                world.write_message(Toast::new(name).body(format!("{} \u{b7} {:.1} km \u{b7} stop here to start", kind.label(), len / 1000.0)).secs(4.0));
                 return;
             }
             a.still = if speed < 1.5 { a.still + dt } else { 0.0 };

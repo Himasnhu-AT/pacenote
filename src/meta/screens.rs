@@ -93,7 +93,7 @@ impl Plugin for ScreensPlugin {
             .insert_resource(BoardSel(1))
             .init_resource::<NetNote>()
             .insert_resource(MenuConfig {
-                eyebrow: "Two-person rally",
+                eyebrow: "Open-world rally",
                 main_items: main_items(vec![
                     ("Play", MenuAction::Custom("select")),
                     ("Play together", MenuAction::Open("together")),
@@ -500,34 +500,66 @@ fn link_button(p: &mut ChildSpawnerCommands, t: &Theme, label_text: &str, action
     });
 }
 
-/// Main menu, bottom right: the crew and their tally.
+/// The colour of an event kind ("Rally", "Sprint", "Lap"), as its marker in the world.
+pub(crate) fn kind_color(kind: &str) -> Color {
+    match kind {
+        "Rally" => Color::srgb(1.0, 0.62, 0.15),
+        "Sprint" => Color::srgb(0.45, 0.78, 1.0),
+        _ => Color::srgb(0.78, 0.55, 1.0),
+    }
+}
+
+/// The driver's best time on event `id` (solo, this car's handling), any level version.
+fn event_best(b: &board::Board, team: &str, id: u32) -> Option<f32> {
+    let hz = board::handling();
+    b.records.iter().filter(|r| r.stage == id && r.team() == team && r.handling == hz).map(|r| r.total()).min_by(f32::total_cmp)
+}
+
+/// Main menu, bottom right: the open world's events and the driver's best time on each
+/// (the event list is remembered from the last drive, `Profile::events`).
 fn crew_card(world: &mut World, slot: Entity) {
     let t = world.resource::<Theme>().clone();
     let p = world.resource::<Profile>().clone();
     let b = world.resource::<Boards>().0.clone();
-    let team = board::team_key(&p.driver_name, &p.guide_name);
-    let cat = world.resource::<StageCatalog>();
-    let current = |r: &Record| cat.info(r.stage).is_none_or(|i| board::split_hash(&r.stage_hash).0 == i.hash);
-    // Stages with a time (in any weather) on the current road.
-    let mut timed: Vec<u32> = b.records.iter().filter(|r| r.team() == team && current(r)).map(|r| r.stage).collect();
-    timed.dedup();
-    let driven = timed.len();
-    let leads = (1..=stage_count()).filter(|s| cat.info(*s).and_then(|i| b.leader(*s, &i.hash)).is_some_and(|r| r.team() == team)).count();
+    let me = board::team_key(&p.driver_name, "");
+    let rows: Vec<(super::EventSeen, Option<f32>)> = p.events.iter().map(|e| (e.clone(), event_best(&b, &me, e.id))).collect();
+    let done = rows.iter().filter(|(_, best)| best.is_some()).count();
+    // The engine's slot is 380 px wide; event names want a little more.
+    if let Some(mut n) = world.get_mut::<Node>(slot) {
+        n.width = px(460);
+    }
     world.commands().entity(slot).with_children(|s| {
-        s.spawn(accent_panel(&t, t.accent, 22.0, GAP_S)).with_children(|c| {
-            c.spawn(eyebrow("Crew", t.accent));
-            c.spawn(hrow(GAP_S)).with_children(|r| {
-                r.spawn(text(p.driver_name.clone(), display(36.0), t.text));
-                r.spawn(text("&", body(SIZE_BODY), t.text_dim));
-                r.spawn(text(p.guide_name.clone(), display(36.0), t.text));
+        s.spawn((
+            Node { width: percent(100), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), padding: UiRect::all(px(22)), border: UiRect::left(px(3)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
+            BackgroundColor(t.panel),
+            BorderColor::all(t.accent),
+            Pickable::IGNORE,
+        ))
+            .with_children(|c| {
+                c.spawn((Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Baseline, ..default() }, Pickable::IGNORE)).with_children(|h| {
+                    h.spawn(eyebrow("Events", t.accent));
+                    if !rows.is_empty() {
+                        h.spawn(text(format!("{done} / {} finished", rows.len()), label(SIZE_LABEL), if done > 0 { t.text } else { t.text_muted }));
+                    }
+                });
+                c.spawn(rule(t.line));
+                if rows.is_empty() {
+                    c.spawn((text("Events wait around the map. Drive into a glowing column and stop inside it to start one.", body(SIZE_BODY - 2.0), t.text_muted), Node { max_width: px(410), ..default() }));
+                }
+                for (e, best) in &rows {
+                    c.spawn((Node { column_gap: px(GAP_S + 4.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
+                        r.spawn((Node { width: px(3), height: px(18), ..default() }, BackgroundColor(kind_color(&e.kind)), Pickable::IGNORE));
+                        r.spawn((Node { flex_grow: 1.0, flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE)).with_children(|n| {
+                            n.spawn((text(e.name.to_uppercase(), label(SIZE_LABEL + 4.0), t.text), TextLayout::no_wrap()));
+                            n.spawn(text(format!("{} \u{b7} {:.1} km", e.kind, e.km), body(SIZE_SMALL - 1.0), t.text_muted));
+                        });
+                        match best {
+                            Some(s) => r.spawn(text(board::clock(*s), body_bold(SIZE_BODY), t.text)),
+                            None => r.spawn(text("\u{2014}", body(SIZE_BODY), t.text_dim)),
+                        };
+                    });
+                }
             });
-            c.spawn(rule(t.line));
-            c.spawn((Node { column_gap: px(GAP_L), ..default() }, Pickable::IGNORE)).with_children(|r| {
-                let open = if crate::demo::ACTIVE { crate::demo::STAGES.len() as u32 } else { stage_count() };
-                stat(r, &t, format!("{driven}/{open}"), "Stages timed", t.text, 32.0);
-                stat(r, &t, leads.to_string(), "Stage records", if leads > 0 { t.accent } else { t.text_dim }, 32.0);
-            });
-        });
     });
 }
 
@@ -894,7 +926,7 @@ fn build_together(world: &mut World, root: Entity) {
             eyebrow_bar(c, "Play together", t.accent);
             c.spawn(title("One drives. One reads.", SIZE_H1, t.text));
             c.spawn((
-                text("Two computers, one car. The driver sees the road but no map; the guide sees the map and calls the corners. Talk over the built-in voice chat.", body(SIZE_BODY), t.text_muted),
+                text("Two computers, one car. The driver sees the road but no map; the guide sees the map and calls the corners. Talk over the built-in voice chat. Team runs use the classic stages: the open world is solo for now.", body(SIZE_BODY), t.text_muted),
                 Node { max_width: px(760), ..default() },
             ));
             c.spawn(spacer(GAP_S));
@@ -1048,16 +1080,19 @@ fn build_results(world: &mut World, root: Entity) {
     let Some(res) = world.get_resource::<LastResult>().cloned() else { return };
     let mode = world.get_resource::<RunMode>().copied().unwrap_or_default();
     let r = &res.record;
+    let in_event = world.get_resource::<crate::world::StageWorld>().is_some_and(|s| s.event.is_some());
     let (headline, hcolor, celebrate) = if res.inserted.stage_record {
-        ("Stage record", t.accent, true)
+        (if in_event { "Event record" } else { "Stage record" }, t.accent, true)
     } else if res.inserted.team_best && res.best_before.is_some() {
         (if r.solo() { "New personal best" } else { "New team best" }, t.good, true)
     } else if res.inserted.team_best {
         ("First time set", t.good, false)
     } else {
-        ("Stage complete", t.text, false)
+        (if in_event { "Event complete" } else { "Stage complete" }, t.text, false)
     };
-    let rank_line = if r.solo() {
+    let rank_line = if r.solo() && in_event {
+        format!("P{} of your times on this event", res.inserted.rank)
+    } else if r.solo() {
         format!("Practice \u{b7} P{} of your solo times on this road", res.inserted.rank)
     } else {
         format!("P{} on the stage \u{b7} {}", res.inserted.rank, r.team_label())
@@ -1065,11 +1100,19 @@ fn build_results(world: &mut World, root: Entity) {
     let names = ["Split 1", "Split 2", "Split 3", "Finish"];
     let conditions = world.get_resource::<crate::world::StageWorld>().map(|s| (s.def.weather, s.def.time));
     let next_name = crate::stage::stages().into_iter().find(|d| d.id == crate::demo::next_stage(r.stage, stage_count())).map(|d| d.name).unwrap_or_default();
-    let in_event = world.get_resource::<crate::world::StageWorld>().is_some_and(|s| s.event.is_some());
+    let event_kind = world
+        .get_resource::<crate::world::StageWorld>()
+        .and_then(|s| s.event.as_ref().map(|e| e.id))
+        .and_then(|id| world.get_resource::<crate::open::events::Events>().and_then(|ev| ev.0.iter().find(|x| x.id == id).map(|x| x.kind.label())));
+    let hints = engine::ui::device_hints(world, &[("A / D", "Choose"), ("Enter", "Select")], &[("D-pad", "Choose"), ("A", "Select")]);
     world.commands().entity(root).with_children(|p| {
         menu_backdrop(p, &t, 0.72, 1.0);
         p.spawn(menu_column(GAP_S)).with_children(|c| {
-            let mut kicker = format!("Stage {} \u{b7} {} \u{b7} {}", r.stage, res.stage_name, if mode == RunMode::Team { "team run" } else { "practice" });
+            let mut kicker = if in_event {
+                format!("{} \u{b7} {}", event_kind.unwrap_or("Event"), res.stage_name)
+            } else {
+                format!("Stage {} \u{b7} {} \u{b7} {}", r.stage, res.stage_name, if mode == RunMode::Team { "team run" } else { "practice" })
+            };
             if let Some((w, tod)) = conditions.filter(|_| !board::split_hash(&r.stage_hash).1.is_empty()) {
                 kicker.push_str(&format!(" \u{b7} {} {}", time_name(tod), weather_name(w)));
             }
@@ -1114,7 +1157,7 @@ fn build_results(world: &mut World, root: Entity) {
                 }
             });
             if res.ghost_saved {
-                c.spawn(text("Ghost saved: race it next time (Settings > Game > Ghost car).", body(SIZE_SMALL), t.text_dim));
+                c.spawn(text("Ghost saved: it races you next time (Settings > Game > Ghost car).", body(SIZE_SMALL), t.text_muted));
             }
             c.spawn(spacer(GAP_M));
             c.spawn((Node { column_gap: px(GAP_M), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|b| {
@@ -1134,7 +1177,7 @@ fn build_results(world: &mut World, root: Entity) {
                 c.spawn(text(crate::demo::store_blurb(), body(SIZE_SMALL), t.text_dim));
             }
         });
-        spawn_footer(p, &t, &[("A / D", "Choose"), ("Enter", "Select")]);
+        spawn_footer(p, &t, &hints);
     });
 }
 
@@ -1149,12 +1192,68 @@ fn pulse(time: Res<Time<Real>>, mut q: Query<(&Pulse, &mut TextColor)>) {
 
 // ---------------------------------------------------------------- pause
 
-/// The engine's pause screen, plus the camera key in its footer hints.
+/// What is being driven, for the pause menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Driving {
+    FreeRoam,
+    Event,
+    Stage,
+}
+
+fn driving(world: &World) -> Driving {
+    match world.get_resource::<crate::world::StageWorld>() {
+        Some(s) if s.free_roam() => Driving::FreeRoam,
+        Some(s) if s.event.is_some() => Driving::Event,
+        _ => Driving::Stage,
+    }
+}
+
+/// The pause menu's buttons and small print for what is being driven: free roam has nothing
+/// to restart and no penalty; an event can be abandoned (back to free roam where the car is).
+fn pause_items(d: Driving) -> (Vec<(&'static str, MenuAction)>, &'static str) {
+    match d {
+        Driving::FreeRoam => (
+            vec![("Resume", MenuAction::Resume), ("Recover car", MenuAction::Custom("recover")), ("Settings", MenuAction::Settings), ("Quit to menu", MenuAction::MainMenu)],
+            "Free roam isn't timed: quitting loses nothing.",
+        ),
+        Driving::Event => (
+            vec![
+                ("Resume", MenuAction::Resume),
+                ("Restart event", MenuAction::Custom("restart")),
+                ("Recover car (+5 s)", MenuAction::Custom("recover")),
+                ("Abandon event", MenuAction::Custom("roam")),
+                ("Settings", MenuAction::Settings),
+                ("Quit to menu", MenuAction::MainMenu),
+            ],
+            "Restarting, abandoning or quitting drops this run. Abandon leaves you in free roam where you are.",
+        ),
+        Driving::Stage => (
+            vec![
+                ("Resume", MenuAction::Resume),
+                ("Restart stage", MenuAction::Custom("restart")),
+                ("Recover car (+5 s)", MenuAction::Custom("recover")),
+                ("Settings", MenuAction::Settings),
+                ("Quit to menu", MenuAction::MainMenu),
+            ],
+            "Restarting or quitting drops this run.",
+        ),
+    }
+}
+
+/// The engine's pause screen with the buttons for what is being driven, the camera key in its
+/// footer, and the driving controls on the right.
 fn build_pause(world: &mut World, root: Entity) {
+    let d = driving(world);
+    if let Some(mut cfg) = world.get_resource_mut::<MenuConfig>() {
+        let (items, note) = pause_items(d);
+        cfg.pause_items = items;
+        cfg.pause_note = note;
+    }
     engine::ui::menus::build_pause(world, root);
     world.flush();
     let t = world.resource::<Theme>().clone();
     let hint = engine::ui::device_hints(world, &[("C", "Camera")], &[("Select", "Camera")]);
+    let device = world.get_resource::<engine::actions::ActionState>().map_or(engine::actions::Device::KeyboardMouse, |a| a.last_device);
     // The footer row: the root's absolute child at the footer spot.
     let footer = world.get::<Children>(root).and_then(|kids| {
         kids.iter().find(|e| {
@@ -1168,84 +1267,69 @@ fn build_pause(world: &mut World, root: Entity) {
             }
         });
     }
+    // Controls, right: what every key does while driving.
+    world.commands().entity(root).with_children(|p| {
+        p.spawn((Node { position_type: PositionType::Absolute, right: px(EDGE), top: px(0), bottom: px(0), justify_content: JustifyContent::Center, flex_direction: FlexDirection::Column, ..default() }, Pickable::IGNORE))
+            .with_children(|col| {
+                col.spawn(panel(&t, 22.0, GAP_S + 2.0)).with_children(|c| {
+                    c.spawn(eyebrow("Driving controls", t.accent));
+                    for (k, what) in super::coach::controls(device) {
+                        c.spawn((Node { column_gap: px(GAP_M), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
+                            r.spawn((Node { width: px(72), ..default() }, Pickable::IGNORE)).with_children(|w| {
+                                w.spawn(key_cap(&t, k));
+                            });
+                            r.spawn(text(*what, body(SIZE_BODY - 2.0), t.text));
+                        });
+                    }
+                    if device == engine::actions::Device::KeyboardMouse {
+                        c.spawn(rule(t.line));
+                        c.spawn(text("H shows these while driving.", body(SIZE_SMALL), t.text_muted));
+                    }
+                    if d == Driving::FreeRoam {
+                        c.spawn((text("Events: drive into a glowing column and stop inside it to start.", body(SIZE_SMALL), t.text_muted), Node { max_width: px(340), ..default() }));
+                    }
+                });
+            });
+    });
 }
 
-/// The "C · Camera view" hint shown for a few seconds at the start of each run.
-#[derive(Component)]
-struct CameraHint(f32);
-
-/// Shows [`CameraHint`] when a run starts (countdown reset: new stage or restart) and fades it.
+/// "C · Camera view" for a few seconds at the start of each timed run (new event or stage,
+/// restart), as a [`super::coach::Notice`]. Free roam has the controls card instead.
+#[allow(clippy::too_many_arguments)]
 fn camera_hint(
-    mut commands: Commands,
-    theme: Res<Theme>,
-    time: Res<Time<Real>>,
     run: Option<Res<StageRun>>,
+    stage: Option<Res<crate::world::StageWorld>>,
     role: Option<Res<super::Role>>,
     loading: Option<Res<crate::loading::Loading>>,
+    actions: Option<Res<engine::actions::ActionState>>,
     mut last: Local<f32>,
     mut was_loading: Local<bool>,
-    mut hints: Query<(Entity, &mut CameraHint, &Children)>,
-    mut colors: Query<&mut TextColor>,
-    mut bgs: Query<&mut BackgroundColor>,
+    mut notices: MessageWriter<super::coach::Notice>,
 ) {
-    const SHOW_S: f32 = 5.0;
-    let dt = time.delta_secs();
-    for (e, mut h, kids) in &mut hints {
-        h.0 += dt;
-        let a = (1.0 - (h.0 - (SHOW_S - 0.8)) / 0.8).clamp(0.0, 1.0);
-        if h.0 >= SHOW_S || run.is_none() {
-            commands.entity(e).despawn();
-            continue;
-        }
-        if let Ok(mut bg) = bgs.get_mut(e) {
-            bg.0.set_alpha(0.78 * a);
-        }
-        for k in kids.iter() {
-            if let Ok(mut c) = colors.get_mut(k) {
-                c.0.set_alpha(a);
-            }
-        }
-    }
     let loaded = std::mem::replace(&mut *was_loading, loading.is_some()) && loading.is_none();
     let Some(run) = run else { return };
     // A run starts when the loading screen goes, or when the countdown is reset (restart).
     let started = loaded || run.countdown > *last + 0.5;
     *last = run.countdown;
-    if !started || loading.is_some() || run.countdown <= 0.0 || role.is_some_and(|r| *r == super::Role::Guide) {
+    if !started || loading.is_some() || run.countdown <= 0.0 || role.is_some_and(|r| *r == super::Role::Guide) || stage.is_some_and(|s| s.free_roam()) {
         return;
     }
-    for (e, ..) in &hints {
-        commands.entity(e).despawn();
-    }
-    let t = &*theme;
-    commands
-        .spawn((
-            CameraHint(0.0),
-            Name::new("Camera hint"),
-            DespawnOnExit(AppState::InGame),
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: px(116),
-                left: percent(50),
-                margin: UiRect::left(px(-110)),
-                width: px(220),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                column_gap: px(GAP_S),
-                padding: UiRect::axes(px(14), px(8)),
-                border_radius: BorderRadius::all(px(RADIUS)),
-                ..default()
-            },
-            BackgroundColor(t.panel.with_alpha(0.78)),
-            Pickable::IGNORE,
-        ))
-        .with_children(|r| {
-            r.spawn((text("C", label(SIZE_LABEL), t.accent), Node { padding: UiRect::axes(px(7), px(1)), border: UiRect::all(px(1)), border_radius: BorderRadius::all(px(3)), ..default() }, BorderColor::all(t.accent)));
-            r.spawn(text("Camera view", body(SIZE_BODY), t.text));
-        });
+    let key = if actions.is_some_and(|a| a.last_device == engine::actions::Device::Gamepad) { "Select" } else { "C" };
+    notices.write(super::coach::Notice::new("Camera view").key(key).secs(5.0));
 }
 
 fn pause_eyebrow(world: &World) -> String {
+    let stage = world.get_resource::<crate::world::StageWorld>();
+    if let Some(e) = stage.and_then(|s| s.event.as_ref()) {
+        let kind = world.get_resource::<crate::open::events::Events>().and_then(|ev| ev.0.iter().find(|x| x.id == e.id).map(|x| x.kind.label()));
+        return match kind {
+            Some(k) => format!("{k} \u{b7} {}", e.name),
+            None => e.name.clone(),
+        };
+    }
+    if stage.is_some_and(|s| s.free_roam()) {
+        return "Free roam".into();
+    }
     match world.get_resource::<StageNow>() {
         Some(s) => format!("Stage {} \u{b7} {}", s.id, s.name),
         None => "Pacenote".into(),
@@ -1255,6 +1339,11 @@ fn pause_eyebrow(world: &World) -> String {
 fn pause_header(world: &mut World, slot: Entity) {
     let t = world.resource::<Theme>().clone();
     let Some(run) = world.get_resource::<StageRun>().cloned() else { return };
+    // Free roam has no clock or route.
+    if driving(world) == Driving::FreeRoam {
+        return;
+    }
+    let what = if driving(world) == Driving::Event { "event" } else { "stage" };
     let len = world.get_resource::<crate::world::StageWorld>().map_or(1.0, |s| s.road.length());
     world.commands().entity(slot).with_children(|p| {
         p.spawn(hrow(GAP_M)).with_children(|r| {
@@ -1262,7 +1351,7 @@ fn pause_header(world: &mut World, slot: Entity) {
             if run.penalty > 0.0 {
                 r.spawn(text(format!("+{:.0} s", run.penalty), body_bold(SIZE_BODY), t.bad));
             }
-            r.spawn(text(format!("{:.0}% of the stage", (run.progress / len * 100.0).clamp(0.0, 100.0)), body(SIZE_SMALL), t.text_muted));
+            r.spawn(text(format!("{:.0}% of the {what}", (run.progress / len * 100.0).clamp(0.0, 100.0)), body(SIZE_SMALL), t.text_muted));
         });
     });
 }
@@ -1337,4 +1426,41 @@ fn build_credits(world: &mut World, root: Entity) {
         });
         spawn_footer(r, &t, &[("Wheel", "Scroll"), ("Esc", "Back")]);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn actions(d: Driving) -> Vec<MenuAction> {
+        pause_items(d).0.into_iter().map(|(_, a)| a).collect()
+    }
+
+    #[test]
+    fn pause_in_free_roam_has_no_restart_or_penalty() {
+        let items = pause_items(Driving::FreeRoam).0;
+        assert!(!actions(Driving::FreeRoam).contains(&MenuAction::Custom("restart")));
+        assert!(items.iter().all(|(n, _)| !n.contains("+5 s")), "no penalty in free roam");
+        assert!(actions(Driving::FreeRoam).contains(&MenuAction::MainMenu));
+    }
+
+    #[test]
+    fn pause_in_an_event_can_restart_or_abandon_it() {
+        let names: Vec<&str> = pause_items(Driving::Event).0.into_iter().map(|(n, _)| n).collect();
+        assert!(names.contains(&"Restart event") && names.contains(&"Abandon event"), "{names:?}");
+        assert!(actions(Driving::Event).contains(&MenuAction::Custom("roam")));
+        assert!(actions(Driving::Stage).contains(&MenuAction::Custom("restart")));
+        assert!(!actions(Driving::Stage).contains(&MenuAction::Custom("roam")));
+    }
+
+    #[test]
+    fn event_best_is_the_drivers_fastest_solo_time() {
+        let mut b = board::Board::default();
+        for (time, driver) in [(200.0, "Mia"), (190.0, "Mia"), (150.0, "Leo")] {
+            b.records.push(Record::new(101, driver, "", time, 0.0, vec![time], 1, "0", "h"));
+        }
+        let me = board::team_key("Mia", "");
+        assert_eq!(event_best(&b, &me, 101), Some(190.0));
+        assert_eq!(event_best(&b, &me, 102), None);
+    }
 }

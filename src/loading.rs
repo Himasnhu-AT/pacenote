@@ -62,7 +62,7 @@ enum Phase {
 impl Phase {
     fn label(self) -> &'static str {
         match self {
-            Phase::Generate => "Surveying the stage",
+            Phase::Generate => "Surveying the roads",
             Phase::Build => "Building terrain and road",
             Phase::Warm => "Preparing scenery and shaders",
             Phase::Settle => "Final checks",
@@ -112,6 +112,16 @@ const TIPS: &[&str] = &[
     "Press C to change camera: cockpit, bonnet or chase.",
     "Stuck or upside down? R puts you back on the road for a 5 s penalty.",
     "The handbrake (Space) helps the car rotate into hairpins.",
+];
+
+/// Tips for the open world (no co-driver in free roam, no penalty for a recover there).
+const OPEN_TIPS: &[&str] = &[
+    "Glowing columns mark the events: orange rallies, blue sprints, purple laps. Stop inside one to start it.",
+    "In an event the co-driver reads the road ahead: listen for the corner grade (1 hairpin to 6 flat).",
+    "Stuck or on the roof? R puts you back on the road (free in free roam, +5 s in an event).",
+    "Press C to change camera: cockpit, bonnet or chase.",
+    "The handbrake (Space) helps the car rotate into hairpins.",
+    "Big hits damage the car. A damaged engine loses power; bent steering pulls to one side.",
 ];
 
 pub struct LoadingPlugin;
@@ -175,7 +185,11 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
     use engine::ui::prelude::*;
 
     let t = world.resource::<Theme>().clone();
-    let tip = TIPS[(def.seed as usize) % TIPS.len()];
+    let open = def.id == crate::open::ID;
+    let tips = if open { OPEN_TIPS } else { TIPS };
+    // The open world loads with the same seed every time: vary its tip by the clock.
+    let pick = if open { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as usize) } else { def.seed as usize };
+    let tip = tips[pick % tips.len()];
     let cat = world.resource::<crate::meta::stages::StageCatalog>();
     let info = cat.info(def.id).cloned();
     // Until the worker's map is in: stage 1's backdrop, else the catalog's road sketch.
@@ -205,7 +219,16 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
             .join(", "),
         None => surface_name(def.surface).to_string(),
     };
-    let facts = format!("{} \u{b7} {} \u{b7} {}, {}", biome_name(def.biome), surf, time_name(def.time), weather_name(def.weather));
+    let facts = if open {
+        format!("A valley town, farms, forest and gravel roads \u{b7} {}, {}", time_name(def.time), weather_name(def.weather))
+    } else {
+        format!("{} \u{b7} {} \u{b7} {}, {}", biome_name(def.biome), surf, time_name(def.time), weather_name(def.weather))
+    };
+    // The open world: the events (as last loaded) and how many have a time, and the controls.
+    let me = board::team_key(&p.driver_name, "");
+    let events_done = p.events.iter().filter(|e| b.records.iter().any(|r| r.stage == e.id && r.team() == me)).count();
+    let device = world.get_resource::<engine::actions::ActionState>().map_or(engine::actions::Device::KeyboardMouse, |a| a.last_device);
+    let keys = crate::meta::coach::controls(device);
     let mut kicker = format!("Stage {:02} \u{b7} {}", def.id, if mode == RunMode::Team { "Team run" } else { "Practice" });
     if def.id == crate::open::ID {
         kicker = "Free roam".into();
@@ -245,6 +268,25 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
                 eyebrow_bar(c, &kicker, t.accent);
                 c.spawn(title(&def.name, name_size, t.text));
                 c.spawn((text(facts, body(SIZE_BODY + 2.0), t.text_muted), Node { max_width: px(760), ..default() }));
+                if open {
+                    c.spawn((Node { column_gap: px(GAP_L), margin: UiRect::vertical(px(GAP_M)), ..default() }, Pickable::IGNORE)).with_children(|r| {
+                        stat(r, &t, "4 \u{d7} 4", "km to roam", t.text, 44.0);
+                        if !p.events.is_empty() {
+                            stat(r, &t, p.events.len().to_string(), "Events", t.text, 44.0);
+                            stat(r, &t, events_done.to_string(), "Finished", if events_done > 0 { t.accent } else { t.text_dim }, 44.0);
+                        }
+                    });
+                    // The controls, two columns.
+                    c.spawn((Node { display: Display::Grid, grid_template_columns: RepeatedGridTrack::px(2, 280.0), row_gap: px(GAP_S), column_gap: px(GAP_M), ..default() }, Pickable::IGNORE)).with_children(|g| {
+                        for (k, what) in keys {
+                            g.spawn((Node { column_gap: px(GAP_S + 2.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|r| {
+                                r.spawn(key_cap(&t, k));
+                                r.spawn(text(*what, body(SIZE_BODY - 2.0), t.text_muted));
+                            });
+                        }
+                    });
+                }
+                if !open {
                 c.spawn((Node { column_gap: px(GAP_L), margin: UiRect::vertical(px(GAP_M)), ..default() }, Pickable::IGNORE)).with_children(|r| {
                     let len = info.as_ref().map_or(def.length, |i| i.length);
                     stat(r, &t, format!("{:.2}", len / 1000.0), "km", t.text, 44.0);
@@ -270,6 +312,7 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
                     line(l, if mode == RunMode::Team { "Team best" } else { "Your best" }, best.as_ref(), t.text);
                     line(l, "Stage record", leader.as_ref(), t.accent);
                 });
+                }
                 c.spawn(spacer(GAP_L));
                 // Progress.
                 c.spawn((Node { width: px(560), height: px(4), ..default() }, BackgroundColor(t.line), Pickable::IGNORE)).with_children(|b| {
