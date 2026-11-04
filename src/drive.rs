@@ -500,6 +500,18 @@ fn follow_camera(
     let shake = access.as_deref().map_or(1.0, |a| if a.reduce_motion { 0.0 } else { a.camera_shake.clamp(0.0, 1.0) });
     let (Ok((car, driven)), Ok((mut cam, proj))) = (cars.single(), cams.single_mut()) else { return };
     let dt = time.delta_secs();
+    // A new view, or the car put somewhere else (a recover, back home after a wreck): start
+    // the chase camera fresh instead of easing out of where it was (a camera pulled in tight
+    // against a tree took ~2 s to come back out after a crash).
+    let jumped = cam_fx.last_pos.is_some_and(|p: Vec3| p.distance(car.translation) > 8.0);
+    if cam_fx.last_view != Some(*view) || jumped {
+        cam_fx.last_view = Some(*view);
+        cam_fx.lift = 0.0;
+        cam_fx.pull = 0.0;
+        *smooth = None;
+        *head = None;
+    }
+    cam_fx.last_pos = Some(car.translation);
     let fwd = car.rotation * Vec3::NEG_Z;
     let flat = Vec3::new(fwd.x, 0.0, fwd.z).normalize_or(Vec3::NEG_Z);
     let speed = driven.map_or(0.0, |d| d.car.vel.length());
@@ -587,7 +599,12 @@ fn follow_camera(
     // First up over it (a car close behind, a low wall), then in if that isn't enough.
     let lift = [0.0, 1.2, 2.4].into_iter().find(|&y| chase_clearance(pivot, eye + Vec3::Y * y, &*stage, &solids) >= 1.0).unwrap_or(2.4);
     let rate = if lift > cam_fx.lift { 8.0 } else { 2.0 };
-    cam_fx.lift += (lift - cam_fx.lift) * (1.0 - (-dt * rate).exp());
+    if cam_fx.pull <= 0.0 {
+        // Fresh (just switched to, or the car was moved): straight to where it should be.
+        cam_fx.lift = lift;
+    } else {
+        cam_fx.lift += (lift - cam_fx.lift) * (1.0 - (-dt * rate).exp());
+    }
     let eye = eye + Vec3::Y * cam_fx.lift;
     let clear = chase_clearance(pivot, eye, &*stage, &solids);
     cam_fx.pull = if clear < cam_fx.pull || cam_fx.pull <= 0.0 { clear } else { cam_fx.pull + (clear - cam_fx.pull) * (1.0 - (-dt * 2.5).exp()) };
@@ -602,6 +619,9 @@ struct CamFx {
     fov: f32,
     lift: f32,
     pull: f32,
+    /// The view and the car's position last frame (to notice a switch or a teleport).
+    last_view: Option<CameraView>,
+    last_pos: Option<Vec3>,
 }
 
 /// Extra vertical field of view (degrees) at `speed` m/s: none to 40 km/h, +7 by 180 km/h.
