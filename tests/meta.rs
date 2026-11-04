@@ -220,11 +220,19 @@ fn top(w: &World) -> Option<&'static str> {
     w.resource::<Screens>().top()
 }
 
+/// Headless Pacenote with the engine's UI kit (screen stack, focus), which headless apps
+/// leave out. Screens aren't drawn headless; their builders are called by hand.
+fn menu_scenario() -> Scenario {
+    Scenario::new(pacenote::info()).menu().setup(|app| {
+        app.add_plugins(engine::ui::UiKitPlugin);
+    }).plugin(pacenote::Pacenote).build()
+}
+
 /// Every screen of the Service Park is reachable from the menu and builds (headless runs
 /// don't draw screens, so each builder is also called by hand).
 #[test]
 fn every_service_park_screen_is_reachable_and_builds() {
-    let mut s = scenario(true);
+    let mut s = menu_scenario();
     s.wait_until(30, |w| state(w) == AppState::MainMenu).expect("main menu");
     let reg = s.world().resource::<engine::ui::screens::ScreenRegistry>().clone();
     for id in ["main", "events", "challenges", "logbook", "garage", "upgrades", "dealer", "settings", "together", "credits", "boards"] {
@@ -268,7 +276,7 @@ fn requests(s: &mut Scenario) -> Vec<CareerRequest> {
 /// Notes the dialog says how many are missing and nothing is sent.
 #[test]
 fn buying_a_part_asks_first_and_too_few_notes_is_refused() {
-    let mut s = scenario(true);
+    let mut s = menu_scenario();
     s.wait_until(30, |w| state(w) == AppState::MainMenu).expect("main menu");
     s.world_mut().write_message(ScreenRequest::Push("upgrades"));
     s.step(2);

@@ -80,7 +80,7 @@ impl Plugin for GarageUiPlugin {
             .register_screen("garage", build_garage)
             .register_screen("upgrades", build_upgrades)
             .register_screen("dealer", build_dealer)
-            .add_systems(Update, part_keys.before(engine::ui::UiSet::Input).run_if(engine::ui::ui_visible))
+            .add_systems(Update, part_keys.before(engine::ui::UiSet::Input).run_if(engine::ui::ui_visible).run_if(resource_exists::<Focus>).run_if(resource_exists::<NavQueue>))
             .add_systems(Update, track_focus.after(engine::ui::UiSet::Paint));
     }
 }
