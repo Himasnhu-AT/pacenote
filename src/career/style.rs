@@ -1071,8 +1071,6 @@ fn score(
     stage: Res<crate::world::StageWorld>,
     run: Res<crate::drive::StageRun>,
     cars: Query<&crate::drive::DrivenCar>,
-    racers: Query<&super::racers::Racer>,
-    field: Option<Res<super::racers::RaceField>>,
     others: Res<super::racers::OtherCars>,
     (paused, loading, role): (Option<Res<engine::pause::Paused>>, Option<Res<crate::loading::Loading>>, Option<Res<crate::meta::Role>>),
     mut state: ResMut<StyleState>,
@@ -1093,13 +1091,14 @@ fn score(
     let n = run.splits.len() + run.finished.is_some() as usize;
     f.split = n > *splits;
     *splits = n;
+    // In a race: each rival's progress along the route (its id as in `OtherCars`).
     rivals.clear();
-    if field.is_some() {
-        for r in &racers {
-            if let Some(at) = stage.road.nearest(Vec2::new(r.car.pos.x, r.car.pos.z), 40.0) {
-                rivals.push((r.slot as u32, at.s));
-            }
+    for o in others.0.iter().filter(|o| matches!(o.kind, super::racers::OtherKind::Rival(_))) {
+        if let Some(at) = stage.road.nearest(Vec2::new(o.pos.x, o.pos.z), 40.0) {
+            rivals.push((o.id, at.s));
         }
+    }
+    if !rivals.is_empty() {
         f.progress = Some(run.progress);
         f.rivals = &rivals;
     }
