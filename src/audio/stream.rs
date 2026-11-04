@@ -17,6 +17,7 @@ use bevy::reflect::TypePath;
 use super::ambience::{AmbParams, AmbienceSynth};
 use super::car::{CarEvent, CarParams, CarSynth};
 use super::dsp::{Biquad, Dynamics, OnePole, RATE, Smooth, finite, soft_clip};
+use super::traffic::{TrafficParams, TrafficSynth};
 use super::voice::{Utterance, VoicePlayer};
 
 pub const BLOCK: usize = 256;
@@ -53,6 +54,8 @@ pub struct Frame {
     pub voice: Utterance,
     pub car: CarParams,
     pub amb: AmbParams,
+    /// The other cars heard (open world traffic).
+    pub traffic: TrafficParams,
     pub mix: Mix,
     pub events: [CarEvent; MAX_EVENTS],
     pub n_events: usize,
@@ -60,7 +63,7 @@ pub struct Frame {
 
 impl Default for Frame {
     fn default() -> Self {
-        Frame { voice: Utterance::default(), car: CarParams::default(), amb: AmbParams::default(), mix: Mix::default(), events: [CarEvent::Shift(true); MAX_EVENTS], n_events: 0 }
+        Frame { voice: Utterance::default(), car: CarParams::default(), amb: AmbParams::default(), traffic: TrafficParams::default(), mix: Mix::default(), events: [CarEvent::Shift(true); MAX_EVENTS], n_events: 0 }
     }
 }
 
@@ -80,6 +83,7 @@ impl Frame {
 pub struct RallySynth {
     pub car: CarSynth,
     pub amb: AmbienceSynth,
+    pub traffic: TrafficSynth,
     mix: Mix,
     car_gain: Smooth,
     amb_gain: Smooth,
@@ -101,6 +105,7 @@ impl RallySynth {
         RallySynth {
             car: CarSynth::new(seed),
             amb: AmbienceSynth::new(seed),
+            traffic: TrafficSynth::new(seed),
             mix: Mix::default(),
             car_gain: Smooth::new(1.0, 0.01, 0.01, RATE),
             amb_gain: Smooth::new(1.0, 0.01, 0.01, RATE),
@@ -119,6 +124,7 @@ impl RallySynth {
     pub fn apply(&mut self, f: &Frame) {
         self.car.set(f.car);
         self.amb.set(f.amb);
+        self.traffic.set(f.traffic);
         for e in &f.events[..f.n_events.min(MAX_EVENTS)] {
             self.car.event(*e);
         }
@@ -138,6 +144,7 @@ impl RallySynth {
         self.car_buf.fill(0.0);
         self.amb_buf.fill(0.0);
         self.car.render(&mut self.car_buf);
+        self.traffic.render(&mut self.car_buf);
         self.amb.render(&mut self.amb_buf);
         let car_filtered = self.mix.car_lp < 19_000.0;
         let amb_filtered = self.mix.amb_lp < 19_000.0;
