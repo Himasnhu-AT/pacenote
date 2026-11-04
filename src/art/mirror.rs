@@ -154,7 +154,9 @@ pub fn dress(commands: &mut Commands, mats: &mut Assets<StandardMaterial>, meshe
 }
 
 /// The mirror camera follows the main camera's exposure and fog.
-fn follow_main(main: Query<(&Exposure, Option<&DistanceFog>), (With<engine::gfx::MainCamera>, Without<MirrorCamera>)>, mut mirror: Query<(Entity, &mut Exposure, Option<&mut DistanceFog>), With<MirrorCamera>>, mut commands: Commands) {
+type MainView<'a> = (&'a Exposure, Option<&'a DistanceFog>);
+
+fn follow_main(main: Query<MainView, (With<engine::gfx::MainCamera>, Without<MirrorCamera>)>, mut mirror: Query<(Entity, &mut Exposure, Option<&mut DistanceFog>), With<MirrorCamera>>, mut commands: Commands) {
     let Some((exp, fog)) = main.iter().next() else { return };
     for (e, mut x, f) in &mut mirror {
         // No sun in the mirror (see [`tag`]): sky light only, so it is exposed brighter.

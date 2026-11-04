@@ -240,6 +240,7 @@ pub fn spawn(world: &mut World, car: Entity) {
 
 /// Finds the hub/spin nodes once the scene is in, tags every part as an `Actor` and gives the
 /// model's textures mips.
+#[allow(clippy::too_many_arguments)]
 fn rig(
     mut commands: Commands,
     models: Query<Entity, (With<CarModel>, Without<CarRig>)>,

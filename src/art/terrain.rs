@@ -151,6 +151,7 @@ fn set_of(l: &SplatLayer) -> Option<String> {
 }
 
 /// Builds our material once the engine's terrain material (and its splat map) exists.
+#[allow(clippy::too_many_arguments)]
 fn build(
     mut commands: Commands,
     plan: Option<Res<TerrainPlan>>,
@@ -181,7 +182,8 @@ fn build(
     };
     let mut ext = PnTerrainExt { splat: src.extension.splat.clone(), ..default() };
     ext.params.extent = src.extension.params.extent;
-    ext.params.misc = Vec4::new(0.16, 0.012, 1.0, 0.0);
+    // Macro variation: patchy fields and slopes rather than one flat colour.
+    ext.params.misc = Vec4::new(0.26, 0.011, 1.0, 0.0);
     // Missing layers repeat the last one with zero weight in the splat map.
     let layers: Vec<SplatLayer> = (0..4).map(|i| plan.0.get(i).or(plan.0.last()).cloned().unwrap_or_default()).collect();
     for (i, l) in layers.iter().enumerate() {

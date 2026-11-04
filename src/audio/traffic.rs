@@ -141,7 +141,7 @@ impl TrafficSynth {
         }
         let bank = samples::bank();
         let exhaust = bank.map_or(&[][..], |b| b.engine(LOOP).1);
-        for fr in out.chunks_exact_mut(2) {
+        for fr in out.as_chunks_mut::<2>().0 {
             if self.coef_timer == 0 {
                 self.coef_timer = 64;
                 for v in &mut self.v {
@@ -255,7 +255,7 @@ mod tests {
         assert!(s.v.iter().any(|v| v.id == Some(9)) && s.v.iter().any(|v| v.id == Some(11)));
         // No sample-to-sample jumps.
         let all: Vec<f32> = a.iter().chain(&b).copied().collect();
-        let jump = all.chunks_exact(2).collect::<Vec<_>>().windows(2).map(|w| (w[1][0] - w[0][0]).abs()).fold(0.0f32, f32::max);
+        let jump = all.as_chunks::<2>().0.windows(2).map(|w| (w[1][0] - w[0][0]).abs()).fold(0.0f32, f32::max);
         assert!(jump < 0.05, "{jump}");
         // Everyone leaves: silent again.
         s.set(TrafficParams::default());
