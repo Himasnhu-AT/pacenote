@@ -104,6 +104,7 @@ impl Plugin for ScreensPlugin {
                     ("Resume", MenuAction::Resume),
                     ("Restart stage", MenuAction::Custom("restart")),
                     ("Recover car (+5 s)", MenuAction::Custom("recover")),
+                    ("Map", MenuAction::Open(crate::map::SCREEN)),
                     ("Settings", MenuAction::Settings),
                     ("Quit to menu", MenuAction::MainMenu),
                 ],
