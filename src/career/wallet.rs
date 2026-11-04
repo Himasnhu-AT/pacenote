@@ -25,3 +25,39 @@ impl Default for Wallet {
         Wallet { balance: STARTING_BALANCE, earned: 0, spent: 0 }
     }
 }
+
+impl Wallet {
+    /// Adds `amount` (saturating), counting it as earned.
+    pub fn credit(&mut self, amount: u32) {
+        self.balance = self.balance.saturating_add(amount);
+        self.earned = self.earned.saturating_add(amount);
+    }
+
+    /// Takes `amount` if the balance covers it; otherwise refuses with what's missing. The
+    /// balance never goes negative.
+    pub fn debit(&mut self, amount: u32) -> Result<(), super::garage::Refusal> {
+        if self.balance < amount {
+            return Err(super::garage::Refusal::Notes { need: amount - self.balance });
+        }
+        self.balance -= amount;
+        self.spent = self.spent.saturating_add(amount);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credit_and_debit_never_go_negative() {
+        let mut w = Wallet::default();
+        assert_eq!(w.balance, 12_000);
+        w.credit(500);
+        assert_eq!((w.balance, w.earned), (12_500, 500));
+        assert_eq!(w.debit(13_000), Err(super::super::garage::Refusal::Notes { need: 500 }));
+        assert_eq!(w.balance, 12_500, "a refused charge changes nothing");
+        w.debit(12_500).unwrap();
+        assert_eq!((w.balance, w.spent), (0, 12_500));
+    }
+}

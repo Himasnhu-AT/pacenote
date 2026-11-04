@@ -78,6 +78,10 @@ pub enum PopProfile {
     Rally,
 }
 
+/// How many paint colours there are (`art::traffic_car`'s: white, silver, black, red, blue,
+/// green, yellow).
+pub const PAINTS: u8 = 7;
+
 /// A paint: one of the 7 `art::traffic_car` paints, solid or metallic. Free to change.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(default)]
@@ -309,6 +313,8 @@ pub enum Refusal {
     Unknown,
     /// You can't sell your last car.
     LastCar,
+    /// Not now: an event is running (car swaps happen at the Service Park or in the menus).
+    Busy,
 }
 
 impl Refusal {
@@ -320,6 +326,7 @@ impl Refusal {
             Refusal::MaxLevel => "Already at the top level".into(),
             Refusal::Unknown => "Not available".into(),
             Refusal::LastCar => "You can't sell your last car".into(),
+            Refusal::Busy => "Not during an event".into(),
         }
     }
 }

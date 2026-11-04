@@ -11,9 +11,12 @@
 //! only ever *sends* [`CareerRequest`]s; only F mutates [`wallet::Wallet`] and
 //! [`garage::Garage`]. One save: `<DataDir>/`[`CAREER_FILE`].
 
+pub mod economy;
 pub mod garage;
 pub mod grade;
+pub mod race_flow;
 pub mod racers;
+pub mod save;
 pub mod style;
 pub mod wallet;
 
@@ -147,6 +150,7 @@ impl Plugin for CareerPlugin {
             .add_message::<MoneyEarned>()
             .add_message::<CareerRequest>()
             .add_message::<style::StyleEvent>()
-            .add_message::<racers::RaceResult>();
+            .add_message::<racers::RaceResult>()
+            .add_plugins((economy::EconomyPlugin, racers::RacersPlugin));
     }
 }

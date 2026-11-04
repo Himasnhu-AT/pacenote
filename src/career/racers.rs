@@ -15,8 +15,20 @@ use std::sync::{Arc, RwLock};
 use bevy::math::Vec2;
 use bevy::prelude::*;
 
-use crate::pilot::Pilot;
-use crate::vehicle::{Car, Obstacle, Spec};
+use crate::pilot::{self, Pilot, PilotParams};
+use crate::stage::{Corner, Road};
+use crate::vehicle::{self, Car, DamageMode, Ground, Input, Obstacle, Spec, Wall};
+
+use super::garage::{self, CARS, CarDef, Class, Paint, UpgradeKind, Upgrades};
+
+/// Registers the race flow (`career::race_flow`).
+pub struct RacersPlugin;
+
+impl Plugin for RacersPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(super::race_flow::RaceFlowPlugin);
+    }
+}
 
 /// Race difficulty (GAME_SYSTEMS §5 table).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -26,6 +38,54 @@ pub enum Difficulty {
     Pro,
     Ace,
     Legend,
+}
+
+impl Difficulty {
+    pub const ALL: [Difficulty; 4] = [Difficulty::Rookie, Difficulty::Pro, Difficulty::Ace, Difficulty::Legend];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Difficulty::Rookie => "Rookie",
+            Difficulty::Pro => "Pro",
+            Difficulty::Ace => "Ace",
+            Difficulty::Legend => "Legend",
+        }
+    }
+    /// 0 Rookie .. 3 Legend (saves, menus).
+    pub fn index(self) -> u8 {
+        self as u8
+    }
+    pub fn from_index(i: u8) -> Difficulty {
+        Difficulty::ALL[(i as usize).min(3)]
+    }
+    /// Share of the surface's grip used in corners (GAME_SYSTEMS §5).
+    pub fn pace(self) -> f32 {
+        [0.55, 0.68, 0.80, 0.92][self as usize]
+    }
+    /// Share of grip used braking.
+    pub fn brake(self) -> f32 {
+        [0.50, 0.55, 0.60, 0.65][self as usize]
+    }
+    /// Chance of a mistake at each corner of grade ≤ 2.
+    pub fn mistake(self) -> f32 {
+        [0.15, 0.08, 0.04, 0.01][self as usize]
+    }
+    /// Chance a rival lets the player past when caught (Legend never: it defends the centre).
+    pub fn yields(self) -> f32 {
+        [1.0, 1.0, 0.5, 0.0][self as usize]
+    }
+    /// The player's start slot, 1-based (1 = front).
+    pub fn player_slot(self) -> u8 {
+        [3, 4, 5, 6][self as usize]
+    }
+    /// The purse multiplier (GAME_SYSTEMS §4).
+    pub fn mult(self) -> f32 {
+        [0.75, 1.0, 1.5, 2.5][self as usize]
+    }
+    /// The entry fee as a share of the purse (Ace 10 %, Legend 25 %).
+    pub fn fee_share(self) -> f32 {
+        [0.0, 0.0, 0.10, 0.25][self as usize]
+    }
 }
 
 /// How an event run is driven (DECISIONS R1). Lap events are Time Trial only.
@@ -47,16 +107,40 @@ pub enum StartFormat {
     Pursuit,
 }
 
-/// One AI car in a race: its own car, spec and pilot.
+/// One AI car in a race: its own car, spec and pilot, and how its race is going.
 #[derive(Component, Clone, Debug)]
 pub struct Racer {
-    /// Start slot and step order.
+    /// Start slot (1 = front) and step order.
     pub slot: u8,
     pub car: Car,
     pub spec: Spec,
     pub pilot: Pilot,
-    /// Pose after the previous step (interpolation and the solids).
+    /// Pose before the last step (interpolation).
     pub prev: (Vec3, Quat),
+    /// Invented driver name.
+    pub name: &'static str,
+    /// Roster car (`garage::CarDef::id`) and its paint.
+    pub model: &'static str,
+    pub paint: Paint,
+    /// Metres along the route (best so far), the step it is released on, how it ended.
+    pub progress: f32,
+    pub release: u32,
+    pub finish: Option<Finish>,
+    /// Progress at every [`HIST_STEPS`] steps since the start (the gaps).
+    pub hist: Vec<f32>,
+    /// Seconds stuck (no progress) / off the road, for putting it back.
+    stuck: f32,
+    off: f32,
+    /// Seconds the player has been right behind it, and the yield in progress (s left, the
+    /// speed cap); one roll per catch.
+    caught: f32,
+    yield_left: f32,
+    yield_cap: f32,
+    rolled_yield: bool,
+    /// Its seeded pace spread (±3 %).
+    pub spread: f32,
+    /// Times it was put back on the road (the dev state).
+    pub resets: u32,
 }
 
 /// The racers' poses after the last step, `(position, forward)` per car (the same shape as
@@ -148,3 +232,523 @@ pub struct OtherCar {
 /// Every other car (traffic and rivals), rebuilt by F each fixed step (DECISIONS R5).
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
 pub struct OtherCars(pub Vec<OtherCar>);
+
+// ---------------------------------------------------------------- the race (pure)
+
+/// Rivals in a race (6 cars with the player; DECISIONS R2).
+pub const RIVALS: usize = 5;
+/// The progress history is sampled every this many fixed steps (0.25 s at 60 Hz).
+pub const HIST_STEPS: u32 = 15;
+/// Pursuit starts: the gap between releases (1.5 s at 60 Hz).
+pub const RELEASE_STEPS: u32 = 90;
+/// A Recover in a race holds the car this many steps (5 s) instead of a time penalty.
+pub const RECOVER_HOLD: u32 = 300;
+/// Contact at or above this closing speed (m/s, 15 km/h) is logged (the clean bonus).
+pub const CONTACT_MS: f32 = 15.0 / 3.6;
+/// Fixed step.
+pub const DT: f32 = 1.0 / 60.0;
+
+/// Invented rival names (GAME_SYSTEMS §5; UX checks none is a real driver before shipping).
+pub const NAMES: [&str; 8] = ["A. Varenne", "T. Okkonen", "R. Castell", "M. Duvane", "I. Strand", "K. Belloc", "J. Marr", "S. Ilves"];
+
+/// Start format by the route's minimum width over its first 400 m.
+pub fn start_format(road: &Road) -> StartFormat {
+    let n = road.station(400.0);
+    let min = road.width[..=n.min(road.len() - 1)].iter().copied().fold(f32::MAX, f32::min);
+    if min >= 6.0 { StartFormat::Grid } else { StartFormat::Pursuit }
+}
+
+/// Where start slot `slot` (1 = front, 6 = back) stands: metres along the route, lateral
+/// offset (m, left +), and the step it is released on.
+pub fn slot_spot(format: StartFormat, slot: u8) -> (f32, f32, u32) {
+    let k = slot.clamp(1, 6) as u32 - 1;
+    match format {
+        // 2 wide (±1.5 m), 3 rows 8 m apart; one launch.
+        StartFormat::Grid => (2.0 + 8.0 * (2 - k / 2) as f32, if k % 2 == 0 { 1.5 } else { -1.5 }, 0),
+        // Single file 10 m apart, released 1.5 s apart from the front.
+        StartFormat::Pursuit => (2.0 + 10.0 * (5 - k) as f32, 0.0, k * RELEASE_STEPS),
+    }
+}
+
+/// A pose on the route: `s` metres along, `lateral` m to the left, on the ground; heading.
+pub fn route_pose(road: &Road, ground: &impl Ground, s: f32, lateral: f32) -> (Vec3, f32) {
+    let i = road.station(s);
+    let d = road.dir[i];
+    let p = road.pts[i] + Vec3::new(d.y, 0.0, -d.x) * lateral;
+    (Vec3::new(p.x, ground.height(p.x, p.z), p.z), libm::atan2f(d.x, d.y))
+}
+
+/// The light rubber band (GAME_SYSTEMS §5): `gap_s` > 0 when the rival is ahead of the player.
+/// +2 % when > 6 s behind, −2 % when > 6 s ahead, never beyond ±3 %, and 0 in the last 15 %
+/// of the route (`frac` = its progress share).
+pub fn rubber_band(gap_s: f32, frac: f32) -> f32 {
+    if frac >= 0.85 {
+        return 0.0;
+    }
+    let m = if gap_s < -6.0 {
+        0.02
+    } else if gap_s > 6.0 {
+        -0.02
+    } else {
+        0.0
+    };
+    f32::clamp(m, -0.03, 0.03)
+}
+
+/// The rivals' cars for a player car of `player_pi`: roster cars of the player's class (by
+/// stock PI, falling back to the nearest below), each upgraded in a seeded order until its PI
+/// is within ±20 of the player's (GAME_SYSTEMS §5).
+pub fn pick_cars(player_pi: u16, seed: u64) -> Vec<(&'static CarDef, Upgrades)> {
+    let class = Class::of(player_pi);
+    let stock = |d: &CarDef| garage::pi(&(d.base)());
+    let mut pool: Vec<&CarDef> = CARS.iter().filter(|d| Class::of(stock(d)) == class && stock(d) <= player_pi + 20).collect();
+    if pool.is_empty() {
+        pool = CARS.iter().filter(|d| stock(d) <= player_pi + 20).collect();
+        pool.sort_by_key(|d| std::cmp::Reverse(stock(d)));
+        pool.truncate(2);
+    }
+    if pool.is_empty() {
+        pool = vec![CARS.iter().min_by_key(|d| stock(d)).unwrap()];
+    }
+    (0..RIVALS)
+        .map(|k| {
+            let d = pool[(pilot::unit(seed, 100 + k as u64) * pool.len() as f32) as usize % pool.len()];
+            let mut u = Upgrades::default();
+            let order: Vec<UpgradeKind> = {
+                let r = (pilot::unit(seed, 200 + k as u64) * 7.0) as usize;
+                (0..7).map(|i| UpgradeKind::ALL[(i + r) % 7]).collect()
+            };
+            'grow: for _ in 0..3 {
+                for kind in &order {
+                    if garage::pi(&garage::build_spec(d, &u)) + 20 >= player_pi {
+                        break 'grow;
+                    }
+                    let l = u.get(*kind);
+                    if l < kind.max_level() {
+                        u.set(*kind, l + 1);
+                        if garage::pi(&garage::build_spec(d, &u)) > player_pi + 20 {
+                            u.set(*kind, l);
+                        }
+                    }
+                }
+            }
+            (d, u)
+        })
+        .collect()
+}
+
+/// The ground a rival drives on: the world (without the race's own solids) plus every other
+/// car of the race as solids.
+pub struct RivalGround<'a, G: Ground> {
+    pub base: &'a G,
+    pub others: &'a [(Vec3, Vec3)],
+}
+
+impl<G: Ground> Ground for RivalGround<'_, G> {
+    fn height(&self, x: f32, z: f32) -> f32 {
+        self.base.height(x, z)
+    }
+    fn normal(&self, x: f32, z: f32) -> Vec3 {
+        self.base.normal(x, z)
+    }
+    fn surface(&self, x: f32, z: f32) -> crate::stage::Surface {
+        self.base.surface(x, z)
+    }
+    fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
+        self.base.obstacles(p, r, out);
+        for pose in self.others {
+            crate::open::traffic::push_solids(*pose, p, r, out);
+        }
+    }
+    fn walls(&self, p: Vec2, r: f32, out: &mut Vec<Wall>) {
+        self.base.walls(p, r, out);
+    }
+}
+
+/// A car's solid pose: (centre on the ground, forward).
+pub fn solid_pose(car: &Car) -> (Vec3, Vec3) {
+    (car.pos - car.up() * 0.45, car.forward())
+}
+
+/// The player as the race sees it each step.
+#[derive(Clone, Copy, Debug)]
+pub struct PlayerNow<'a> {
+    pub car: &'a Car,
+    pub progress: f32,
+    /// The player's race is over (finished or retired): rivals stop yielding.
+    pub done: bool,
+}
+
+/// The race itself, pure: the rivals, the clock and the player's history. The ECS shell
+/// (`career::race_flow`) feeds it the player's car each fixed step.
+#[derive(Clone, Debug)]
+pub struct RaceSim {
+    pub event: u32,
+    pub difficulty: Difficulty,
+    pub format: StartFormat,
+    pub attempt: u32,
+    pub seed: u64,
+    pub rivals: Vec<Racer>,
+    /// The player's start slot (1-based) and release step.
+    pub player_slot: u8,
+    pub player_release: u32,
+    /// Steps since the start (the race clock: `step / 60` s); counts once the countdown is over.
+    pub step: u32,
+    armed: bool,
+    /// The player's progress every [`HIST_STEPS`].
+    pub player_hist: Vec<f32>,
+    /// No contact ≥ 15 km/h between the player and a rival so far.
+    pub clean: bool,
+    /// Contacts logged (for the HUD / tests).
+    pub contacts: u32,
+    touching: [bool; RIVALS],
+    /// Route length (m).
+    pub len: f32,
+}
+
+impl RaceSim {
+    /// A race on `road` (the event's route) for a player in a car of PI `player_pi`.
+    pub fn new(event: u32, difficulty: Difficulty, attempt: u32, road: &Road, ground: &impl Ground, player_pi: u16, damage: DamageMode) -> RaceSim {
+        let seed = pilot::seed(&[event as u64, difficulty.index() as u64, attempt as u64]);
+        let format = start_format(road);
+        let player_slot = difficulty.player_slot();
+        let cars = pick_cars(player_pi, seed);
+        // Names: 5 of the 8, seeded.
+        let mut names: Vec<&'static str> = NAMES.to_vec();
+        for k in (1..names.len()).rev() {
+            let j = (pilot::unit(seed, 300 + k as u64) * (k + 1) as f32) as usize % (k + 1);
+            names.swap(k, j);
+        }
+        let mut rivals = Vec::with_capacity(RIVALS);
+        let slots: Vec<u8> = (1..=6u8).filter(|s| *s != player_slot).collect();
+        for (k, slot) in slots.into_iter().enumerate() {
+            let (d, u) = cars[k];
+            let mut spec = garage::build_spec(d, &u);
+            spec.damage = damage;
+            spec.abs = true;
+            spec.traction_assist = true;
+            let (s, lat, release) = slot_spot(format, slot);
+            let (pos, heading) = route_pose(road, ground, s, lat);
+            let car = Car::new(pos + Vec3::Y * 0.9, heading);
+            let spread = (pilot::unit(seed, 400 + k as u64) * 2.0 - 1.0) * 0.03;
+            let params = PilotParams {
+                pace: difficulty.pace() * (1.0 + spread),
+                brake: difficulty.brake(),
+                line_offset: lat,
+                seed: pilot::seed(&[seed, slot as u64]),
+                mistake: difficulty.mistake(),
+                ..PilotParams::default()
+            };
+            let colour = ((pilot::unit(seed, 500 + k as u64) * 7.0) as u8 + k as u8) % garage::PAINTS;
+            rivals.push(Racer {
+                slot,
+                prev: (car.pos, car.rot),
+                car,
+                spec,
+                pilot: Pilot::new(params),
+                name: names[k],
+                model: d.id,
+                paint: Paint { colour, metallic: k % 2 == 1 },
+                progress: s,
+                release,
+                finish: None,
+                hist: Vec::new(),
+                stuck: 0.0,
+                off: 0.0,
+                caught: 0.0,
+                yield_left: 0.0,
+                yield_cap: 0.0,
+                rolled_yield: false,
+                spread,
+                resets: 0,
+            });
+        }
+        let player_release = slot_spot(format, player_slot).2;
+        RaceSim { event, difficulty, format, attempt, seed, rivals, player_slot, player_release, step: 0, armed: false, player_hist: Vec::new(), clean: true, contacts: 0, touching: [false; RIVALS], len: road.length() }
+    }
+
+    /// Where the player starts: position on the ground and heading.
+    pub fn player_start(&self, road: &Road, ground: &impl Ground) -> (Vec3, f32) {
+        let (s, lat, _) = slot_spot(self.format, self.player_slot);
+        route_pose(road, ground, s, lat)
+    }
+
+    /// Race clock (s).
+    pub fn clock(&self) -> f32 {
+        self.step as f32 * DT
+    }
+
+    /// Has the start (the countdown) gone?
+    pub fn started(&self) -> bool {
+        self.armed
+    }
+
+    /// Is the player still held at the start (a pursuit release)?
+    pub fn player_held(&self) -> bool {
+        !self.armed || self.step < self.player_release
+    }
+
+    /// The finish line (m along the route).
+    pub fn finish_line(&self) -> f32 {
+        self.len - 4.0
+    }
+
+    /// One fixed step of every rival, after the player's. `counting_down`: the start hasn't
+    /// gone yet (everyone held). Each rival sees the player and the others as they were at the
+    /// start of this step.
+    pub fn step(&mut self, ground: &impl Ground, road: &Road, corners: &[Corner], player: PlayerNow, counting_down: bool) {
+        if !counting_down {
+            if self.armed {
+                self.step += 1;
+            } else {
+                self.armed = true;
+            }
+        }
+        if self.armed && self.step.is_multiple_of(HIST_STEPS) && self.player_hist.len() as u32 <= self.step / HIST_STEPS {
+            self.player_hist.push(player.progress);
+        }
+        let poses: Vec<(Vec3, Vec3)> = self.rivals.iter().map(|r| solid_pose(&r.car)).collect();
+        let mut others = Vec::with_capacity(RIVALS);
+        let player_pose = solid_pose(player.car);
+        let snapshot: Vec<(f32, f32, f32, bool)> = self.rivals.iter().map(|r| (r.progress, r.car.speed(), lateral_on(road, &r.car), r.finish.is_some())).collect();
+        let player_lat = lateral_on(road, player.car);
+        for k in 0..self.rivals.len() {
+            others.clear();
+            others.push(player_pose);
+            others.extend(poses.iter().enumerate().filter(|(j, _)| *j != k).map(|(_, p)| *p));
+            let g = RivalGround { base: ground, others: &others };
+            let held = !self.armed || self.step < self.rivals[k].release || self.rivals[k].finish.is_some();
+            let r = &mut self.rivals[k];
+            r.prev = (r.car.pos, r.car.rot);
+            let input = if held {
+                Input { handbrake: true, ..Input::default() }
+            } else {
+                racecraft(r, k, &snapshot, (player.progress, player.car.speed(), player_lat, player.done), self.difficulty, road, self.seed, self.len);
+                r.pilot.input(&r.car, &r.spec, road, corners, r.progress, DT)
+            };
+            vehicle::step(&mut r.car, &r.spec, input, &g, DT);
+            if held {
+                continue;
+            }
+            // Progress: near the road and forwards only (as the player's).
+            let near = road.nearest(Vec2::new(r.car.pos.x, r.car.pos.z), 40.0);
+            if let Some(rp) = near
+                && rp.s > r.progress
+                && rp.s < r.progress + 40.0
+            {
+                if rp.s > r.progress + 0.05 {
+                    r.stuck = 0.0;
+                }
+                r.progress = rp.s;
+            }
+            r.stuck += DT;
+            let off = near.is_none_or(|rp| rp.lateral.abs() > road.half_width(&rp) + 1.5) || r.car.up().y < 0.3;
+            r.off = if off { r.off + DT } else { 0.0 };
+            // A broken part retires it (Simulation damage); stuck or off the road, the
+            // marshals put it back where it was (deterministic).
+            if r.spec.damage == DamageMode::Simulation && r.car.damage.wrecked() {
+                r.finish = Some(Finish::Dnf);
+                continue;
+            }
+            if r.off > 3.0 || r.stuck > 6.0 {
+                let i = road.station(r.progress);
+                let d = road.dir[i];
+                vehicle::recover(&mut r.car, road.pts[i], libm::atan2f(d.x, d.y));
+                r.prev = (r.car.pos, r.car.rot);
+                r.off = 0.0;
+                r.stuck = 0.0;
+                r.resets += 1;
+            }
+            if r.progress >= self.len - 4.0 && r.finish.is_none() {
+                r.finish = Some(Finish::Time(self.step as f32 * DT));
+            }
+        }
+        // History and contact with the player.
+        let step = self.step;
+        for (k, r) in self.rivals.iter_mut().enumerate() {
+            if self.armed && step.is_multiple_of(HIST_STEPS) && r.hist.len() as u32 <= step / HIST_STEPS {
+                r.hist.push(r.progress);
+            }
+            let close = touching(&r.car, player.car);
+            let closing = (r.car.vel - player.car.vel).length();
+            if close && !self.touching[k] && closing >= CONTACT_MS && !player.done {
+                self.clean = false;
+                self.contacts += 1;
+            }
+            self.touching[k] = close;
+        }
+    }
+
+    /// Seconds `a` is behind `b` from `b`'s history: now − when `b` was where `a` is. Positive
+    /// when `a` is behind.
+    pub fn gap(hist_b: &[f32], s_a: f32, now: f32) -> Option<f32> {
+        let k = hist_b.iter().position(|&s| s >= s_a)?;
+        let t = if k == 0 {
+            0.0
+        } else {
+            let (s0, s1) = (hist_b[k - 1], hist_b[k]);
+            let f = if s1 > s0 { (s_a - s0) / (s1 - s0) } else { 1.0 };
+            (k as f32 - 1.0 + f) * HIST_STEPS as f32 * DT
+        };
+        Some(now - t)
+    }
+
+    /// Seconds a rival is ahead of the player (+) or behind (−), from the histories.
+    pub fn gap_to_player(&self, k: usize, player_progress: f32) -> f32 {
+        let r = &self.rivals[k];
+        let now = self.clock();
+        if r.progress >= player_progress {
+            RaceSim::gap(&r.hist, player_progress, now).unwrap_or(0.0)
+        } else {
+            -RaceSim::gap(&self.player_hist, r.progress, now).unwrap_or(0.0)
+        }
+    }
+
+    /// Standings now: (who, progress, finish), first to last. Finished cars by time, then the
+    /// running ones by progress, retirements last.
+    pub fn standings(&self, player_progress: f32, player_finish: Option<Finish>) -> Vec<(Who, f32, Option<Finish>)> {
+        let mut v: Vec<(Who, f32, Option<Finish>)> = self.rivals.iter().map(|r| (Who::Rival(r.slot), r.progress, r.finish)).collect();
+        v.push((Who::Player, player_progress, player_finish));
+        let key = |e: &(Who, f32, Option<Finish>)| match e.2 {
+            Some(Finish::Time(t)) => (0, t, 0.0),
+            None => (1, 0.0, -e.1),
+            Some(Finish::Dnf) => (2, 0.0, -e.1),
+        };
+        v.sort_by(|a, b| {
+            let (ka, kb) = (key(a), key(b));
+            ka.0.cmp(&kb.0).then(ka.1.total_cmp(&kb.1)).then(ka.2.total_cmp(&kb.2))
+        });
+        v
+    }
+
+    /// The result when the player's race ends: `player` is the player's race time, or `None`
+    /// for a retirement (DNF). Rivals still running get their elapsed time plus the remaining
+    /// metres at their mean speed so far.
+    pub fn result(&self, player: Option<f32>) -> RaceResult {
+        let now = self.clock();
+        let mut order: Vec<(Who, Finish)> = self
+            .rivals
+            .iter()
+            .map(|r| {
+                let f = r.finish.unwrap_or_else(|| {
+                    let run = (now - r.release as f32 * DT).max(1.0);
+                    let start = slot_spot(self.format, r.slot).0;
+                    let mean = ((r.progress - start) / run).max(1.0);
+                    Finish::Time(now + (self.len - 4.0 - r.progress).max(0.0) / mean)
+                });
+                (Who::Rival(r.slot), f)
+            })
+            .collect();
+        order.push((Who::Player, player.map_or(Finish::Dnf, Finish::Time)));
+        order.sort_by(|a, b| match (a.1, b.1) {
+            (Finish::Time(x), Finish::Time(y)) => x.total_cmp(&y),
+            (Finish::Time(_), Finish::Dnf) => std::cmp::Ordering::Less,
+            (Finish::Dnf, Finish::Time(_)) => std::cmp::Ordering::Greater,
+            // Two retirements: the player last (the rival got further, or it's a wash).
+            (Finish::Dnf, Finish::Dnf) => (a.0 == Who::Player).cmp(&(b.0 == Who::Player)),
+        });
+        let player_pos = order.iter().position(|e| e.0 == Who::Player).unwrap_or(5) as u8 + 1;
+        RaceResult { event: self.event, difficulty: self.difficulty, order, player_pos, clean: self.clean }
+    }
+}
+
+/// Signed lateral offset of a car from the route's centreline (0 off the road).
+fn lateral_on(road: &Road, car: &Car) -> f32 {
+    road.nearest(Vec2::new(car.pos.x, car.pos.z), 40.0).map_or(0.0, |r| r.lateral)
+}
+
+/// Do two cars touch (their 3-circle solids overlap)?
+fn touching(a: &Car, b: &Car) -> bool {
+    if a.pos.distance_squared(b.pos) > 25.0 {
+        return false;
+    }
+    let (pa, pb) = (solid_pose(a), solid_pose(b));
+    let circles = |p: (Vec3, Vec3)| {
+        let c = Vec2::new(p.0.x, p.0.z);
+        let f = Vec2::new(p.1.x, p.1.z).normalize_or_zero();
+        [c - f * 1.3, c, c + f * 1.3]
+    };
+    let (ca, cb) = (circles(pa), circles(pb));
+    ca.iter().any(|x| cb.iter().any(|y| x.distance(*y) < 0.95 * 2.0 + 0.05))
+}
+
+/// The race's say in how rival `k` drives this step: the rubber band, gap keeping behind the
+/// car ahead, overtaking where the road is wide, yielding to the player when caught.
+/// `cars[j]`: (progress, speed, lateral, finished) of rival `j` at the start of the step;
+/// `player`: (progress, speed, lateral, done).
+#[allow(clippy::too_many_arguments)]
+fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f32, f32, f32, bool), difficulty: Difficulty, road: &Road, seed: u64, len: f32) {
+    let (me_s, me_v) = (r.progress, r.car.speed());
+    let me_lat = lateral_on(road, &r.car);
+    let gap_s = {
+        // Seconds ahead of the player (+) or behind (−), from progress and speed (the
+        // histories are the HUD's; this is cheap and smooth enough for the band).
+        let v = me_v.max(player.1).max(8.0);
+        (me_s - player.0) / v
+    };
+    r.pilot.pace_mod = 1.0 + rubber_band(gap_s, me_s / len.max(1.0));
+    r.pilot.speed_cap = None;
+    r.pilot.offset_target = None;
+
+    // The car ahead within 50 m on the route (rivals and the player).
+    let mut ahead: Option<(f32, f32, f32)> = None;
+    let mut consider = |s: f32, v: f32, lat: f32| {
+        let d = s - me_s;
+        if d > 0.0 && d < 50.0 && ahead.is_none_or(|a| d < a.0) {
+            ahead = Some((d, v, lat));
+        }
+    };
+    for (j, c) in cars.iter().enumerate() {
+        if j != k && !c.3 {
+            consider(c.0, c.1, c.2);
+        }
+    }
+    if !player.3 {
+        consider(player.0, player.1, player.2);
+    }
+
+    // Width of the road over the next 60 m.
+    let i0 = road.station(me_s);
+    let i1 = road.station(me_s + 60.0);
+    let min_w = road.width[i0..=i1.max(i0)].iter().copied().fold(f32::MAX, f32::min);
+    let straight = road.curv[i0..=i1.max(i0)].iter().all(|c| c.abs() < 1.0 / 120.0);
+
+    if let Some((d, v_ahead, lat_ahead)) = ahead {
+        let gap_m = (d - 4.5).max(0.0);
+        let wants = me_v.max(v_ahead) >= v_ahead * 1.03 || gap_m < 0.6 * me_v;
+        if min_w >= 4.5 && wants && gap_m < 25.0 {
+            // Overtake: the side away from the car ahead.
+            let room = min_w * 0.5 - 1.1;
+            r.pilot.offset_target = Some(if lat_ahead >= 0.0 { -room } else { room });
+            // Not alongside yet: don't run into its back.
+            if (me_lat - lat_ahead).abs() < 1.7 && gap_m < 3.0 {
+                r.pilot.speed_cap = Some(v_ahead);
+            }
+        } else {
+            // Follow at a 0.6 s headway.
+            let want_gap = 2.0 + 0.6 * me_v;
+            r.pilot.speed_cap = Some((v_ahead + (gap_m - want_gap) * 0.5).max(0.0));
+        }
+    }
+
+    // Yielding: the player right behind (within 1.2 s) for 2 s, on a straight ≥ 3.8 m wide.
+    let behind_s = me_s - player.0;
+    let caught = !player.3 && behind_s > 0.0 && behind_s < 1.2 * player.1.max(5.0) && player.1 > me_v * 0.9;
+    r.caught = if caught { r.caught + DT } else { 0.0 };
+    if !caught {
+        r.rolled_yield = false;
+    }
+    if r.yield_left <= 0.0 && r.caught >= 2.0 && straight && min_w >= 3.8 && !r.rolled_yield {
+        r.rolled_yield = true;
+        if pilot::unit(seed, 600 + r.slot as u64 * 7919 + (me_s as u64)) < difficulty.yields() {
+            r.yield_left = 3.0;
+            r.yield_cap = me_v * 0.85;
+        }
+    }
+    if r.yield_left > 0.0 {
+        r.yield_left -= DT;
+        let room = (min_w * 0.5 - 1.1).max(0.0);
+        r.pilot.offset_target = Some(if player.2 >= 0.0 { -room } else { room });
+        r.pilot.speed_cap = Some(r.pilot.speed_cap.map_or(r.yield_cap, |c| c.min(r.yield_cap)));
+    }
+}
