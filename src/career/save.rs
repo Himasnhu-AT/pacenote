@@ -137,7 +137,8 @@ pub struct CareerFile {
     pub wallet: Wallet,
     pub garage: Garage,
     pub grade: Grade,
-    #[serde(flatten)]
+    /// Pose, challenges, races, stats, ledger (one object: serde can't flatten maps with
+    /// number keys).
     pub progress: CareerProgress,
 }
 

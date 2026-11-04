@@ -206,7 +206,7 @@ fn race_step(world: &mut World) {
     race.player_progress = run.progress;
     if let Ok(mut v) = race.solids.0.write() {
         v.clear();
-        v.extend(race.sim.rivals.iter().map(|r| super::racers::solid_pose(&r.car)));
+        v.extend(race.sim.rivals.iter().filter(|r| r.ghost <= 0.0).map(|r| super::racers::solid_pose(&r.car)));
     }
     let took = t0.elapsed().as_secs_f32() * 1000.0;
     if let Some(mut perf) = world.get_resource_mut::<RacePerf>() {

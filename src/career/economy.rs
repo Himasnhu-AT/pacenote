@@ -679,7 +679,7 @@ mod tests {
         assert_eq!((g.owned.len(), g.active_car().model.as_str()), (1, "wren"));
         assert_eq!(apply_request(&CareerRequest::SellCar(0), &mut w, &mut g, &mut log, false), Err(Refusal::LastCar));
         assert_eq!(w.balance, w.earned + 12_000 - w.spent, "the books balance");
-        assert!(log.ledger.len() >= 5);
+        assert_eq!(log.ledger.len(), 4, "buy, brakes, service, sale (refits are free)");
         let _ = def("wren");
     }
 }

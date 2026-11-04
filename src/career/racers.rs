@@ -141,6 +141,10 @@ pub struct Racer {
     pub spread: f32,
     /// Times it was put back on the road (the dev state).
     pub resets: u32,
+    /// Seconds stopped right behind a stopped car, and seconds left passing through it (a
+    /// stalled car on a narrow road would block it for ever: it ghosts past, not solid).
+    blocked: f32,
+    pub ghost: f32,
 }
 
 /// The racers' poses after the last step, `(position, forward)` per car (the same shape as
@@ -461,6 +465,8 @@ impl RaceSim {
                 rolled_yield: false,
                 spread,
                 resets: 0,
+                blocked: 0.0,
+                ghost: 0.0,
             });
         }
         let player_release = slot_spot(format, player_slot).2;
@@ -507,15 +513,17 @@ impl RaceSim {
         if self.armed && self.step.is_multiple_of(HIST_STEPS) && self.player_hist.len() as u32 <= self.step / HIST_STEPS {
             self.player_hist.push(player.progress);
         }
-        let poses: Vec<(Vec3, Vec3)> = self.rivals.iter().map(|r| solid_pose(&r.car)).collect();
+        let poses: Vec<(Vec3, Vec3, bool)> = self.rivals.iter().map(|r| (solid_pose(&r.car).0, solid_pose(&r.car).1, r.ghost > 0.0)).collect();
         let mut others = Vec::with_capacity(RIVALS);
         let player_pose = solid_pose(player.car);
         let snapshot: Vec<(f32, f32, f32, bool)> = self.rivals.iter().map(|r| (r.progress, r.car.speed(), lateral_on(road, &r.car), r.finish.is_some())).collect();
         let player_lat = lateral_on(road, player.car);
         for k in 0..self.rivals.len() {
             others.clear();
-            others.push(player_pose);
-            others.extend(poses.iter().enumerate().filter(|(j, _)| *j != k).map(|(_, p)| *p));
+            if !poses[k].2 {
+                others.push(player_pose);
+                others.extend(poses.iter().enumerate().filter(|(j, p)| *j != k && !p.2).map(|(_, p)| (p.0, p.1)));
+            }
             let g = RivalGround { base: ground, others: &others };
             let held = !self.armed || self.step < self.rivals[k].release || self.rivals[k].finish.is_some();
             let r = &mut self.rivals[k];
@@ -571,7 +579,7 @@ impl RaceSim {
             }
             let close = touching(&r.car, player.car);
             let closing = (r.car.vel - player.car.vel).length();
-            if close && !self.touching[k] && closing >= CONTACT_MS && !player.done {
+            if close && !self.touching[k] && closing >= CONTACT_MS && !player.done && r.ghost <= 0.0 {
                 self.clean = false;
                 self.contacts += 1;
             }
@@ -713,6 +721,19 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
     let min_w = road.width[i0..=i1.max(i0)].iter().copied().fold(f32::MAX, f32::min);
     let straight = road.curv[i0..=i1.max(i0)].iter().all(|c| c.abs() < 1.0 / 120.0);
 
+    // Passing through a stalled car (see `Racer::ghost`).
+    if r.ghost > 0.0 {
+        r.ghost -= DT;
+        return;
+    }
+    let stalled = ahead.is_some_and(|(d, v, _)| d < 15.0 && v < 2.0);
+    r.blocked = if stalled && me_v < 2.0 { r.blocked + DT } else { 0.0 };
+    if r.blocked > 4.0 {
+        r.blocked = 0.0;
+        r.ghost = 4.0;
+        return;
+    }
+
     if let Some((d, v_ahead, lat_ahead)) = ahead {
         let gap_m = (d - 4.5).max(0.0);
         let wants = me_v.max(v_ahead) >= v_ahead * 1.03 || gap_m < 0.6 * me_v;
@@ -750,5 +771,184 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
         let room = (min_w * 0.5 - 1.1).max(0.0);
         r.pilot.offset_target = Some(if player.2 >= 0.0 { -room } else { room });
         r.pilot.speed_cap = Some(r.pilot.speed_cap.map_or(r.yield_cap, |c| c.min(r.yield_cap)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stage::Surface;
+
+    #[test]
+    fn rubber_band_is_light_and_off_at_the_end() {
+        assert_eq!(rubber_band(-10.0, 0.5), 0.02, "far behind: a little faster");
+        assert_eq!(rubber_band(10.0, 0.5), -0.02, "far ahead: a little slower");
+        assert_eq!(rubber_band(3.0, 0.5), 0.0);
+        assert_eq!(rubber_band(-30.0, 0.86), 0.0, "never in the last 15 %");
+        for g in [-100.0, -6.1, -1.0, 0.0, 6.1, 100.0] {
+            for f in [0.0, 0.5, 0.84, 0.9] {
+                assert!(rubber_band(g, f).abs() <= 0.03);
+            }
+        }
+    }
+
+    #[test]
+    fn start_slots() {
+        // Grid: 2 wide, 3 rows 8 m apart, one launch.
+        assert_eq!(slot_spot(StartFormat::Grid, 1), (18.0, 1.5, 0));
+        assert_eq!(slot_spot(StartFormat::Grid, 2), (18.0, -1.5, 0));
+        assert_eq!(slot_spot(StartFormat::Grid, 6), (2.0, -1.5, 0));
+        // Pursuit: single file 10 m apart, released 1.5 s (90 steps) apart from the front.
+        assert_eq!(slot_spot(StartFormat::Pursuit, 1), (52.0, 0.0, 0));
+        assert_eq!(slot_spot(StartFormat::Pursuit, 4), (22.0, 0.0, 270));
+        let gaps: Vec<u32> = (1..6).map(|k| slot_spot(StartFormat::Pursuit, k + 1).2 - slot_spot(StartFormat::Pursuit, k).2).collect();
+        assert!(gaps.iter().all(|g| *g == RELEASE_STEPS));
+        assert_eq!(Difficulty::Legend.player_slot(), 6);
+    }
+
+    #[test]
+    fn rival_cars_match_the_players_pi() {
+        for d in CARS {
+            let p = garage::pi(&(d.base)());
+            for seed in 0..4u64 {
+                let cars = pick_cars(p, seed);
+                assert_eq!(cars.len(), RIVALS);
+                for (c, u) in cars {
+                    let q = garage::pi(&garage::build_spec(c, &u));
+                    assert!(q.abs_diff(p) <= 20 || q < p, "{}: rival {} PI {q} vs {p}", d.id, c.id);
+                    assert!(q + 60 >= p, "{}: rival {} PI {q} far below {p}", d.id, c.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn standings_and_result_order() {
+        let road = Road::from_centreline(&(0..500).map(|i| Vec2::new(0.0, i as f32 * 2.0)).collect::<Vec<_>>(), &[0.0; 500], vec![7.0; 500], vec![Surface::Tarmac; 500]);
+        let g = crate::vehicle::Flat(0.0, Surface::Tarmac);
+        let mut sim = RaceSim::new(1, Difficulty::Pro, 0, &road, &g, 570, DamageMode::Simulation);
+        assert_eq!(sim.format, StartFormat::Grid);
+        sim.step = 600;
+        for (k, r) in sim.rivals.iter_mut().enumerate() {
+            r.progress = 100.0 + 100.0 * k as f32;
+        }
+        sim.rivals[4].finish = Some(Finish::Time(55.0));
+        sim.rivals[4].progress = sim.len;
+        sim.rivals[0].finish = Some(Finish::Dnf);
+        // The player at 350 m, running.
+        let st = sim.standings(350.0, None);
+        assert_eq!(st[0].0, Who::Rival(sim.rivals[4].slot), "the finisher leads");
+        assert_eq!(st[1].0, Who::Rival(sim.rivals[3].slot));
+        assert_eq!(st[2].0, Who::Player);
+        assert_eq!(st[5].0, Who::Rival(sim.rivals[0].slot), "the retirement last");
+        // Player crosses first (before the finisher's 55 s and the running rivals' estimates,
+        // ≥ 25 s at their pace so far): P1.
+        let r = sim.result(Some(20.0));
+        assert_eq!(r.player_pos, 1);
+        // Player crosses last: rivals still running get estimates ahead of a slow time.
+        let r = sim.result(Some(10_000.0));
+        assert_eq!(r.player_pos, 5, "behind the 4 running or finished, ahead of the retirement: {:?}", r.order);
+        // Retired: DNF, behind everyone.
+        let r = sim.result(None);
+        assert_eq!(r.player_pos, 6);
+        assert!(r.clean);
+    }
+
+    #[test]
+    fn gaps_from_history() {
+        // b went 0, 10, 20, 30 m at 0.25 s steps; a is at 15 m now (t = 1.0 s): b was there
+        // at 0.375 s, so a is 0.625 s behind.
+        let g = RaceSim::gap(&[0.0, 10.0, 20.0, 30.0], 15.0, 1.0).unwrap();
+        assert!((g - 0.625).abs() < 1e-4, "{g}");
+    }
+}
+
+/// Headless races on the open world's event routes (slow in debug: the full world loads).
+#[cfg(test)]
+mod race_tests {
+    use super::*;
+    use crate::open::events;
+
+    struct Run {
+        finished: usize,
+        resets: u32,
+        dnf: usize,
+        worst_off: f32,
+        poses: Vec<(Vec3, Quat)>,
+        secs: f32,
+    }
+
+    /// Races event `id` at `d` with the player parked (held) on its slot; `steps` max.
+    fn race(base: &crate::world::StageWorld, id: u32, d: Difficulty, steps: u32, stop_at: Option<u32>) -> Run {
+        let ev = events::build(&base.open.as_ref().unwrap().net, &base.open.as_ref().unwrap().data.events);
+        let e = ev.iter().find(|e| e.id == id).unwrap();
+        let mut w = base.clone();
+        events::on_route(&mut w, e);
+        let mut sim = RaceSim::new(id, d, 1, &w.road, &w, 570, DamageMode::Simulation);
+        let (p, h) = sim.player_start(&w.road, &w);
+        let mut player = Car::new(p + Vec3::Y * 0.9, h);
+        let mut worst_off = 0.0f32;
+        let t0 = std::time::Instant::now();
+        let mut n = 0;
+        for i in 0..steps {
+            // The player parked on the handbrake (stepped, so it settles like a real car).
+            vehicle::step(&mut player, &Spec::default(), Input { handbrake: true, ..Input::default() }, &w, DT);
+            sim.step(&w, &w.road, &w.corners, PlayerNow { car: &player, progress: 0.0, done: false }, i < 180);
+            n += 1;
+            for r in &sim.rivals {
+                if r.finish.is_none()
+                    && let Some(rp) = w.road.nearest(Vec2::new(r.car.pos.x, r.car.pos.z), 40.0)
+                {
+                    worst_off = worst_off.max(rp.lateral.abs() - w.road.half_width(&rp));
+                }
+            }
+            if stop_at == Some(i) || sim.rivals.iter().all(|r| r.finish.is_some()) {
+                break;
+            }
+        }
+        let secs = t0.elapsed().as_secs_f32();
+        eprintln!("event {id} {:?}: {n} steps in {secs:.1} s ({:.3} ms per step for 5 rivals)", d, secs * 1000.0 / n as f32);
+        for r in &sim.rivals {
+            eprintln!("  slot {} {:10} {:7}: {:?} at {:.0} m, resets {}, damage {:.2}", r.slot, r.name, r.model, r.finish, r.progress, r.resets, r.car.damage.total());
+        }
+        Run {
+            finished: sim.rivals.iter().filter(|r| matches!(r.finish, Some(Finish::Time(_)))).count(),
+            resets: sim.rivals.iter().map(|r| r.resets).sum(),
+            dnf: sim.rivals.iter().filter(|r| r.finish == Some(Finish::Dnf)).count(),
+            worst_off,
+            poses: sim.rivals.iter().map(|r| (r.car.pos, r.car.rot)).collect(),
+            secs,
+        }
+    }
+
+    fn world() -> crate::world::StageWorld {
+        crate::world::generate(&crate::open::def())
+    }
+
+    /// AI-4: at Pro, with the player parked, all 5 rivals finish every Rally and Sprint route
+    /// without retiring or being put back on the road.
+    #[test]
+    #[ignore = "slow (the open world + every route, ~minutes in debug): cargo test -- --ignored rivals_finish"]
+    fn rivals_finish_every_route_at_pro() {
+        let w = world();
+        let ev = events::build(&w.open.as_ref().unwrap().net, &w.open.as_ref().unwrap().data.events);
+        for e in ev.iter().filter(|e| e.kind != events::EventKind::Lap) {
+            let r = race(&w, e.id, Difficulty::Pro, 60 * 900, None);
+            assert_eq!(r.finished, RIVALS, "{}: {} of 5 finished", e.name, r.finished);
+            assert_eq!(r.dnf, 0, "{}", e.name);
+            assert_eq!(r.resets, 0, "{}: rivals had to be put back on the road", e.name);
+            assert!(r.worst_off < 1.5, "{}: a rival went {:.1} m off the road", e.name, r.worst_off);
+        }
+    }
+
+    /// AI-2: two headless races with the same inputs give identical rival poses at step N.
+    #[test]
+    #[ignore = "slow (loads the open world): cargo test -- --ignored rivals_are_deterministic"]
+    fn rivals_are_deterministic() {
+        let w = world();
+        let a = race(&w, events::FIRST_ID + 4, Difficulty::Ace, 60 * 40, Some(60 * 40 - 1));
+        let b = race(&w, events::FIRST_ID + 4, Difficulty::Ace, 60 * 40, Some(60 * 40 - 1));
+        assert_eq!(a.poses, b.poses);
+        eprintln!("{:.1} s", a.secs);
     }
 }

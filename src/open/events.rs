@@ -635,6 +635,20 @@ fn choice_from_save(p: Res<crate::career::save::CareerProgress>, mut c: ResMut<C
     }
 }
 
+/// Makes `e`'s route the stage's road (corners with the level's grades, crests) and marks the
+/// event as running. Pure (tests drive events headless with it).
+pub fn on_route(s: &mut StageWorld, e: &EventDef) {
+    let open = s.open.clone();
+    let mut corners = stage::corners(&e.route);
+    if let Some(o) = &open {
+        o.data.apply_grades(e, &o.net, &mut corners);
+    }
+    s.corners = Arc::new(corners);
+    s.crests = Arc::new(stage::crests(&e.route));
+    s.road = e.route.clone();
+    s.event = Some(EventRef { id: e.id, name: e.name.clone() });
+}
+
 /// Starts event `id` as a Time Trial (see [`start_as`]).
 pub fn start(world: &mut World, id: u32) {
     start_as(world, id, EventMode::TimeTrial);
@@ -667,15 +681,7 @@ pub fn start_as(world: &mut World, id: u32, mode: EventMode) -> bool {
     }
     {
         let mut s = world.resource_mut::<StageWorld>();
-        let open = s.open.clone();
-        let mut corners = stage::corners(&e.route);
-        if let Some(o) = &open {
-            o.data.apply_grades(&e, &o.net, &mut corners);
-        }
-        s.corners = Arc::new(corners);
-        s.crests = Arc::new(stage::crests(&e.route));
-        s.road = e.route.clone();
-        s.event = Some(EventRef { id: e.id, name: e.name.clone() });
+        on_route(&mut s, &e);
     }
     // Events run without traffic (clean racing; ghosts replay exactly).
     world.remove_resource::<super::traffic::Traffic>();
