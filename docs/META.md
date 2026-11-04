@@ -13,11 +13,14 @@ credits. One plugin, `meta::MetaPlugin`, added in `lib.rs`.
 | `meta/netlink.rs` | The only place the menus call networking: `Role`, `host`, `join`, `leave`, `status`, `peer_name`. **Stubs** until guide-net lands; swap by editing this file only |
 | `meta/screens.rs` | All screens on the engine UI kit, theme, `on_menu` (every button's handler), settings rows ("Game" tab) |
 | `meta/textfield.rs` | One-line text input (names, address) for the UI kit |
+| `meta/coach.rs` | Driving-screen guidance: `Notice` (one bottom-centre pill, the newest replaces the last), the controls card, the event-start prompt, the roof hint; dev `coach.place` |
 
 ## Flow
 
-Main menu (no stage shown: a neutral contour backdrop, the crew card) → **Play** (stage picker,
-solo practice) / **Play together** (screen "together": **Host as driver** = the same stage picker,
+Main menu ("Open-world rally"; a neutral contour backdrop; bottom right the **events card**:
+each open-world event with its kind colour, length and your best solo time, "n / 5 finished";
+the list is `Profile.events`, remembered whenever the world's events load, so a first launch
+shows how to start one instead) → **Play** (the open world, free roam) / **Play together** (screen "together": **Host as driver** = the same stage picker,
 then `netlink::host`, team run; **Join as guide** = address + name, `netlink::join`, then the net
 module owns the guide's flow; and the crew's two names) / **Settings** / **Quit**. **Credits** is a
 small link bottom right. The demo adds its store button under Play.
@@ -41,7 +44,16 @@ and which HUD readouts show. Side panels preview the HUD and a sample call live.
 **Camera view:** Cockpit / Bonnet / Chase, saved in `Profile.camera` (Settings > Game > Camera
 view, the stage picker's View chips or C there). Runs start in it; C in game (or on the pause
 screen, whose footer lists it) changes it and the change is kept (`meta::sync_camera`, which
-also toasts "Chase camera"). A "C · Camera view" hint shows for 5 s at the start of each run.
+also shows the notice "Chase camera": one pill that the next change replaces, never a stack of
+toasts). A "C · Camera view" notice shows for 5 s at the start of each timed run.
+
+**Coaching (`coach.rs`):** the first 3 free-roam drives (`Profile.controls_hint_runs`) open
+with a controls card top left for 16 s (keyboard or gamepad buttons, whichever was used last;
+"drive into a glowing column and stop inside it" in free roam); H shows / hides it any time,
+and an event starting takes the automatic one away. Inside an event marker the HUD names the
+event (kind, km) with "Stop here to start" and a bar that fills over the 0.6 s hold (this
+replaced the entry toast; `open::events::Approach` is read for it). On the roof or side and
+still for 1 s: "Car on its roof · R Recover onto the road" (+5 s in an event).
 
 **Weather and fairness:** each weather / time of day has its own board and ghosts. Records and
 ghosts carry a board hash: the road hash at the stage's default conditions (unchanged, so
@@ -64,8 +76,15 @@ it into the board, saves `leaderboard.json`, saves the ghost when it's the team'
 `LastResult` and opens the sticky `"results"` screen (Retry / Next stage / Menu). The guide's
 machine (`Role::Guide`) never writes records.
 
-Pause (Esc, engine pause screen): Resume, Restart stage, Recover car (+5 s), Settings, Quit to
-menu. The header shows the stage clock, penalties and progress.
+Pause (Esc, engine pause screen, items set per what is driven in `build_pause`): **free roam**
+Resume, Recover car, Settings, Quit to menu (eyebrow "Free roam", no clock); **event** Resume,
+Restart event, Recover car (+5 s), Abandon event (back to free roam where the car is),
+Settings, Quit to menu (eyebrow "Rally · <name>", clock and % of the event); **stage** as
+before. The driving controls are listed on the right. The HUD hides while any screen is open.
+
+Results in an event say "Rally · <name>", "Event record" / "Event complete", "P1 of your times
+on this event", and offer Retry / Free roam / Menu. The open world's loading screen shows its
+size, events finished, the controls and open-world tips (no stage stats or "Stage record").
 
 ## Leaderboard records
 
@@ -145,7 +164,7 @@ current road first), Rival (picked on the leaderboard: Enter on a time with a gh
   (tens of KB for a 4 min stage); an analogue gamepad changes it nearly every step (up to
   ~1 MB pretty-printed for 4 min). Quantising analogue input in `drive::simulate` (e.g. to
   1/128) before it reaches the car would make gamepad ghosts as small as keyboard ones.
-- The results screen dims the HUD but the HUD's centre "FINISH" text still shows faintly
-  behind it (the HUD could hide while a screen is open).
+- Key names in the coaching and pause controls are the default bindings, not read from the
+  rebinding table: a remapped key still shows its default.
 - Ghosts replay against the current `StageWorld` obstacles: a dressing change (trees moved)
   can make an old ghost drift even when the road hash matches.

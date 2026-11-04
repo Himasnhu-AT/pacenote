@@ -117,8 +117,8 @@ Loading / damage / co-driver (added 30 Oct):
 Driving:
 - Accel is now 0–100 km/h in ~8 s on gravel (after the LSD + hill-hold fix, `bdb30ba`). The
   feel still needs tuning on gravel and snow.
-- A car that leaves the road at speed rolls easily. Recover is `R` (+5 s). There's no HUD hint
-  when the car is upside down.
+- A car that leaves the road at speed rolls easily. Recover is `R` (+5 s in an event). The HUD says
+  "Car on its roof · R Recover" after 1 s upside down and still (`meta/coach.rs`).
 - At some starts the road curves right away, so throttle with no steering runs off the road.
   The start heading may want aligning with the first few metres.
 
