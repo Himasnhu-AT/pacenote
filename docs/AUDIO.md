@@ -181,6 +181,8 @@ a text-to-speech engine, so it sounds the same on macOS and Windows:
   the same while it speaks.
 - Not loaded yet, or no audio output: lines are timed by word count and show as subtitles only.
 
+**Traffic** (`traffic.rs`, open world). The four nearest traffic cars within 140 m (`traffic_heard`, from the camera and the player's velocity) each get a voice: the recorded on-load 1925 rpm exhaust loop pitched by a road-car gearbox from the car's speed (1.7-4.4k rpm), tyre roar (band-passed noise rising with speed), inverse-distance gain (1 at 3 m), air absorption (low-pass 11 kHz / (1 + d/28 m)), Doppler from the closing speed and equal-power pan by bearing; muffled and −5 dB inside. A voice stays with its car (by id) and is only handed to another once silent. A car passing at 3 m at 80 km/h peaks ~5 dB over the player's idle (`render_places`).
+
 **Ambience** (`ambience.rs`, `Recipe::of`):
 
 | Biome | Bed | Life |
@@ -190,6 +192,8 @@ a text-to-speech engine, so it sounds the same on macOS and Windows:
 | scrub | light wind | cicadas (62 Hz pulsed 5.6 kHz buzz), few birds |
 | moor | strong gusty wind | curlew-like rising calls, rare birds |
 | snow forest | quiet wind | rare birds |
+
+Open world places (`places_near`, quantised to 1/32): near the river (1 on the bank, 0 from ~120 m) a babble of two band-noise streams with an uneven swell and popping bubbles; in the village (houses within 90 m) a low hum, a dog barking now and then, and half the forest birds and leaves.
 
 Birds sing more in the morning and less at dusk. Overcast, fog and rain thin out the life;
 rain adds hiss and drops. Every combination stays quiet (RMS 0.0004–0.12 before the bus
@@ -223,6 +227,9 @@ gain; tested).
 - `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_previews -- --ignored
   --nocapture` writes rpm sweeps (full load and no load, chase; full load, cockpit) and
   co-driver lines over a driving engine (and the voice alone).
+- `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_places -- --ignored
+  --nocapture` writes traffic passing an idling car (chase and cockpit) and the river, village
+  and forest ambience (20 s each).
 - `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_scenes -- --ignored
   --nocapture` renders twelve scripted scenes through the real car sim (`scenes.rs`):
   idle, full throttle through the gears, lift-off pops, a handbrake slide on gravel, a
@@ -302,9 +309,10 @@ Apple M-series, dev profile (game crate at opt-level 1):
   into `audio::RemoteCarSound`, and the synth plays that: engine, pops and wind. There
   are no tyres, thumps or impacts, because the replicated state has no surface, slip or
   impacts. Ambience comes from `GuideStage.def`.
-- The car is 2D, centred on the listener. That is fine for the chase and bonnet cameras,
-  but there is no doppler or distance for a ghost or other cars (use engine 3D cues for
-  those).
+- The car is 2D, centred on the listener. That is fine for the chase and bonnet cameras.
+  Traffic has distance, pan and Doppler but no front/back cue or occlusion; ghosts are silent.
+- The rolling road noise and gravel stones stay out (removed on 2 Nov as tiring); turbo and
+  gear whine too (no CC0 recordings).
 - Not in engine bus meters: the engine's `sound.stats` peak meters don't include the rally
   stream. `RallyAudioStats` is the place to look.
 - The rally stream doesn't go through the engine reverb (no tunnels exist yet).

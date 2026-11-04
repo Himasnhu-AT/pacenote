@@ -167,9 +167,9 @@ impl TrafficSynth {
                 }
                 let doppler = (SOUND / (SOUND - c.closing.clamp(-60.0, 60.0))).clamp(0.85, 1.18);
                 let rate = v.rate.next(rpm_at(c.speed) / LOOP_RPM * doppler);
-                let engine = v.looper.next(exhaust, rate) * (0.03 + 0.02 * (c.speed / 25.0).min(1.0));
+                let engine = v.looper.next(exhaust, rate) * (0.14 + 0.08 * (c.speed / 25.0).min(1.0));
                 let s = (c.speed / 22.0).min(1.6);
-                let roar = 0.05 * s * s.sqrt();
+                let roar = 0.22 * s * s.sqrt();
                 let nl = v.roar_l.run(self.n.white()) * roar;
                 let nr = v.roar_r.run(self.n.white()) * roar;
                 let (pl, pr) = pan(v.pan.next(c.pan * 0.85));
