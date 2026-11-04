@@ -158,9 +158,12 @@ pub fn spawn_road(world: &mut World, s: &StageWorld) {
 /// chunks) don't each cost a draw (TECH_PASS §4).
 #[derive(Default)]
 pub(super) struct Parts {
-    /// (name, material, casts shadows, tile) → (origin, merged mesh), in first-seen order.
-    groups: Vec<((&'static str, Handle<StandardMaterial>, bool, (i32, i32)), Vec3, Mesh)>,
+    /// (key, origin, merged mesh), in first-seen order.
+    groups: Vec<(PartKey, Vec3, Mesh)>,
 }
+
+/// A merged road piece's name, material, whether it casts shadows, and tile.
+type PartKey = (&'static str, Handle<StandardMaterial>, bool, (i32, i32));
 
 /// Side (m) of the tiles road pieces merge in.
 const PART_TILE: f32 = 512.0;

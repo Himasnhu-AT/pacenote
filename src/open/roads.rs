@@ -690,7 +690,9 @@ fn build(seed: u64) -> RoadNet {
     // (Straight over each bridge and 45 m on: no bend on a deck.)
     let (fw, fe) = (pl.ford_w - Vec2::Y * 45.0, pl.ford_e - Vec2::Y * 45.0);
     b.straight.extend([(s0.pos + s0.out * 16.0, pl.ford_w), (pl.ford_w, fw), (fe, pl.ford_e), (pl.ford_e, s1.pos + s1.out * 16.0)]);
-    b.road(RoadKind::Gravel, bridge, Some(s0), &[pl.ford_w, fw, pl.south, fe, pl.ford_e], Some(s1));
+    // (Out through the south-west and south-east hills too: the loop runs 3.5 km or so.)
+    let (sw, se) = (Vec2::new(pl.ford_w.x - 250.0, -1850.0), Vec2::new(pl.ford_e.x + 150.0, -1850.0));
+    b.road(RoadKind::Gravel, bridge, Some(s0), &[pl.ford_w, fw, sw, pl.south, se, fe, pl.ford_e], Some(s1));
     // Fernhollow's streets (roads 8 on), when the forestry road is there to lead on from the
     // town.
     if let Some(forest) = escarp {
@@ -818,12 +820,12 @@ fn sculpt_yump(nr: &mut NetRoad, i: usize, r_v: f32) {
         let (l, r) = (toe - span, toe + span);
         let (yl, yr) = (y[l], y[r]);
         let (gl, gr) = ((y[l] - y[l - 1]) / STEP, (y[r + 1] - y[r]) / STEP);
-        for j in l + 1..r {
+        let h = (r - l) as f32 * STEP;
+        for (k, v) in y[l + 1..r].iter_mut().enumerate() {
             // Cubic Hermite between the two sides, matching their grades.
-            let t = (j - l) as f32 / (r - l) as f32;
-            let h = (r - l) as f32 * STEP;
+            let t = (k + 1) as f32 / (r - l) as f32;
             let (t2, t3) = (t * t, t * t * t);
-            y[j] = (2.0 * t3 - 3.0 * t2 + 1.0) * yl + (t3 - 2.0 * t2 + t) * h * gl + (-2.0 * t3 + 3.0 * t2) * yr + (t3 - t2) * h * gr;
+            *v = (2.0 * t3 - 3.0 * t2 + 1.0) * yl + (t3 - 2.0 * t2 + t) * h * gl + (-2.0 * t3 + 3.0 * t2) * yr + (t3 - t2) * h * gr;
         }
     }
     let pts: Vec<Vec2> = road.pts.iter().map(|p| Vec2::new(p.x, p.z)).collect();

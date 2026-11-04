@@ -369,7 +369,7 @@ pub mod dev {
         });
         app.add_control_command(
             "open.check",
-            "Roads more than 5 cm above or below the live terrain anywhere: the worst place of each",
+            "Roads (their crowned surface at the centre) more than 5 cm above or below the live terrain anywhere: the worst place of each",
             params(&[]),
             |w, _| {
                 let s = w.get_resource::<crate::world::StageWorld>().ok_or("no stage")?;
@@ -379,8 +379,10 @@ pub mod dev {
                 let mut worst = Vec::new();
                 for (k, r) in open.net.roads.iter().enumerate() {
                     let (mut above, mut below) = ((0.0f32, Vec3::ZERO), (0.0f32, Vec3::ZERO));
-                    for p in &r.road.pts {
-                        let d = p.y - hf.height_at(p.x, p.z);
+                    for (i, p) in r.road.pts.iter().enumerate() {
+                        // The drawn surface at the centre (with its crown).
+                        let at = crate::stage::RoadPos { i: i.min(r.road.len() - 2), t: if i + 1 == r.road.len() { 1.0 } else { 0.0 }, s: i as f32 * crate::stage::STEP, lateral: 0.0 };
+                        let d = r.road.height_at(&at) - hf.height_at(p.x, p.z);
                         if d > above.0 {
                             above = (d, *p);
                         }

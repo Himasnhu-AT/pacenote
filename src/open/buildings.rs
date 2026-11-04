@@ -687,7 +687,7 @@ fn farms(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) 
         while i < road.len() {
             let p = Vec2::new(road.pts[i].x, road.pts[i].z);
             let low = road.pts[i].y < 260.0 && (r.kind == RoadKind::Gravel && p.distance(super::land::TOWN_C) > 600.0 || away(p));
-            if low && rng.chance(0.7) {
+            if low && rng.chance(0.6) {
                 let dir = road.dir[i];
                 let side = if rng.chance(0.5) { 1.0 } else { -1.0 };
                 let out = dir.perp() * side;
@@ -1224,7 +1224,7 @@ mod render {
             2 => -b.axis,
             _ => -b.axis.perp(),
         };
-        let reach = if b.front % 2 == 0 { b.half.x } else { b.half.y };
+        let reach = if b.front.is_multiple_of(2) { b.half.x } else { b.half.y };
         let c = b.centre + n * (reach - side * 0.5);
         let height = b.top() - b.ground + 9.0;
         let t = Building { centre: c, half: Vec2::splat(side * 0.5), floors: 1, floor_h: height, roof: Roof::Hip, pitch: 1.8, bits: b.bits & !7, ..*b };
