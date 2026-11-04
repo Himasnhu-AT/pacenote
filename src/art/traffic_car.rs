@@ -468,12 +468,12 @@ pub fn spawn_parts(p: &mut ChildSpawnerCommands, art: &TrafficArt, id: u32, colo
     let m = &art.shapes[shape_of(id)];
     let paint = art.paint[color as usize % art.paint.len()][((id >> 3) & 1) as usize].clone();
     use bevy::light::NotShadowCaster as NoShadow;
-    p.spawn((Mesh3d(m.body.clone()), MeshMaterial3d(paint), NoShadow));
-    p.spawn((Mesh3d(m.glass.clone()), MeshMaterial3d(art.glass.clone()), NoShadow));
-    p.spawn((Mesh3d(m.parts.clone()), MeshMaterial3d(art.parts.clone()), NoShadow));
-    p.spawn((Mesh3d(m.lamps.clone()), MeshMaterial3d(art.lamp.clone()), NoShadow, bevy::light::NotShadowReceiver));
-    p.spawn((Mesh3d(m.brake.clone()), MeshMaterial3d(art.lamp.clone()), NoShadow, BrakeLamps, Visibility::Hidden));
-    p.spawn((Mesh3d(m.hazard.clone()), MeshMaterial3d(art.lamp.clone()), NoShadow, HazardLamps, Visibility::Hidden));
+    p.spawn((Mesh3d(m.body.clone()), MeshMaterial3d(paint), NoShadow, super::mirror::seen()));
+    p.spawn((Mesh3d(m.glass.clone()), MeshMaterial3d(art.glass.clone()), NoShadow, super::mirror::seen()));
+    p.spawn((Mesh3d(m.parts.clone()), MeshMaterial3d(art.parts.clone()), NoShadow, super::mirror::seen()));
+    p.spawn((Mesh3d(m.lamps.clone()), MeshMaterial3d(art.lamp.clone()), NoShadow, super::mirror::seen(), bevy::light::NotShadowReceiver));
+    p.spawn((Mesh3d(m.brake.clone()), MeshMaterial3d(art.lamp.clone()), NoShadow, super::mirror::seen(), BrakeLamps, Visibility::Hidden));
+    p.spawn((Mesh3d(m.hazard.clone()), MeshMaterial3d(art.lamp.clone()), NoShadow, super::mirror::seen(), HazardLamps, Visibility::Hidden));
 }
 
 /// Shows brake lamps on cars that slow down or stand, blinks hazards on cars stopped by a hit.

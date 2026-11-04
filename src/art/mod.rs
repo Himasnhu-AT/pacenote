@@ -14,6 +14,7 @@ pub mod hands;
 pub mod junctions;
 pub mod look;
 pub mod meshfile;
+pub mod mirror;
 pub mod props;
 pub mod roadside;
 pub mod spray;

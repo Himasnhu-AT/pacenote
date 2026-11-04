@@ -31,7 +31,7 @@
 //! The driver's hands, arms and the gear and handbrake levers are animated in `hands.rs`.
 
 use bevy::camera::visibility::VisibilityRange;
-use bevy::gltf::GltfMeshName;
+use bevy::gltf::{GltfMaterialName, GltfMeshName};
 use bevy::prelude::*;
 use engine::render_budget::Actor;
 
@@ -41,7 +41,7 @@ pub struct CarArtPlugin;
 
 impl Plugin for CarArtPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (rig, wheels, cockpit, super::hands::find_levers, super::hands::find_arms, super::hands::animate).chain());
+        app.add_systems(Update, (rig, wheels, cockpit, wear, super::hands::find_levers, super::hands::find_arms, super::hands::animate).chain()).add_plugins(super::mirror::MirrorPlugin);
     }
 }
 
@@ -234,6 +234,7 @@ pub fn spawn(world: &mut World, car: Entity) {
         ))
         .id();
     world.entity_mut(model).add_child(fill);
+    super::mirror::spawn(world, model);
     super::hands::spawn(world, car, model);
 }
 
@@ -246,8 +247,11 @@ fn rig(
     names: Query<(&Name, &Transform)>,
     meshes: Query<&MeshMaterial3d<StandardMaterial>>,
     mesh_names: Query<&GltfMeshName>,
+    mat_names: Query<&GltfMaterialName>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut mesh_assets: ResMut<Assets<Mesh>>,
+    mirror: Option<Res<super::mirror::MirrorImage>>,
 ) {
     for m in &models {
         let mut hub = [Entity::PLACEHOLDER; 4];
@@ -291,6 +295,40 @@ fn rig(
         // glTF textures come without mips (shimmer at distance): build them once, on the CPU.
         let mut done = std::collections::HashSet::new();
         let mut glass_done = std::collections::HashSet::new();
+        // This car's own copies of the materials that change while it drives (paint gets
+        // dusty, the tail lamps light up under braking): one copy per source material.
+        let mut own: std::collections::HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>> = default();
+        let mut wear = CarWear::default();
+        let mut rear_mirror = None;
+        for &e in &parts {
+            let (Ok(mm), Ok(name)) = (meshes.get(e), mat_names.get(e)) else { continue };
+            let paint = match name.0.as_str() {
+                "Paint" | "Chalk" => true,
+                "TailLamp" => false,
+                "Mirror" => {
+                    rear_mirror = Some(mm.0.clone());
+                    continue;
+                }
+                _ => continue,
+            };
+            let h = own
+                .entry(mm.0.id())
+                .or_insert_with(|| {
+                    let m = mats.get(&mm.0).cloned().unwrap_or_default();
+                    let h = mats.add(m.clone());
+                    if paint {
+                        wear.paint.push((h.clone(), m.base_color, m.perceptual_roughness, m.clearcoat));
+                    } else {
+                        wear.tail.push((h.clone(), m.emissive));
+                    }
+                    h
+                })
+                .clone();
+            commands.entity(e).insert(MeshMaterial3d(h));
+        }
+        let doors = ["MirrorL", "MirrorR"].map(|n| detached.iter().find(|(p, _)| *p == n).map(|(_, e)| *e));
+        super::mirror::dress(&mut commands, &mut mats, &mut mesh_assets, rear_mirror, doors, mirror.as_deref());
+        commands.entity(m).insert(wear);
         for e in parts {
             commands.entity(e).insert(Actor);
             if let Ok(n) = mesh_names.get(e)
@@ -331,9 +369,11 @@ fn is_glass(m: &StandardMaterial) -> bool {
 /// Clear, slightly smoked glass. The import's white at 45% read as frosted from the cockpit
 /// with Bevy 0.20 (the whole outside view washed out to white).
 fn tint_glass(m: &mut StandardMaterial) {
-    m.base_color = Color::srgba(0.06, 0.07, 0.08, 0.12);
-    m.perceptual_roughness = 0.05;
-    m.reflectance = 0.25;
+    // Single-sided: only seen from outside (the cockpit looks through its back faces), so it
+    // can be as dark and glossy as real tinted glass without dimming the driver's view.
+    m.base_color = Color::srgba(0.025, 0.03, 0.035, 0.42);
+    m.perceptual_roughness = 0.04;
+    m.reflectance = 0.6;
     m.metallic = 0.0;
     m.specular_transmission = 0.0;
     m.diffuse_transmission = 0.0;
@@ -420,9 +460,99 @@ fn cockpit(
     }
 }
 
+/// The car's materials that change with the run: its own copies of the paint (base colour,
+/// roughness, clear coat as built) and the tail lamps (emissive as built).
+#[derive(Component, Default)]
+pub struct CarWear {
+    paint: Vec<(Handle<StandardMaterial>, Color, f32, f32)>,
+    tail: Vec<(Handle<StandardMaterial>, LinearRgba)>,
+    /// Dust and mud on the paint, 0 (clean) ..= 1 (caked).
+    pub dirt: f32,
+    shown_dirt: f32,
+    braking: bool,
+}
+
+/// How far a fully dirty car's paint goes towards [`DUST`].
+const MAX_DIRT: f32 = 0.6;
+/// The colour dirt takes the paint towards (a multiplier on the livery).
+const DUST: [f32; 3] = [0.62, 0.54, 0.43];
+
+/// Dirt per metre driven with all four wheels on a surface (a full coat after ~3 km of
+/// gravel, ~800 m of mud; tarmac stays clean).
+pub fn dirt_rate(s: crate::stage::Surface) -> f32 {
+    use crate::stage::Surface::*;
+    match s {
+        Tarmac => 0.0,
+        Gravel | Loose => 1.0 / 3000.0,
+        Verge | Rough => 1.0 / 1500.0,
+        Mud => 1.0 / 800.0,
+        Snow => 1.0 / 2500.0,
+        _ => 1.0 / 2000.0,
+    }
+}
+
+/// The colour of livery `c` under dirt `d` (0..=1).
+pub fn dusty(c: Color, d: f32) -> Color {
+    let d = d.clamp(0.0, 1.0) * MAX_DIRT;
+    let s = c.to_srgba();
+    Color::srgba(s.red * (1.0 - d + d * DUST[0]), s.green * (1.0 - d + d * DUST[1]), s.blue * (1.0 - d + d * DUST[2]), s.alpha)
+}
+
+/// Paint gets dusty as the car drives on loose surfaces (faster while the wheels slip), and the
+/// tail lamps light up under braking.
+fn wear(time: Res<Time>, cars: Query<(&DrivenCar, Option<&DriverInput>, &Children)>, mut wears: Query<&mut CarWear>, mut mats: ResMut<Assets<StandardMaterial>>) {
+    let dt = time.delta_secs();
+    for (driven, input, kids) in &cars {
+        let Some(k) = kids.iter().find(|k| wears.contains(*k)) else { continue };
+        let Ok(mut w) = wears.get_mut(k) else { continue };
+        let car = &driven.car;
+        let v = car.speed().abs();
+        let mut rate = 0.0;
+        for wh in &car.wheels {
+            if let (true, Some(s)) = (wh.contact, wh.surface) {
+                rate += dirt_rate(s) * 0.25 * (1.0 + 2.0 * (wh.slip_ratio.abs() + wh.slip_angle.abs()).min(1.0));
+            }
+        }
+        w.dirt = (w.dirt + rate * v * dt).min(1.0);
+        // Re-upload the paint only when the dirt has visibly changed.
+        if (w.dirt - w.shown_dirt).abs() > 1.0 / 48.0 {
+            w.shown_dirt = w.dirt;
+            let d = w.dirt;
+            for (h, base, rough, coat) in &w.paint {
+                if let Some(mut m) = mats.get_mut(h) {
+                    m.base_color = dusty(*base, d);
+                    m.perceptual_roughness = rough + (0.85 - rough) * d * MAX_DIRT;
+                    m.clearcoat = coat * (1.0 - d);
+                }
+            }
+        }
+        let braking = input.is_some_and(|i| i.0.brake > 0.05) && v > 0.5;
+        if braking != w.braking {
+            w.braking = braking;
+            for (h, e) in &w.tail {
+                if let Some(mut m) = mats.get_mut(h) {
+                    m.emissive = if braking { *e * 5.0 } else { *e };
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dirt_builds_on_loose_surfaces_only() {
+        use crate::stage::Surface;
+        assert_eq!(dirt_rate(Surface::Tarmac), 0.0);
+        assert!(dirt_rate(Surface::Mud) > dirt_rate(Surface::Gravel));
+        let c = Color::srgb(0.2, 0.5, 0.8);
+        assert_eq!(dusty(c, 0.0), c);
+        let d = dusty(c, 1.0).to_srgba();
+        // Darker and browner (blue drops most).
+        assert!(d.blue < 0.8 * 0.7 && d.red < 0.2 && d.red / d.blue > 0.2 / 0.8);
+    }
 
     #[test]
     fn model_sits_on_its_wheels() {

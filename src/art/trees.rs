@@ -906,7 +906,7 @@ fn build_chunk(commands: &mut Commands, meshes: &mut Assets<Mesh>, kit: &TreeKit
         // GPU-only (no CPU copy kept), and the quads turn: bounds by hand.
         let aabb = Aabb::from_min_max(q.lo, q.hi);
         let id = commands
-            .spawn((Name::new("trees far"), Mesh3d(h), MeshMaterial3d(kit.species[&sp].imp_mat.clone()), Transform::from_translation(at), aabb, NoAutoAabb, NotShadowCaster, Scenery, KeepDetail))
+            .spawn((Name::new("trees far"), Mesh3d(h), MeshMaterial3d(kit.species[&sp].imp_mat.clone()), Transform::from_translation(at), aabb, NoAutoAabb, NotShadowCaster, Scenery, KeepDetail, super::mirror::seen()))
             .id();
         ch.entities.push(id);
     }
