@@ -207,3 +207,172 @@ Each line: what disagreed → the ruling (decision id).
 
 **Verdict: CONFLICTS FOUND, all resolved above.** No conflict is left open. Not checked: art
 and audio numbers that only one doc states (they have nothing to conflict with).
+
+## 4. Stream briefs
+
+Every stream: branch `fest-<stream>` from the wave-0 commit, worktree
+`/Users/himanshu/codes/game/pacenote-wt/<stream>` (TEAM.md), every cargo command through
+`memgate`, runs only through `engine/scripts/play.py --manifest <wt>/Cargo.toml` (TECH_PASS §6),
+SMTP keys blank. Read this file, TECH_PASS §1-§7 and HANDOFF.md first. Need a module or a
+shared-file change not listed here? Ask the lead. Hand back: files, how to see it, test results,
+screenshots checked, `budget.py --quality Low` and `Medium` rows, `span` timings, known gaps.
+Merge order: D → C → A → B → F → E.
+
+### A WORLD (terrain, Fernhollow, re-bake)
+
+- **Owns:** `src/open/*` except `furniture.rs` (B), `challenges.rs` and `events.rs` (F);
+  `src/world.rs`; `src/art/{terrain.rs,terrain.wesl,ground.rs,junctions.rs,water.rs,trees.rs,dressing.rs,props.rs}`;
+  `src/map/*`; `assets/levels/open*` (the only stream that writes level files); the terrain code in `src/stage.rs`.
+- **Touch minimally:** golden hashes in `handling_tests.rs` (`stages_hash_the_same_everywhere`,
+  obstacles), in the re-bake commit with a reason. Keep the wave-0 hooks in `open/mod.rs` and
+  `world.rs` (`furniture`, `surface_at`, `racers`) working as they are.
+- **Wave 0:** consumes `open::furniture` (calls `build`/`dip`/`surface_override`/`walls`), keeps
+  `StageWorld.racers` in `obstacles()`. Implements none.
+- **Read:** WORLD_PASS (all), ART_BIBLE §5, TECH_PASS §4 row A and §5, this file W1, W2, W8, C5.
+- **Acceptance:**
+  1. WORLD_PASS §7 table, measured by the new ignored test `open::land::tests::slope_report`
+     (slope shares, 2 m steps, band means, hypsometry, town slope, corridor).
+  2. Roads 0-4 keep kinds and order; new roads at index ≥ 9; 5 events, 4-15 km; event ids
+     unchanged; `grades_and_hairpins` passes (hairpins ≥ 7 m).
+  3. Buildings: core 380-520, outskirts + hamlets 80-130, steadings 25-35, huts 8-12; merged per
+     block/tile: ≤ 60 meshes, < 600k triangles, ≤ +60 draws at Low (TECH_PASS §4).
+  4. 3 Yump crests sculpted (R_v 45 m gravel / 55 m tarmac); dev autopilot at pace 0.85 gets
+     ≥ 0.3 s airborne at each. Report the re-measured station of every WORLD_PASS §5 anchor.
+  5. Two bakes give identical bytes; bake ≤ 10 s, load ≤ 0.1 s; `committed_levels_load` and
+     `open.check` pass (0 roads > 5 cm off the ground).
+  6. Release note: open-world boards and ghosts reset. Docs drift fixed (`GAME_OVERVIEW.md`
+     §4.3/4.4, `RALLY_MAP.md`).
+
+### B ROADSIDE (rails, signs, posts, road conditions)
+
+- **Owns:** `src/open/furniture.rs` (pure, seeded, tested); `src/art/roadside.rs`;
+  `src/art/signs.rs`; `src/art/conditions.rs`; sign and condition textures.
+- **Touch minimally:** none (hooks are in wave 0). Rebase onto A and re-run placement on the
+  final roads before handing back.
+- **Wave 0:** implements `open::furniture::{Furniture, RailRun, Sign, SignKind, Patch,
+  PatchKind, build, dip, surface_override, walls, REV}`, `art::signs::SignsPlugin`,
+  `art::conditions::ConditionsPlugin`. Consumes `stage::Surface::Wet`. Puts `furniture::REV`
+  into the event `stage_hash` (ask F, who owns `events.rs`, or the lead, for the one-line hook).
+- **Read:** WORLD_PASS §4 (rules), ART_BIBLE §4 (look), TECH_PASS §4 row B and §5, this file W3-W7, C5.
+- **Acceptance:**
+  1. `furniture::build` gives the same output twice (test); sorted, grid-indexed patches.
+  2. Rail 1.2-1.6 km total on the committed level; rails are solid (`Wall` every 2 stations,
+     r 0.12, top ground + 0.75): a car driven into one scrapes and is held (test).
+  3. Every hairpin has a warning sign + chevrons; a delineator every 50 m (±5) on rural
+     tarmac; town board + "50" at the town limits; speed signs match `traffic::limit`/`limit_at`.
+  4. Potholes dip the ground (grip unchanged); wet patches return `Surface::Wet`; washouts
+     `Loose` + corrugation; ice `Snow` — each with a unit test through `OpenWorld`.
+  5. Drawn as merged mesh per kind per tile, no shadows on posts/signs, range 250 m: ≤ +20 draws,
+     ≤ +0.2 ms GPU (Medium, M5 Pro), ≤ +0.05 ms CPU; conditions as mesh patches, not decals.
+  6. `scripted_drive_is_bit_identical` still passes; stage hashes change only via `REV`.
+
+### C LOOK (sky, clouds, time of day)
+
+- **Owns:** `src/art/look.rs`; `src/daytime.rs`; `src/art/sky.rs` + new `src/art/clouds.wesl`;
+  cloud textures.
+- **Touch minimally:** none. Cloud shadows in `terrain.wesl` (A's) are a post-merge follow-up.
+- **Wave 0:** implements `daytime::{DayClock (sun/daylight/is_night), DaySettings, DAY_RATE,
+  START_PRESETS, NIGHT, DayPlugin}` (rows on tab "World" via `register_setting` in `DayPlugin`)
+  and `art::sky::SkyPlugin`. Consumes `art::headlights::Headlights` through
+  `daytime::night_available` (DECISIONS L6) and B's `SignKind::StreetLight` positions (L7).
+- **Read:** ART_BIBLE §1, §2, §7; TECH_PASS §1 (Look application, env map, pipeline toggles),
+  §4 row C, §7 risks; this file L1-L8.
+- **Acceptance:**
+  1. Fix the existing look first (ART §7 priority 1): ambient 350-600 cd/m² by day, aerial
+     perspective instead of the grey clear-day fog, auto exposure in a narrow window.
+  2. Clock 5×, frozen by pause; `Look` written ≈ 1 Hz (0.02° quantum), `env_refresh_hz` 0.05;
+     prove with `look.get`'s apply count; no frame spike > 2 ms; CPU ≤ +0.1 ms average.
+  3. `SkyMode` never changes during play; stars from the cloud shader at night; the moon is the
+     sun light re-aimed (0.6 lux, `0.62 0.72 1.0`).
+  4. Clouds: one shell mesh, depth-tested; ≤ +0.5 ms Medium / +0.7 ms High, Low static ≤ 0.05 ms;
+     +1 draw.
+  5. World › Start time (8 presets, default Morning) and Time passes; Night hidden unless
+     `Headlights` exists and the moon works. Classic stages stay at their authored time.
+  6. Screenshots at 06:30 / 12:00 / 19:00 / 23:00 from the town square, a mountain hairpin and a
+     forest straight in `docs/festival/shots/`; dev commands `look.time <h>`, `look.speed <x>`.
+
+### D CAR FEEL (pops and bangs, flames, spring arm, blur, shake, headlights)
+
+- **Owns:** `src/drive.rs` (cameras; may move them into `src/camera.rs`); `src/camera.rs`;
+  `src/audio/{car.rs,powertrain.rs,stream.rs,body.rs,pops.rs}`; `src/art/{car.rs,spray.rs,
+  hands.rs,mirror.rs,exhaust.rs,headlights.rs}`.
+- **Touch minimally:** none. (`audio/traffic.rs` voice tiers for rivals, AUDIO §4, are F's ask
+  after both land.)
+- **Wave 0:** implements `audio::pops::{ExhaustPop, PopKind, PopsPlugin}` + the `PopScheduler`,
+  `art::exhaust::ExhaustPlugin`, `camera::{SpeedFeel, CameraFeel, CameraFeelPlugin}` (rows on
+  tab "Camera"), `art::headlights::{Headlights, HeadlightsPlugin}` (**insert `Headlights` only
+  when the lights work**). Wet spray in `spray.rs` for `Surface::Wet`. Consumes
+  `career::garage::PopProfile` once F lands it (default Rally for the Saker).
+- **Read:** AUDIO_PASS §1, §2, §5, §6, §8; ART_BIBLE §2.3 "Night requirements", §3; TECH_PASS §4
+  row D, §7; this file D1-D6, L6-L7.
+- **Acceptance:**
+  1. AUDIO_PASS §8 items 1-6 and 8 (pops per lift/shift, levels over the engine RMS, no two
+     identical pops in a burst, cockpit muffling, `ExhaustPop` count == `pops_played`, flame
+     within ±40 ms of the sound, `SpeedFeel` drives FOV, blur and wind from one value).
+  2. Flames: 2 additive cones, pooled, `NotShadowCaster`; ≤ +4 draws, ≤ 32 sprites, ≤ 0.05 ms.
+  3. Spring arm per ART §3.2 (ω, ζ, limits), collision probe, reset on view switch/teleport;
+     landing kick and chase shake scaled by Camera shake; reduce motion turns them off.
+  4. Motion blur Off/Low/High (default Low), High+ tiers only, never inserted or removed in play
+     (writes `shutter_angle` after `QualitySet::Look`), 0 for 3 frames after a cut.
+  5. Headlights: 2 low beams + pod per ART §2.3, brake/tail lamps; the shadowed spot spawned at
+     load at intensity 0 by day; `Headlights` inserted; ≤ 0.4 ms at night (High).
+  6. `scripted_drive_is_bit_identical` and every handling test unchanged (nothing here feeds the sim).
+
+### E UI (Service Park hub, loading, garage/upgrades/dealership, settings, HUD restyle)
+
+- **Owns:** `src/meta/screens.rs`, `src/meta/mod.rs`, `src/meta/coach.rs`, `src/loading.rs`
+  (visuals and copy only, not the phase logic), `src/hud.rs`; new `src/meta/{hub.rs,showroom.rs,
+  garage_ui.rs,confirm.rs}` (declare them in `meta/mod.rs`); `src/audio/ui.rs`.
+- **Touch minimally:** `prefs::LAYOUT` row order, in one final commit (moves `camera_view`,
+  `fov_deg`, `camera_shake` to Camera; orders World, Camera and HUD rows).
+- **Wave 0:** implements `audio::ui::{UiSound, UiSoundPlugin}` and an optional `UiPrefs` ("ui")
+  section for the Notes chip and HUD safe area. Consumes (read-only) `career::{wallet::Wallet,
+  garage::{Garage, CARS, can_buy, can_fit, part_price, pi, Class, stat_bars, level_name},
+  grade::Grade, LastPayout, MoneyEarned}`, `career::racers::{RaceField, RaceResult, EventMode,
+  Difficulty}`, `open::challenges::ChallengeDef`; **sends** `CareerRequest` only (never mutates
+  career state). Fixed ids `dealer:0..dealer:15`, `part:0..part:6`.
+- **Read:** UX_PASS (all); GAME_SYSTEMS §6; ART_BIBLE §6; AUDIO_PASS §3 "Main menu UI" and the
+  loading-screen bed; TECH_PASS §3 "Menu wiring", §4 row E; this file §1, U1-U7, E1-E12.
+- **Acceptance:**
+  1. UX_PASS §7.8 items 1-9, with the canonical names (Notes / N, Rhythm, Valley Trials,
+     stars, Dealership, Logbook) and S4's 3 Style lines.
+  2. Hub items exactly as U1; balance + active car chip (name, class, PI) on every menu screen.
+  3. Buying with too few Notes is impossible and says how many are missing; a purchase updates
+     the top bar and survives a restart (through F's save); refusals show `Refusal`'s reason.
+  4. `tests/meta.rs` reaches every new screen headless; Continue restores the saved pose; Go now
+     loads at the event's start line.
+  5. Showroom only under `MainMenu` (`DespawnOnExit`), fades in after two drawn frames; loading
+     ≤ +0.5 s over today; HUD ≤ 0.1 ms, ≤ 60 UI nodes in play.
+
+### F GAMEPLAY (Style + HUD, challenges, economy + career save, rivals + race HUD)
+
+- **Owns:** `src/career/*`; `src/pilot.rs`; `src/autopilot.rs` (becomes a shell over `pilot`);
+  `src/open/events.rs`; `src/open/challenges.rs`; `src/hud_style.rs`, `src/hud_challenge.rs`,
+  `src/hud_race.rs`; `src/audio/festival.rs`; new `assets/levels/open/challenges.ron`;
+  `src/meta/board.rs` and `src/meta/ghost.rs` for the record car key (E12) only.
+- **Touch minimally:** `src/vehicle.rs`: `Spec.grip`, `Spec.shift_time` read in `step`, under
+  DECISIONS E6's conditions (first commit); nothing else in `step`, the tyres or `Ground`.
+  `src/open/traffic.rs`: none (read `Traffic` for `OtherCars`).
+- **Wave 0:** implements everything in `career::*` (`Wallet`, `Garage`, `CARS` with all 8
+  cars, `build_spec`, `pi`, `Grade::level`, `Rhythm` scoring, `Payout`/`Charge` → wallet,
+  `MoneyEarned`, `CareerRequest` handling, `career.json`, `CareerSettings` rows on tab HUD,
+  `RaceField`, `Racer`, `RacerSolids` filled after each step and set on `StageWorld.racers` in
+  Race runs, `RaceResult`, `OtherCars`), `pilot::{Pilot, PilotParams}` + `input`,
+  `open::challenges::*`, the three HUD plugins, `audio::festival::FestivalAudioPlugin`.
+  Consumes `drive::{DrivenCar, CarSpec, StageRun}` read-only, `Surface::Wet`.
+- **Read:** GAME_SYSTEMS (all); WORLD_PASS §5 (anchors) and §6.5; AUDIO_PASS §3-§4, §6;
+  UX_PASS §3.1-§3.3 (HUD layout); TECH_PASS §3, §4 row F, §5; this file §2.1-§2.4.
+- **Acceptance:**
+  1. GAME_SYSTEMS §7 stories SK-1..SK-8, CH-2..CH-7 (with C2: the 13 anchors, "all 13" on the
+     map), EC-1..EC-7, AI-1..AI-8, as amended here (7 parts, Saker owned + 12,000 N, no
+     Showroom/Wren starter, Race as a mode).
+  2. `challenges.ron` loads against the committed level: every gate on its road (test, re-run
+     after A's merge); star bake is deterministic, 1★ < 2★ < 3★.
+  3. Ghosts: a stock Saker's `sim_hash` equals today's; `scripted_drive_is_bit_identical`,
+     `obstacles_the_same_everywhere` and `ghost.verify` pass; Race runs record no ghost or board time.
+  4. Rivals: 5, deterministic (two headless races with the same inputs → identical poses at step
+     N); AI ≤ 0.5 ms per frame (dev, `span`), style ≤ 0.05 ms, popups ≤ 0.1 ms; ≤ +15 draws.
+  5. AUDIO_PASS §8 item 7 and the festival cues of §3 (ticks ≤ 15/s, Bank stops ticks, Lost
+     never louder than Bank); item 9 with 5 rivals.
+  6. Pacing check holds (E3): a fresh career has 12,000 N and the Saker; a newcomer can afford an
+     Engine Gravel or a second car within ~25 min (show the arithmetic in the hand-back).
