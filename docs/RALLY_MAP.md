@@ -100,6 +100,13 @@ Ticked as each step lands on main (commit in brackets).
 
 ## Status
 
+- **Festival world pass (5 Nov 2026,** `docs/festival/WORLD_PASS.md`**):** the land smoothed
+  (T1-T11: no scarps, rounded ridges, a 75 % talus outside a few crags, corridor shaping with
+  cut ≤ 60 %, an adaptive blend and two-road blending), the valley village became the town of
+  Fernhollow (13 streets as roads 8-20, 654 buildings in all, drawn merged per tile), three
+  jumps, the level re-baked (21 roads, 5 events 4.4-10.7 km). The phase notes below describe
+  the 3 Nov state.
+
 - Phase 1: done. `stage::grade_for` holds the radius table; the hairpin is grade 0
   (`stage::HAIRPIN`), so world data went to version 2 and a version 1 grade override of 1 is
   migrated to 0. `Corner` gained `crest_into`, `tightens_from`, `opens_to`, `off_camber` and
