@@ -368,6 +368,11 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         for c in [pl.village, pl.park] {
             rects.push(Rect { center: c, half: Vec2::splat(crate::open::buildings::VILLAGE_R * 0.7), yaw: 0.0, y: o.net.town_y, tag: "road".into() });
         }
+        // Nothing grows in the river (`art::water` lays the water in its bed).
+        let hf = &w.heights;
+        for (c, h, yaw) in crate::art::water::channel(&o.net.land.river, |x, z| hf.height_at(x, z)) {
+            rects.push(Rect { center: c, half: h, yaw, y: hf.height_at(c.x, c.y), tag: "road".into() });
+        }
         for b in &o.buildings.buildings {
             rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(4.0), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
         }

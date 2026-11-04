@@ -21,6 +21,7 @@ pub mod spray;
 pub mod terrain;
 pub mod traffic_car;
 pub mod trees;
+pub mod water;
 
 use std::sync::Arc;
 
@@ -111,6 +112,7 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     world.insert_resource(cat);
     trees::setup(world, s, view, q);
     props::spawn(world, s);
+    water::spawn(world, s);
     let half = stage::half_size(&s.def);
     let area = Area::new(Vec2::splat(-half), Vec2::splat(half));
     // Rocks, bushes, ground cover: evaluated and kept only near the camera (the engine drops far
