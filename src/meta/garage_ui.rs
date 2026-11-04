@@ -159,6 +159,8 @@ pub fn refusal_text(r: Refusal) -> String {
         Refusal::Owned => "Already in your garage".into(),
         Refusal::MaxLevel => "Already at the top level".into(),
         Refusal::Unknown => "Not in the Dealership".into(),
+        Refusal::LastCar => "You can't sell your last car".into(),
+        Refusal::Busy => "Not during an event".into(),
     }
 }
 
