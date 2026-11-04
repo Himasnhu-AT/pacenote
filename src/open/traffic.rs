@@ -71,6 +71,9 @@ const SPOT_STEP: f32 = 15.0;
 const CELL: f32 = 250.0;
 /// Seconds a car stands after a hard hit.
 const HAZARD_S: f32 = 4.0;
+/// How far along its path a car looks for the player (m), in steps of this (m).
+const PLAYER_LOOK: f32 = 100.0;
+const PLAYER_STEP: f32 = 1.5;
 
 /// Speed limit by road kind (m/s): 40, 100, 70, 50 km/h.
 pub fn limit(kind: RoadKind) -> f32 {
@@ -521,6 +524,22 @@ impl Default for TrafficConfig {
 pub struct Player {
     pub pos: Vec3,
     pub vel: Vec3,
+    /// The way the car's nose points (unit; any length works, zero = along the lane): a car
+    /// stopped across a lane blocks more of it than one parked along it.
+    pub fwd: Vec3,
+}
+
+/// The player's car footprint (half width, half length; `vehicle::Spec::size`).
+const PLAYER_HALF: (f32, f32) = (0.89, 1.98);
+
+impl Player {
+    /// Half the footprint across `dir` (unit, flat) and along it.
+    fn extent(p: Player, dir: Vec2) -> (f32, f32) {
+        let f = Vec2::new(p.fwd.x, p.fwd.z).normalize_or(dir);
+        let (c, sn) = (f.dot(dir).abs(), f.perp_dot(dir).abs());
+        let (w, l) = PLAYER_HALF;
+        (w * c + l * sn, l * c + w * sn)
+    }
 }
 
 /// One AI car.
@@ -686,7 +705,12 @@ impl Traffic {
         self.rebuild();
         self.grant();
         let acc: Vec<f32> = (0..self.agents.len()).map(|i| self.accel(i, player)).collect();
-        self.integrate(&acc, dt);
+        // Never into the player's footprint (the car may still be hit by them).
+        let to_player: Vec<f32> = match player {
+            Some(p) => self.agents.iter().map(|a| self.player_ahead(a, p).map_or(f32::MAX, |(gap, _)| (gap + 0.2).max(0.0))).collect(),
+            None => Vec::new(),
+        };
+        self.integrate(&acc, &to_player, dt);
         if let Some(p) = player {
             self.hits(p);
         }
@@ -939,40 +963,53 @@ impl Traffic {
         v * a.temper
     }
 
-    /// The player as a leader: (gap, speed along the path) when they're within reach of the
-    /// path ahead.
+    /// The player as a leader: (gap bumper to bumper, speed along the path) when their
+    /// footprint is on the path ahead. Walks the path (the chosen lanes) rather than
+    /// projecting on the car's heading: in a bend or a turn the straight line ahead leaves the
+    /// lane, and a car came round a corner into the back of a stopped player.
     fn player_ahead(&self, a: &Agent, p: Player) -> Option<(f32, f32)> {
         let d = xz(p.pos) - xz(a.pose.0);
-        let fwd = xz(a.pose.1).normalize_or_zero();
-        let along = d.dot(fwd);
-        if !(-1.0..=100.0).contains(&along) || d.length_squared() > 110.0 * 110.0 {
+        if d.length_squared() > (PLAYER_LOOK + 10.0) * (PLAYER_LOOK + 10.0) {
             return None;
         }
-        // The path point that far along (following the chosen lanes).
         let g = &self.graph;
-        let (mut l, mut s, mut next) = (a.lane, a.s + along.max(0.0), a.next);
-        for _ in 0..3 {
+        let (mut l, mut s, mut next) = (a.lane, a.s, a.next);
+        let mut ahead = 0.0;
+        let mut hops = 0;
+        while ahead <= PLAYER_LOOK {
             let len = g.lanes[l as usize].length();
-            if s <= len {
-                break;
+            if s > len {
+                if hops == 3 {
+                    break;
+                }
+                hops += 1;
+                s -= len;
+                l = next;
+                let nl = &g.lanes[l as usize];
+                next = if nl.is_turn() { nl.next[0] } else { nl.next.first().copied().unwrap_or(l) };
+                continue;
             }
-            s -= len;
-            l = next;
-            let nl = &g.lanes[l as usize];
-            next = if nl.is_turn() { nl.next[0] } else { nl.next.first().copied().unwrap_or(l) };
+            let lane = &g.lanes[l as usize];
+            let q = xz(lane.point(s));
+            let dir = xz(lane.point(s + 1.0) - lane.point(s - 1.0)).normalize_or_zero();
+            let rel = xz(p.pos) - q;
+            let lo = rel.dot(dir);
+            if lo.abs() <= PLAYER_STEP * 0.5 + 0.01 {
+                // The player's footprint across and along the lane: stopped across it, a car
+                // blocks its whole width and reaches further back.
+                let (across, length) = Player::extent(p, dir);
+                if dir.perp_dot(rel).abs() <= CAR_WIDTH * 0.5 + across + 0.5 {
+                    let v = Vec2::new(p.vel.x, p.vel.z).dot(dir).max(0.0);
+                    return Some((ahead + lo - HALF_LEN - length - 0.3, v));
+                }
+            }
+            s += PLAYER_STEP;
+            ahead += PLAYER_STEP;
         }
-        let lane = &g.lanes[l as usize];
-        let q = xz(lane.point(s));
-        let side = (xz(p.pos) - q).length();
-        if side > CAR_WIDTH * 0.5 + 1.4 {
-            return None;
-        }
-        let dir = xz(lane.point(s + 1.0) - lane.point(s - 1.0)).normalize_or_zero();
-        let v = Vec2::new(p.vel.x, p.vel.z).dot(dir).max(0.0);
-        Some((along - HALF_LEN - 2.3, v))
+        None
     }
 
-    fn integrate(&mut self, acc: &[f32], dt: f32) {
+    fn integrate(&mut self, acc: &[f32], to_player: &[f32], dt: f32) {
         let g = self.graph.clone();
         // Hard limits from the start-of-step positions: never closer than 0.3 m to the car
         // ahead in the lane, never past an ungranted stop line.
@@ -996,6 +1033,9 @@ impl Traffic {
                 }
                 room[front as usize] = r.max(0.0);
             }
+        }
+        for (r, p) in room.iter_mut().zip(to_player) {
+            *r = r.min(*p);
         }
         for i in 0..self.agents.len() {
             let mut a = self.agents[i].clone();
@@ -1216,7 +1256,7 @@ impl LaneWalker {
     /// As the player: position and velocity.
     pub fn player(&self, graph: &LaneGraph) -> Player {
         let (pos, fwd) = graph.pose(self.lane, self.s, self.next);
-        Player { pos, vel: fwd * self.speed }
+        Player { pos, vel: fwd * self.speed, fwd }
     }
 }
 
@@ -1257,7 +1297,7 @@ impl Plugin for TrafficPlugin {
 pub struct TrafficFocus(pub Player);
 
 fn step(time: Res<Time<Fixed>>, mut traffic: ResMut<Traffic>, cars: Query<&crate::drive::DrivenCar>, focus: Option<Res<TrafficFocus>>, solids: Res<TrafficSolids>) {
-    let player = cars.iter().next().map(|c| Player { pos: c.car.pos, vel: c.car.vel }).or(focus.map(|f| f.0));
+    let player = cars.iter().next().map(|c| Player { pos: c.car.pos, vel: c.car.vel, fwd: c.car.forward() }).or(focus.map(|f| f.0));
     traffic.step(time.delta_secs(), player);
     if let Ok(mut s) = solids.0.write() {
         s.clear();
@@ -1631,7 +1671,7 @@ mod tests {
             t.agents.push(Agent { id: k + 1, lane: li as u32, s, v: 10.0, next, temper: 1.0, color: 0, hazard: 0.0, waited: 0.0, asked: None, hold: None, pose, prev: pose, behind_player: false });
         }
         let stand = lane.point(300.0);
-        let p = Player { pos: stand, vel: Vec3::ZERO };
+        let p = Player { pos: stand, vel: Vec3::ZERO, fwd: Vec3::ZERO };
         for _ in 0..60 * 60 {
             t.step(1.0 / 60.0, Some(p));
         }
@@ -1641,6 +1681,65 @@ mod tests {
         }
         let front = t.agents.iter().map(|a| a.s).fold(0.0, f32::max);
         assert!(front > 300.0 - 12.0, "queued close behind: {front}");
+    }
+
+    /// Do two footprints (centre, unit forward, half width, half length) overlap? (2D SAT.)
+    fn boxes_overlap(a: (Vec2, Vec2, f32, f32), b: (Vec2, Vec2, f32, f32)) -> bool {
+        let axes = |f: Vec2| [f, Vec2::new(-f.y, f.x)];
+        let reach = |(_, f, w, l): (Vec2, Vec2, f32, f32), ax: Vec2| l * f.dot(ax).abs() + w * Vec2::new(-f.y, f.x).dot(ax).abs();
+        let d = b.0 - a.0;
+        axes(a.1).into_iter().chain(axes(b.1)).all(|ax| d.dot(ax).abs() < reach(a, ax) + reach(b, ax))
+    }
+
+    #[test]
+    fn cars_never_drive_into_a_stopped_player() {
+        // The player stands across, at an angle or off to the side of a lane, on a straight and
+        // in a curve; a car comes up behind at speed. It stops short, every time.
+        let (_, g) = world();
+        let (li, _) = g.lanes.iter().enumerate().find(|(_, l)| matches!(l.kind, LaneKind::Road { .. }) && l.length() > 600.0).unwrap();
+        let mut cases: Vec<(usize, f32)> = [150.0, 300.0, 450.0].iter().map(|&at| (li, at)).collect();
+        // The bendiest stretches: the lane turns most over the 40 m before the player.
+        let turn = |l: &Lane, s: f32| {
+            let d = |s: f32| xz(l.point(s + 1.0) - l.point(s - 1.0)).normalize_or_zero();
+            d(s - 40.0).angle_to(d(s)).abs()
+        };
+        let mut bends: Vec<(f32, usize, f32)> = Vec::new();
+        for (i, l) in g.lanes.iter().enumerate() {
+            if !matches!(l.kind, LaneKind::Road { .. }) || l.length() < 200.0 {
+                continue;
+            }
+            let mut s = 100.0;
+            while s < l.length() - 20.0 {
+                bends.push((turn(l, s), i, s));
+                s += 10.0;
+            }
+        }
+        bends.sort_by(|a, b| b.0.total_cmp(&a.0));
+        assert!(bends[0].0 > 0.6, "no bend in the network: {:.2} rad", bends[0].0);
+        cases.extend(bends.iter().take(3).map(|b| (b.1, b.2)));
+        for (li, at) in cases {
+            let next = g.lanes[li].next[0];
+            for yaw in [0.0f32, 30.0, 60.0, 90.0, 135.0, 180.0] {
+                for off in [-2.7f32, -2.2, -1.2, 0.0, 1.2, 2.2, 2.7] {
+                    let mut t = Traffic::with_graph(g.clone(), TrafficConfig { cars: 0, ..default() });
+                    let s = at - 90.0;
+                    let pose = g.pose(li as u32, s, next);
+                    t.agents.push(Agent { id: 1, lane: li as u32, s, v: 20.0, next, temper: 1.0, color: 0, hazard: 0.0, waited: 0.0, asked: None, hold: None, pose, prev: pose, behind_player: false });
+                    let (c, f) = g.pose(li as u32, at, next);
+                    let side = Vec3::new(-f.z, 0.0, f.x).normalize();
+                    let (sy, cy) = yaw.to_radians().sin_cos();
+                    let pf = (f * cy + side * sy).normalize();
+                    let p = Player { pos: c + side * off, vel: Vec3::ZERO, fwd: pf };
+                    let pbox = (xz(p.pos), xz(pf).normalize(), 0.89, 1.98);
+                    for k in 0..60 * 20 {
+                        t.step(1.0 / 60.0, Some(p));
+                        let a = &t.agents[0];
+                        let abox = (xz(a.pose.0), xz(a.pose.1).normalize(), CAR_WIDTH * 0.5, HALF_LEN);
+                        assert!(!boxes_overlap(abox, pbox), "lane {li} at {at} m, yaw {yaw}°, {off} m off the lane: hit the player after {:.1} s at {:.1} m/s", k as f32 / 60.0, a.v);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1653,9 +1752,9 @@ mod tests {
         t.agents.push(Agent { id: 1, lane: li as u32, s: 100.0, v: 10.0, next, temper: 1.0, color: 0, hazard: 0.0, waited: 0.0, asked: None, hold: None, pose, prev: pose, behind_player: false });
         // The player slams in from the side.
         let side = Vec3::new(-pose.1.z, 0.0, pose.1.x);
-        t.step(1.0 / 60.0, Some(Player { pos: pose.0 + side * 2.5, vel: -side * 12.0 }));
+        t.step(1.0 / 60.0, Some(Player { pos: pose.0 + side * 2.5, vel: -side * 12.0, fwd: -side }));
         assert!(t.agents[0].hazard > 0.0 && t.agents[0].v == 0.0);
-        let far = Player { pos: pose.0 + side * 200.0, vel: Vec3::ZERO };
+        let far = Player { pos: pose.0 + side * 200.0, vel: Vec3::ZERO, fwd: Vec3::ZERO };
         for _ in 0..60 * 3 {
             t.step(1.0 / 60.0, Some(far));
         }
