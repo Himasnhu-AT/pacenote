@@ -307,7 +307,8 @@ pub fn rubber_band(gap_s: f32, frac: f32) -> f32 {
 pub fn pick_cars(player_pi: u16, seed: u64) -> Vec<(&'static CarDef, Upgrades)> {
     let class = Class::of(player_pi);
     let stock = |d: &CarDef| garage::pi(&(d.base)());
-    let mut pool: Vec<&CarDef> = CARS.iter().filter(|d| Class::of(stock(d)) == class && stock(d) <= player_pi + 20).collect();
+    // The player's class, plus cars up to ~120 PI below that upgrades can bring up (variety).
+    let mut pool: Vec<&CarDef> = CARS.iter().filter(|d| stock(d) <= player_pi + 20 && (Class::of(stock(d)) == class || stock(d) + 120 >= player_pi)).collect();
     if pool.is_empty() {
         pool = CARS.iter().filter(|d| stock(d) <= player_pi + 20).collect();
         pool.sort_by_key(|d| std::cmp::Reverse(stock(d)));
@@ -445,7 +446,9 @@ impl RaceSim {
                 mistake: difficulty.mistake(),
                 ..PilotParams::default()
             };
-            let colour = ((pilot::unit(seed, 500 + k as u64) * 7.0) as u8 + k as u8) % garage::PAINTS;
+            // Distinct, strong colours (not the white of the default Saker).
+            const RIVAL_PAINTS: [u8; 6] = [3, 4, 5, 6, 2, 1];
+            let colour = RIVAL_PAINTS[((pilot::unit(seed, 500) * 6.0) as usize + k) % 6];
             rivals.push(Racer {
                 slot,
                 prev: (car.pos, car.rot),
@@ -567,7 +570,13 @@ impl RaceSim {
                 r.progress = rp.s;
             }
             r.stuck += DT;
-            let off = near.is_none_or(|rp| rp.lateral.abs() > road.half_width(&rp) + 1.5) || r.car.up().y < 0.3;
+            // Off the road, on its roof or side, or turned round (after a spin).
+            let wrong_way = near.is_some_and(|rp| {
+                let d = road.dir[rp.i];
+                let f = r.car.forward();
+                f.x * d.x + f.z * d.y < -0.3 && r.car.speed().abs() < 8.0
+            });
+            let off = near.is_none_or(|rp| rp.lateral.abs() > road.half_width(&rp) + 1.5) || r.car.up().y < 0.3 || wrong_way;
             r.off = if off { r.off + DT } else { 0.0 };
             // A broken part retires it (Simulation damage); stuck or off the road, the
             // marshals put it back where it was (deterministic).
@@ -724,7 +733,7 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
     let mut ahead: Option<(f32, f32, f32)> = None;
     let mut consider = |s: f32, v: f32, lat: f32| {
         let d = s - me_s;
-        if d > 0.0 && d < 50.0 && ahead.is_none_or(|a| d < a.0) {
+        if d > 0.0 && d < 120.0 && ahead.is_none_or(|a| d < a.0) {
             ahead = Some((d, v, lat));
         }
     };
@@ -775,14 +784,23 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
             }
         } else {
             r.pass_side = 0.0;
-            // Follow at a 0.6 s headway.
+            // Follow at a 0.6 s headway: the speed it can still brake from to the car ahead's
+            // speed within the gap left (≈ 4 m/s², all surfaces).
             let want_gap = 2.0 + 0.6 * me_v;
-            r.pilot.speed_cap = Some((v_ahead + (gap_m - want_gap) * 0.5).max(0.0));
+            let room = gap_m - want_gap;
+            let cap = if room >= 0.0 { (v_ahead * v_ahead + 2.0 * 4.0 * room).sqrt() } else { (v_ahead + room * 0.5).max(0.0) };
+            r.pilot.speed_cap = Some(cap);
         }
     }
 
     if ahead.is_none() {
         r.pass_side = 0.0;
+    }
+    // A car alongside (the grid, a pass in progress): hold this side of the road.
+    let alongside = cars.iter().enumerate().filter(|(j, c)| *j != k && !c.3).map(|(_, c)| (c.0, c.2)).chain((!player.3).then_some((player.0, player.2))).any(|(s, lat)| (s - me_s).abs() < 6.5 && (lat - me_lat).abs() < 2.8);
+    if alongside && r.pilot.offset_target.is_none() {
+        let room = (min_w * 0.5 - 1.1).max(0.0);
+        r.pilot.offset_target = Some(me_lat.clamp(-room, room));
     }
 
     // Yielding: the player right behind (within 1.2 s) for 2 s, on a straight ≥ 3.8 m wide.
@@ -1077,6 +1095,25 @@ mod race_tests {
     #[ignore = "slow (loads the open world): cargo test -- --ignored rivals_are_deterministic"]
     fn rivals_are_deterministic() {
         let w = world();
+        // AI-3: the start format by width (the Hillclimb is a B-road, Fernhollow a forest track).
+        let ev = events::build(&w.open.as_ref().unwrap().net, &w.open.as_ref().unwrap().data.events);
+        let fmt = |name: &str| start_format(&ev.iter().find(|e| e.name == name).unwrap().route);
+        assert_eq!(fmt("Hillclimb"), StartFormat::Grid);
+        assert_eq!(fmt("Fernhollow escarpment"), StartFormat::Pursuit);
+        // No car overlaps another at spawn.
+        for e in ev.iter().filter(|e| e.kind != events::EventKind::Lap) {
+            let mut we = w.clone();
+            events::on_route(&mut we, e);
+            let sim = RaceSim::new(e.id, Difficulty::Pro, 1, &we.road, &we, 570, DamageMode::Simulation);
+            let (p, h) = sim.player_start(&we.road, &we);
+            let mut cars: Vec<Car> = sim.rivals.iter().map(|r| r.car.clone()).collect();
+            cars.push(Car::new(p + Vec3::Y * 0.9, h));
+            for i in 0..cars.len() {
+                for j in i + 1..cars.len() {
+                    assert!(!touching(&cars[i], &cars[j]), "{}: cars {i} and {j} overlap on the grid", e.name);
+                }
+            }
+        }
         let a = race(&w, events::FIRST_ID + 4, Difficulty::Ace, 60 * 40, Some(60 * 40 - 1));
         let b = race(&w, events::FIRST_ID + 4, Difficulty::Ace, 60 * 40, Some(60 * 40 - 1));
         assert_eq!(a.poses, b.poses);

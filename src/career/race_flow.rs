@@ -78,7 +78,22 @@ impl Plugin for RaceFlowPlugin {
             .add_systems(Update, despawn_rivals.run_if(not(resource_exists::<RaceRun>)))
             .add_systems(OnExit(AppState::InGame), |w: &mut World| end(w));
         #[cfg(feature = "dev")]
-        app.configure_sets(FixedUpdate, crate::autopilot::AutopilotSet.before(race_pre));
+        {
+            use engine::devtools::{AddControlCommand, params};
+            app.configure_sets(FixedUpdate, crate::autopilot::AutopilotSet.before(race_pre));
+            app.add_control_command("race.state", "The race: standings, rivals, contacts, AI step time", params(&[]), |w, _| {
+                let perf = w.get_resource::<RacePerf>().copied().unwrap_or_default();
+                let Some(r) = w.get_resource::<RaceRun>() else { return Ok(serde_json::json!({"racing": false})) };
+                let run = w.resource::<StageRun>().clone();
+                let st: Vec<_> = standings(r, &run).iter().map(|e| serde_json::json!([format!("{:?}", e.0), e.1, format!("{:?}", e.2)])).collect();
+                Ok(serde_json::json!({
+                    "racing": true, "event": r.sim.event, "difficulty": r.sim.difficulty.label(), "format": format!("{:?}", r.sim.format),
+                    "clock": r.sim.clock(), "clean": r.sim.clean, "contacts": r.sim.contacts, "done": r.done, "standings": st,
+                    "rivals": r.sim.rivals.iter().map(|x| serde_json::json!({"slot": x.slot, "name": x.name, "car": x.model, "s": x.progress, "kmh": x.car.speed() * 3.6, "resets": x.resets, "doing": x.pilot.doing})).collect::<Vec<_>>(),
+                    "ai_ms": {"last": perf.last_ms, "mean": perf.mean_ms, "max": perf.max_ms, "steps": perf.steps},
+                }))
+            });
+        }
     }
 }
 
@@ -203,7 +218,8 @@ fn race_step(world: &mut World) {
     let mut race = world.remove_resource::<RaceRun>().unwrap();
     let done = run.finished.is_some() || run.retired;
     race.sim.step(&race.ground, &road, &corners, PlayerNow { car: &player, progress: run.progress, done }, run.countdown > 0.0);
-    race.player_progress = run.progress;
+    // Before the clock runs `StageRun::progress` is 0: the grid slot's place on the route.
+    race.player_progress = if run.countdown > 0.0 { road.nearest(Vec2::new(player.pos.x, player.pos.z), 20.0).map_or(run.progress, |r| r.s) } else { run.progress };
     if let Ok(mut v) = race.solids.0.write() {
         v.clear();
         v.extend(race.sim.rivals.iter().filter(|r| r.ghost <= 0.0).map(|r| super::racers::solid_pose(&r.car)));
@@ -345,5 +361,5 @@ pub fn standings(race: &RaceRun, run: &StageRun) -> Vec<(Who, f32, Option<Finish
     } else {
         run.finished.map(|t| Finish::Time(t - run.penalty))
     };
-    race.sim.standings(run.progress, pf)
+    race.sim.standings(run.progress.max(race.player_progress), pf)
 }

@@ -82,6 +82,18 @@ pub enum PopProfile {
 /// green, yellow).
 pub const PAINTS: u8 = 7;
 
+/// The paint colours (sRGB), as `art::traffic_car`'s.
+pub const PAINT_SRGB: [[f32; 3]; 7] = [[0.86, 0.86, 0.84], [0.56, 0.58, 0.61], [0.035, 0.037, 0.045], [0.56, 0.06, 0.05], [0.07, 0.17, 0.46], [0.07, 0.24, 0.14], [0.82, 0.62, 0.12]];
+
+impl Paint {
+    /// The colour for a livery tint (metallic a shade darker, as the traffic's).
+    pub fn color(self) -> Color {
+        let c = PAINT_SRGB[(self.colour % PAINTS) as usize];
+        let k = if self.metallic { 0.8 } else { 1.0 };
+        Color::srgb(c[0] * k, c[1] * k, c[2] * k)
+    }
+}
+
 /// A paint: one of the 7 `art::traffic_car` paints, solid or metallic. Free to change.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(default)]

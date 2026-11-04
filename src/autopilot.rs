@@ -133,9 +133,36 @@ impl Autopilot {
         p.power_beta = self.power_beta;
         p.hb_steer = self.hb_steer;
         self.pilot.crash_at_m = self.crash_at_m;
-        let input = self.pilot.input(car, spec, &w.road, &w.corners, w, progress, dt);
+        // Steers round trees and rocks, not the race's cars (it would dodge off the road).
+        let input = self.pilot.input(car, spec, &w.road, &w.corners, &NoRacers(w), progress, dt);
         self.doing = self.pilot.doing;
         input
+    }
+}
+
+/// The stage's ground without the rivals' solids (they come last in `obstacles`).
+struct NoRacers<'a>(&'a StageWorld);
+
+impl crate::vehicle::Ground for NoRacers<'_> {
+    fn height(&self, x: f32, z: f32) -> f32 {
+        self.0.height(x, z)
+    }
+    fn normal(&self, x: f32, z: f32) -> Vec3 {
+        self.0.normal(x, z)
+    }
+    fn surface(&self, x: f32, z: f32) -> crate::stage::Surface {
+        self.0.surface(x, z)
+    }
+    fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<crate::vehicle::Obstacle>) {
+        self.0.obstacles(p, r, out);
+        if let Some(racers) = &self.0.racers {
+            let mut extra = Vec::new();
+            racers.obstacles(p, r, &mut extra);
+            out.truncate(out.len().saturating_sub(extra.len()));
+        }
+    }
+    fn walls(&self, p: Vec2, r: f32, out: &mut Vec<crate::vehicle::Wall>) {
+        self.0.walls(p, r, out);
     }
 }
 

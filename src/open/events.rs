@@ -365,6 +365,11 @@ pub struct Events(pub Vec<EventDef>);
 #[derive(Component)]
 struct Marker;
 
+/// The see-through start cylinder of a marker (hidden while an event runs: a race's grid
+/// stands in it).
+#[derive(Component)]
+struct StartCylinder;
+
 /// Free-roam state near markers: which one the car is in, and for how long it's been still
 /// (`meta::coach` shows the "stop here to start" prompt from it).
 #[derive(Resource, Default)]
@@ -409,7 +414,7 @@ impl Plugin for EventsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Approach>()
             .init_resource::<Choice>()
-            .add_systems(Update, (setup, approach).chain().run_if(resource_exists::<StageWorld>))
+            .add_systems(Update, (setup, approach, hide_markers_in_events).chain().run_if(resource_exists::<StageWorld>))
             .add_systems(Update, choice_from_save.run_if(resource_changed::<crate::career::save::CareerProgress>));
         #[cfg(feature = "dev")]
         dev::register(app);
@@ -554,6 +559,7 @@ fn setup(world: &mut World) {
             world.spawn((
                 Name::new(format!("event marker: {}", e.name)),
                 Marker,
+                StartCylinder,
                 engine::level::GeneratedBy("pacenote::events"),
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat),
@@ -620,6 +626,13 @@ fn approach(world: &mut World) {
                 start_as(world, id, mode);
             }
         }
+    }
+}
+
+fn hide_markers_in_events(stage: Res<StageWorld>, mut q: Query<&mut Visibility, With<StartCylinder>>) {
+    let want = if stage.event.is_some() { Visibility::Hidden } else { Visibility::Inherited };
+    for mut v in &mut q {
+        v.set_if_neq(want);
     }
 }
 

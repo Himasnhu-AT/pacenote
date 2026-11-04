@@ -210,6 +210,7 @@ impl Plugin for EconomyPlugin {
             .init_resource::<TrialPaid>()
             .add_systems(Startup, load_career)
             .add_systems(Update, (apply_money, handle_requests, pay_race, pay_trial, grade_from_style, sync_car_spec, track_car, mark_changes, save_debounced).chain())
+            .add_systems(Update, livery)
             .add_systems(Last, save_on_exit);
         #[cfg(feature = "dev")]
         dev::register(app);
@@ -460,7 +461,6 @@ fn sync_car_spec(
 /// remembered for Continue. On a fresh spawn in free roam the stored damage comes back.
 fn track_car(
     mut cars: Query<&mut DrivenCar>,
-    added: Query<(), Added<DrivenCar>>,
     stage: Option<Res<StageWorld>>,
     mut garage: ResMut<Garage>,
     mut progress: ResMut<CareerProgress>,
@@ -473,7 +473,7 @@ fn track_car(
     }
     let Ok(mut c) = cars.single_mut() else { return };
     let i = garage.active.min(garage.owned.len() - 1);
-    if !added.is_empty() {
+    if c.is_added() {
         let d = garage.owned[i].damage;
         if d > 0.0 {
             let dm = &mut c.car.damage;
@@ -505,6 +505,34 @@ fn mark_changes(wallet: Res<Wallet>, garage: Res<Garage>, grade: Res<Grade>, pro
     let changed = |c: bool, a: bool| c && !a;
     if changed(wallet.is_changed(), wallet.is_added()) || changed(garage.is_changed(), garage.is_added()) || changed(grade.is_changed(), grade.is_added()) || changed(progress.is_changed(), progress.is_added()) {
         mark(&mut save);
+    }
+}
+
+/// The driven car's paint is the garage's (the rally hatch's livery tinted; the Saker's stock
+/// white keeps the livery as built). On a new car model and whenever the paint changes.
+fn livery(garage: Res<Garage>, mut wears: Query<&mut crate::art::car::CarWear>, mut mats: Option<ResMut<Assets<StandardMaterial>>>, mut built: Local<Vec<(AssetId<StandardMaterial>, Color)>>) {
+    let Some(mats) = mats.as_deref_mut() else { return };
+    let car = garage.active_car();
+    for mut w in &mut wears {
+        if !w.is_added() && !garage.is_changed() {
+            continue;
+        }
+        let stock = car.def().is_some_and(|d| d.id == garage::SAKER && car.paint == d.paint);
+        let dirt = w.dirt;
+        for (h, base, _, _) in w.paint.iter_mut() {
+            // The livery as built, kept the first time it is seen.
+            let orig = match built.iter().find(|b| b.0 == h.id()) {
+                Some(b) => b.1,
+                None => {
+                    built.push((h.id(), *base));
+                    *base
+                }
+            };
+            *base = if stock { orig } else { car.paint.color() };
+            if let Some(mut m) = mats.get_mut(&*h) {
+                m.base_color = crate::art::car::dusty(*base, dirt);
+            }
+        }
     }
 }
 

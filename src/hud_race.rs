@@ -152,10 +152,11 @@ fn update_block(
         let mut s = String::new();
         let _ = write!(s, "P{pos}/{}", st.len());
         set(RaceText::Pos, &s);
+        // (The HUD font has no ▲ / ▼: the sign carries it.)
         let c = match shown.change {
             0 => String::new(),
-            n if n > 0 => format!("\u{25b2}{n}"),
-            n => format!("\u{25bc}{}", -n),
+            n if n > 0 => format!("+{n}"),
+            n => format!("\u{2212}{}", -n),
         };
         set(RaceText::Change, &c);
     }
@@ -174,10 +175,10 @@ fn update_block(
         };
         let line = |i: Option<usize>, up: bool| -> String {
             let Some(e) = i.and_then(|i| st.get(i)) else { return String::new() };
-            let arrow = if up { "\u{25b2}" } else { "\u{25bc}" };
+            let label = if up { "AHEAD" } else { "BEHIND" };
             match (e.2, gap(e.0)) {
-                (Some(Finish::Dnf), _) => format!("{arrow} {}  out", name(e.0)),
-                (_, Some(g)) => format!("{arrow} {}  {}{:.1}", name(e.0), if up { "+" } else { "\u{2212}" }, g),
+                (Some(Finish::Dnf), _) => format!("{label}  {}  out", name(e.0)),
+                (_, Some(g)) => format!("{label}  {}  {}{:.1}", name(e.0), if up { "+" } else { "\u{2212}" }, g),
                 _ => String::new(),
             }
         };
@@ -217,7 +218,8 @@ fn update_block(
     }
 }
 
-/// The results card, once the result and the economy's payout lines are in.
+/// The results card (right, under the damage panel: the centre keeps the HUD's FINISH time),
+/// once the result and the economy's payout lines are in.
 #[allow(clippy::too_many_arguments)]
 fn results_card(
     mut commands: Commands,
@@ -253,7 +255,7 @@ fn results_card(
         _ => 0.0,
     };
     commands
-        .spawn((ResultsCard, Name::new("Race results"), DespawnOnExit(AppState::InGame), Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }, Pickable::IGNORE))
+        .spawn((ResultsCard, Name::new("Race results"), DespawnOnExit(AppState::InGame), Node { position_type: PositionType::Absolute, right: px(40), top: px(236), ..default() }, Pickable::IGNORE))
         .with_children(|root| {
             root.spawn((
                 Node { flex_direction: FlexDirection::Column, row_gap: px(4), padding: UiRect::all(px(26)), min_width: px(560), border: UiRect::left(px(4)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
