@@ -1289,7 +1289,7 @@ fn bad_inputs_keep_the_car_finite() {
 /// The scripted drive's hash on every machine. If it changes on purpose (a sim change), bump
 /// `vehicle::REVISION` and update it here. If it differs only on some CPU, the sim has picked
 /// up a platform-dependent call (see the comments at the libm calls in vehicle.rs).
-const SCRIPTED_HASH: u64 = 0x7d39_843b_d34b_fbe6;
+const SCRIPTED_HASH: u64 = 0x55e6_02b7_93c1_5097;
 
 #[test]
 fn scripted_drive_is_bit_identical() {
@@ -1304,26 +1304,26 @@ fn scripted_drive_is_bit_identical() {
 /// before the generator used libm, 10 of 20 differed between them, so boards split by CPU).
 /// A stage that changes on purpose gets a new id (docs/DESIGN.md), so these never change.
 const STAGE_HASHES: [(u32, &str); 20] = [
-    (1, "001a1b22a514b71c"),
-    (2, "d2bfac6f5be597f5"),
-    (3, "41672b7b7187af6e"),
-    (4, "9b5ff09d9e4989f5"),
-    (5, "c0e6b71168935d60"),
-    (6, "44534ab226a64260"),
-    (7, "0186761fc85b74e2"),
-    (8, "09ad4f54901c8705"),
-    (9, "e7b512226608c589"),
-    (10, "8db691b4319b4083"),
-    (11, "d0298edc5bab6551"),
-    (12, "370927fb3e6569f6"),
-    (13, "477bb90b75a3f425"),
-    (14, "d69527f0702b4804"),
-    (15, "ffabc0b81317907f"),
-    (16, "cb51f9cb21237d75"),
-    (17, "8c5a43c7d441977d"),
-    (18, "584349844762de04"),
-    (19, "d3ebc14f33871762"),
-    (20, "0bee70541823745a"),
+    (1, "bf93b5a296b08f8a"),
+    (2, "027b59fdfa5f194f"),
+    (3, "28add4ad69c60021"),
+    (4, "854c0823ad772af4"),
+    (5, "52a7edeed30bd877"),
+    (6, "d88733b6ac14f295"),
+    (7, "65626ebaf80e5e67"),
+    (8, "483ea741cb9165f4"),
+    (9, "2f7111bdb4e48867"),
+    (10, "5344116b8bf79f53"),
+    (11, "81042b2b840e9078"),
+    (12, "f7cb9e4e9b9cf201"),
+    (13, "72dc104008fc890c"),
+    (14, "e9992b5fb52165e2"),
+    (15, "9d5112586d248967"),
+    (16, "0cda48ddfbe7af9d"),
+    (17, "998286ad3b47713e"),
+    (18, "8f66ca6e81ea59d6"),
+    (19, "0b11c1b768cdd60c"),
+    (20, "c589becb13a7d501"),
 ];
 
 #[test]
@@ -1372,26 +1372,26 @@ fn print_obstacle_hashes() {
 /// break ghosts. Placement goes through pcg-core, whose rotations use libm. Regenerate with
 /// `print_obstacle_hashes` only if the dressing changes on purpose.
 const OBSTACLE_HASHES: [(u32, &str, usize); 20] = [
-    (1, "fe92638228ab1dfc", 2629),
-    (2, "6375f3a14fa07b7a", 3135),
-    (3, "1264991fd4ed4b5c", 556),
-    (4, "40c811e0a6409dba", 913),
-    (5, "98d49b417f3014db", 471),
-    (6, "a052073167575bcd", 688),
-    (7, "7d0b91f222f60997", 324),
-    (8, "0571fd74cf33c0be", 284),
-    (9, "93d74343f597a6e8", 2131),
-    (10, "1dcae1ffd193d0a4", 2738),
-    (11, "ce30c20ea84322f4", 4800),
-    (12, "5ed751c77a46ac29", 1578),
-    (13, "7179ac8223373bba", 1239),
-    (14, "2ae0c374720d735a", 860),
-    (15, "626dcd932ac28173", 786),
-    (16, "677544f15acc5e47", 336),
-    (17, "d92c082c885df71a", 285),
-    (18, "885e3af9211b21be", 482),
-    (19, "b9d7240d0a4c2113", 1683),
-    (20, "fa725e63ddcba9c7", 3302),
+    (1, "0eaaae3943497242", 2644),
+    (2, "e5acd3a5baf81537", 3151),
+    (3, "9d9fe3e2448faf60", 556),
+    (4, "9839138f129dec40", 911),
+    (5, "3560c5d217b9cb29", 482),
+    (6, "86f978b3fce63560", 673),
+    (7, "2706f6140a436d91", 320),
+    (8, "03a54225f4f9bab2", 274),
+    (9, "61ade8201eb8aa21", 2127),
+    (10, "9e49c7abad6c34a0", 2712),
+    (11, "bbc60a3e6fe7d54d", 4886),
+    (12, "5601288e7d0d0aa9", 1631),
+    (13, "a504c72f1a690c8d", 1237),
+    (14, "527eae37c50d0883", 857),
+    (15, "107648e0b0265f40", 880),
+    (16, "44a9d7704c59557e", 339),
+    (17, "fcbeaeb024dbef36", 278),
+    (18, "404d8102e6d54692", 484),
+    (19, "a5941684e703a3e0", 1698),
+    (20, "4986cb3f344b703d", 3306),
 ];
 
 #[test]
@@ -1428,26 +1428,26 @@ fn print_prop_hashes() {
 /// their ids decide what a run knocks down, so ghosts depend on them). Regenerate with
 /// `print_prop_hashes` only if the props change on purpose.
 const PROP_HASHES: [(u32, &str, usize); 20] = [
-    (1, "9d7a9c809adb743a", 507),
-    (2, "ae0d05995f73afc7", 640),
-    (3, "ad11ae692282a072", 519),
-    (4, "d4053f0796a0e2b7", 659),
-    (5, "80ffc1375e9fef74", 766),
-    (6, "8366b06094d11abd", 1098),
-    (7, "e5cac8016eef3af0", 899),
-    (8, "b4c7ea33cd1b0101", 647),
-    (9, "4aa7167db0a2bf3c", 358),
-    (10, "4df9997db2e62d2c", 504),
-    (11, "48af7989100ebc1f", 920),
-    (12, "283a6b8d59d30647", 404),
-    (13, "30feb0e498f668d1", 872),
-    (14, "cc43df233458aabf", 605),
-    (15, "d4ec625c39a3532c", 1285),
-    (16, "ddbee53f8d1da2f4", 729),
-    (17, "41da48ab2354d4ee", 735),
-    (18, "391019b0a00a651b", 1010),
-    (19, "ff4e3163d1d08dfe", 316),
-    (20, "02c31bfcf4899da7", 599),
+    (1, "36823cabe476b049", 513),
+    (2, "0a943d7a8d8e6b37", 633),
+    (3, "049ef7218ffee1fb", 515),
+    (4, "5e679023458dbce1", 662),
+    (5, "4e3693f6bcccd22e", 771),
+    (6, "f456ed3a5763cd2d", 1097),
+    (7, "dff689be6760c96b", 932),
+    (8, "e1d47b8cca3e02f4", 646),
+    (9, "e3ca692c5d408df0", 360),
+    (10, "e4e94e58bfc3e30b", 505),
+    (11, "cffbfc6d504a57d8", 918),
+    (12, "65072dba51a89697", 405),
+    (13, "b8fa97c611af753b", 876),
+    (14, "671950e19c13052d", 605),
+    (15, "3b88911f91b547d5", 1316),
+    (16, "fa4432ecee96d725", 722),
+    (17, "6622f09f0309ca04", 741),
+    (18, "853639c408cc7d29", 1012),
+    (19, "873cbf23108cbb4c", 309),
+    (20, "591d4f9764e5fe48", 598),
 ];
 
 #[test]
@@ -1457,4 +1457,167 @@ fn props_the_same_everywhere() {
         let want = PROP_HASHES.iter().find(|o| o.0 == def.id).map(|o| (o.1, o.2));
         assert_eq!(Some((format!("{h:016x}").as_str(), n)), want, "stage {} {}: the props generated differently", def.id, def.name);
     }
+}
+
+/// Diagnostic: throttle only, no steering, from each stage's start line. Prints where the car
+/// leaves the road and every damaging hit.
+#[test]
+#[ignore]
+fn throttle_off_the_line() {
+    let only: Option<u32> = std::env::var("STAGE").ok().and_then(|s| s.parse().ok());
+    for def in stage::stages() {
+        if only.is_some_and(|o| o != def.id) {
+            continue;
+        }
+        let w = world::generate(&def);
+        let road = &w.road;
+        let spec = Spec::default();
+        let (p, h) = road.start();
+        let mut car = Car::new(p + Vec3::Y * 0.9, h);
+        for _ in 0..60 {
+            step(&mut car, &spec, Input { handbrake: true, ..Input::default() }, &w, DT);
+        }
+        let curv: Vec<String> = (0..8).map(|k| format!("{:.3}", road.curv[road.station(k as f32 * 10.0)])).collect();
+        let mut off_at = None;
+        let mut t = 0.0;
+        let mut lines = Vec::new();
+        while t < 8.0 {
+            let before = car.damage;
+            step(&mut car, &spec, Input { throttle: 1.0, ..Input::default() }, &w, DT);
+            t += DT;
+            let rp = road.nearest(Vec2::new(car.pos.x, car.pos.z), 40.0);
+            if off_at.is_none() && rp.is_none_or(|r| r.lateral.abs() > road.half_width(&r)) {
+                off_at = Some((t, rp.map_or(0.0, |r| r.s), car.speed() * 3.6));
+            }
+            if car.damage.hits > before.hits {
+                let d = car.damage;
+                lines.push(format!(
+                    "    t {:.2} {:.0} km/h sev {:.2}: eng {:.2}→{:.2} steer {:.2}→{:.2} susp {:.2}→{:.2}",
+                    t, car.speed() * 3.6, d.last, before.engine, d.engine, before.steering, d.steering, before.suspension, d.suspension
+                ));
+            }
+        }
+        println!("stage {:2} curv/10m [{}] off {:?} dmg {:.2} wrecked {}", def.id, curv.join(" "), off_at, car.damage.worst(), car.damage.wrecked());
+        for l in lines.iter().take(12) {
+            println!("{l}");
+        }
+    }
+}
+
+/// Prints launch numbers per surface (for docs/HANDLING.md).
+#[test]
+#[ignore]
+fn launch_table() {
+    for surf in [Surface::Tarmac, Surface::Gravel, Surface::Snow] {
+        let (rpm, t50, t100, shifts, top) = launch_test(surf);
+        println!("{surf:?}: rpm@0.5s {rpm:.0}  0-50 {t50:.2} s  0-100 {t100:.2} s  shifts {shifts}  top {top:.0} km/h");
+    }
+}
+
+/// A flat road for x < 4, then a side slope (`grade`, rise per metre; − = falling away)
+/// covered in rough ground; a lip of `lip` m at the edge.
+struct Verge {
+    grade: f32,
+    lip: f32,
+}
+
+impl Ground for Verge {
+    fn height(&self, x: f32, _: f32) -> f32 {
+        if x > 4.0 { self.lip + (x - 4.0) * self.grade } else { 0.0 }
+    }
+    fn normal(&self, x: f32, _: f32) -> Vec3 {
+        if x > 4.0 { Vec3::new(-self.grade, 1.0, 0.0).normalize() } else { Vec3::Y }
+    }
+    fn surface(&self, x: f32, _: f32) -> Surface {
+        if x > 4.0 { Surface::Rough } else { Surface::Gravel }
+    }
+    fn obstacles(&self, _: Vec2, _: f32, out: &mut Vec<Obstacle>) {
+        out.clear();
+    }
+}
+
+/// Leaving the road: at `kmh`, `angle`° off the road's line (0 = straight along, 90 =
+/// sideways), sliding with `beta`° of slip, onto `g`. Returns the lowest `up.y` in 4 s
+/// (< 0 = on its roof or side past 90°).
+fn leave_road(g: &impl Ground, kmh: f32, angle: f32, beta: f32) -> f32 {
+    let spec = Spec::default();
+    let (a, b) = (angle.to_radians(), beta.to_radians());
+    // Heading h faces (sin h, cos h): travel along the road (+Z) turned `angle` towards +X.
+    let mut car = Car::new(Vec3::new(0.0, 0.9, 0.0), a - b);
+    for _ in 0..60 {
+        step(&mut car, &spec, Input { handbrake: true, ..Input::default() }, g, DT);
+    }
+    let dir = Vec3::new(libm::sinf(a), 0.0, libm::cosf(a));
+    car.vel = dir * kmh / 3.6;
+    for w in &mut car.wheels {
+        w.spin = kmh / 3.6 * libm::cosf(b) / spec.wheel_radius;
+    }
+    let mut min_up = 1.0f32;
+    for _ in 0..(60 * 4) {
+        step(&mut car, &spec, Input { brake: 0.3, ..Input::default() }, g, DT);
+        min_up = min_up.min(car.up().y);
+    }
+    min_up
+}
+
+/// Diagnostic: where leaving the road rolls the car.
+#[test]
+#[ignore]
+fn roll_report() {
+    for (name, g) in [
+        ("flat rough", Verge { grade: 0.0, lip: 0.0 }),
+        ("ditch -0.35", Verge { grade: -0.35, lip: 0.0 }),
+        ("ditch -0.6", Verge { grade: -0.6, lip: 0.0 }),
+        ("bank +0.35", Verge { grade: 0.35, lip: 0.0 }),
+        ("bank +0.6", Verge { grade: 0.6, lip: 0.0 }),
+        ("lip 0.15", Verge { grade: 0.0, lip: 0.15 }),
+    ] {
+        for (angle, beta) in [(10.0, 0.0), (20.0, 0.0), (20.0, 30.0), (90.0, 90.0)] {
+            let row: Vec<String> = [50.0, 70.0, 90.0, 110.0, 130.0].iter().map(|&v| format!("{:5.2}", leave_road(&g, v, angle, beta))).collect();
+            println!("{name:12} angle {angle:3.0} β {beta:3.0}: 50..130 km/h min up {}", row.join(" "));
+        }
+    }
+}
+
+/// Flat rough ground with one trunk at (x, 0).
+struct TrunkAt(f32);
+
+impl Ground for TrunkAt {
+    fn height(&self, _: f32, _: f32) -> f32 {
+        0.0
+    }
+    fn normal(&self, _: f32, _: f32) -> Vec3 {
+        Vec3::Y
+    }
+    fn surface(&self, _: f32, _: f32) -> Surface {
+        Surface::Rough
+    }
+    fn obstacles(&self, _: Vec2, _: f32, out: &mut Vec<Obstacle>) {
+        out.clear();
+        out.push(Obstacle { pos: Vec2::new(self.0, 0.0), radius: 0.35, top: 10.0, give: Give::Solid });
+    }
+}
+
+/// Diagnostic: sliding sideways (and at 45°) into a trunk.
+#[test]
+#[ignore]
+fn trunk_roll_report() {
+    for (angle, beta) in [(90.0, 90.0), (90.0, 45.0), (60.0, 60.0)] {
+        let row: Vec<String> = [40.0, 60.0, 80.0, 100.0, 120.0].iter().map(|&v| format!("{:5.2}", leave_road(&TrunkAt(12.0), v, angle, beta))).collect();
+        println!("trunk angle {angle:3.0} β {beta:3.0}: 40-120 km/h min up {}", row.join(" "));
+    }
+}
+
+#[test]
+fn sliding_sideways_into_a_trunk_spins_it_without_rolling() {
+    // Side-on (and 45° nose-in) into a trunk: the car stops and spins; it may bend, but up to
+    // 100 km/h it stays on its wheels. (Pushed at the body box's middle it rolled from 60.)
+    for (angle, beta) in [(90.0, 90.0), (90.0, 45.0)] {
+        for kmh in [60.0, 80.0, 100.0] {
+            let up = leave_road(&TrunkAt(12.0), kmh, angle, beta);
+            assert!(up > 0.5, "{kmh} km/h, {beta}° into a trunk tipped to up.y {up:.2}");
+        }
+    }
+    // Still rolls: sideways off the road down a steep (31°) bank.
+    assert!(leave_road(&Verge { grade: -0.6, lip: 0.0 }, 70.0, 90.0, 90.0) < 0.0);
 }

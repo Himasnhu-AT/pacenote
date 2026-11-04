@@ -43,6 +43,9 @@ pub struct StageRun {
     pub retired: bool,
     /// The car is out of action: wrecked (waiting for a recover) or the driver is dead.
     pub down: Option<Down>,
+    /// The crash in progress: (`Damage::total` before its first hit, seconds since its last
+    /// hit). Hits less than [`CRASH_GAP`] apart are one crash (a trunk, then the bank).
+    pub crash: Option<(f32, f32)>,
 }
 
 /// The driver's camera, cycled with the camera action: cockpit → bonnet → chase. The choice is
@@ -180,7 +183,7 @@ fn simulate(
         if let Some(mut l) = last {
             l.0 = input;
         }
-        let before = c.car.damage.worst();
+        let (before, hits) = (c.car.damage.total(), c.car.damage.hits);
         vehicle::step(&mut c.car, &spec.0, input, &*stage, dt);
         log.get_or_insert_with(CarLog::open).write(&c.car, input, actions.value("steer"), &stage);
         if run.countdown > 0.0 {
@@ -190,12 +193,19 @@ fn simulate(
         if run.finished.is_some() || run.retired {
             continue;
         }
-        // Damage (Simulation only): a single crash that takes half the car or more kills the
-        // driver (respawn at home, or the event restarts); a broken part stops the car until the
-        // player recovers it (back on the road where it is, repaired).
+        // Damage (Simulation only): a single crash that takes half the car or more (the mean
+        // of engine, steering and suspension) kills the driver (respawn at home, or the event
+        // restarts); a broken part stops the car until the player recovers it (back on the road
+        // where it is, repaired).
+        run.crash = match run.crash {
+            _ if c.car.damage.hits > hits => Some((run.crash.map_or(before, |(b, _)| b), 0.0)),
+            Some((b, t)) if t + dt < CRASH_GAP => Some((b, t + dt)),
+            _ => None,
+        };
         if spec.0.damage == DamageMode::Simulation && run.down.is_none() {
-            if c.car.damage.worst() - before >= DEATH_HIT {
-                info!("dead: one crash took {:.0} % ({:?})", (c.car.damage.worst() - before) * 100.0, c.car.damage);
+            let crash = run.crash.map_or(0.0, |(b, _)| c.car.damage.total() - b);
+            if crash >= DEATH_HIT {
+                info!("dead: one crash took {:.0} % of the car ({:?})", crash * 100.0, c.car.damage);
                 run.down = Some(Down::Dead(DEAD_SECS));
             } else if c.car.damage.wrecked() {
                 info!("not drivable at {:.0} m ({:?})", run.progress, c.car.damage);
@@ -362,8 +372,11 @@ pub enum Down {
     Dead(f32),
 }
 
-/// Damage from one crash (worst part, 0..1) that kills the driver.
-pub const DEATH_HIT: f32 = 0.5;
+/// Damage from one crash ([`vehicle::Damage::total`], 0..1) that kills the driver: about a
+/// 125 km/h head-on into a trunk, ~110 km/h on a front corner. An 80 km/h tree costs ~0.2.
+pub const DEATH_HIT: f32 = 0.6;
+/// Hits closer together than this (s) are one crash.
+pub const CRASH_GAP: f32 = 0.5;
 /// How long "You're dead" shows before the respawn.
 pub const DEAD_SECS: f32 = 2.5;
 
@@ -463,51 +476,85 @@ fn draw_car(fixed: Res<Time<Fixed>>, mut bodies: Query<(&DrivenCar, &mut Transfo
     tf.rotation = c.prev.1.slerp(c.car.rot, a);
 }
 
+/// The drawn car and its sim state, for the cameras.
+type CarPose = (&'static Transform, Option<&'static DrivenCar>);
+
+#[allow(clippy::too_many_arguments)]
 fn follow_camera(
     time: Res<Time>,
     view: Res<CameraView>,
     spec: Res<CarSpec>,
-    cars: Query<(&Transform, Option<&DrivenCar>), (With<CarBody>, Without<MainCamera>)>,
-    mut cams: Query<&mut Transform, With<MainCamera>>,
+    stage: Res<StageWorld>,
+    cars: Query<CarPose, (With<CarBody>, Without<MainCamera>)>,
+    mut cams: Query<(&mut Transform, Option<&mut Projection>), With<MainCamera>>,
     access: Option<Res<engine::actions::Accessibility>>,
+    core: Option<Res<engine::settings::CoreSettings>>,
+    traffic: Option<Res<crate::open::traffic::TrafficSolids>>,
     mut smooth: Local<Option<(Vec3, Vec3)>>,
     mut head: Local<Option<Quat>>,
+    mut cam_fx: Local<CamFx>,
 ) {
     // Settings > Driving > Camera shake (0..1; Reduce motion = 0): how much of the body's
-    // pitch and roll reaches the cockpit and bonnet views.
+    // pitch and roll reaches the cockpit and bonnet views, and how much the speed widens the
+    // view and the road buzzes through the seat.
     let shake = access.as_deref().map_or(1.0, |a| if a.reduce_motion { 0.0 } else { a.camera_shake.clamp(0.0, 1.0) });
-    let (Ok((car, driven)), Ok(mut cam)) = (cars.single(), cams.single_mut()) else { return };
+    let (Ok((car, driven)), Ok((mut cam, proj))) = (cars.single(), cams.single_mut()) else { return };
+    let dt = time.delta_secs();
     let fwd = car.rotation * Vec3::NEG_Z;
     let flat = Vec3::new(fwd.x, 0.0, fwd.z).normalize_or(Vec3::NEG_Z);
+    let speed = driven.map_or(0.0, |d| d.car.vel.length());
+    // Speed widens the view a little (up to +7° by 180 km/h), eased so a hit doesn't snap it.
+    let kick = speed_fov(speed) * shake;
+    cam_fx.fov += (kick - cam_fx.fov) * (1.0 - (-dt * 2.0).exp());
+    if let (Some(mut proj), Some(core)) = (proj, core.as_deref())
+        && let Projection::Perspective(pp) = proj.as_mut()
+    {
+        let fov = (core.fov_deg.clamp(30.0, 150.0) + cam_fx.fov).to_radians();
+        if (pp.fov - fov).abs() > 1e-4 {
+            pp.fov = fov;
+        }
+    }
+    // Road buzz in the cockpit and bonnet views: a few millimetres on gravel at speed, more on
+    // rough ground, next to nothing on tarmac (camera only: the sim doesn't see it).
+    let buzz = {
+        use vehicle::Ground;
+        let rough = surface_buzz(stage.surface(car.translation.x, car.translation.z));
+        let on_ground = driven.is_none_or(|d| d.car.wheels.iter().any(|w| w.contact));
+        let amp = if on_ground { 0.004 * rough * (speed / 25.0).min(1.5) * shake } else { 0.0 };
+        let t = time.elapsed_secs();
+        let n = |a: f32, b: f32, c: f32| (t * a).sin() * 0.5 + (t * b + 1.3).sin() * 0.3 + (t * c + 2.1).sin() * 0.2;
+        (Vec3::new(n(17.0, 29.3, 41.1) * 0.4, n(13.1, 23.7, 37.9), 0.0) * amp, n(11.3, 19.1, 33.7) * amp * 0.35)
+    };
     match *view {
         CameraView::Cockpit => {
             // Fixed to the seat; the view direction follows the body through a short lag so
             // the suspension's high-frequency shake doesn't reach the eye. Pitched a little
             // down, the way a driver looks at the road.
-            let k = 1.0 - (-time.delta_secs() * (3.0 + 15.0 * shake)).exp();
+            let k = 1.0 - (-dt * (3.0 + 15.0 * shake)).exp();
             let look = match *head {
                 Some(q) if q.dot(car.rotation).abs() > 0.97 => q.slerp(car.rotation, k),
                 _ => car.rotation,
             };
             *head = Some(look);
-            cam.translation = car.translation + car.rotation * crate::art::car::cockpit_eye(&spec.0);
-            cam.rotation = look * Quat::from_rotation_x(-0.05);
+            cam.translation = car.translation + car.rotation * (crate::art::car::cockpit_eye(&spec.0) + buzz.0);
+            cam.rotation = look * Quat::from_rotation_x(-0.05 + buzz.1);
             *smooth = None;
             return;
         }
         CameraView::Bonnet => {
-            cam.translation = car.translation + car.rotation * crate::art::car::bonnet_cam(&spec.0);
+            cam.translation = car.translation + car.rotation * (crate::art::car::bonnet_cam(&spec.0) + buzz.0 * 0.7);
             // Fixed to the bonnet at full shake; smoothed towards the body below that.
-            cam.rotation = if shake >= 0.99 {
+            let body = if shake >= 0.99 {
                 car.rotation
             } else {
-                let k = 1.0 - (-time.delta_secs() * (3.0 + 27.0 * shake)).exp();
+                let k = 1.0 - (-dt * (3.0 + 27.0 * shake)).exp();
                 match *head {
                     Some(q) if q.dot(car.rotation).abs() > 0.97 => q.slerp(car.rotation, k),
                     _ => car.rotation,
                 }
             };
-            *head = Some(cam.rotation);
+            *head = Some(body);
+            cam.rotation = body * Quat::from_rotation_x(buzz.1 * 0.7);
             *smooth = None;
             return;
         }
@@ -515,15 +562,101 @@ fn follow_camera(
     }
     // Partly along the direction of travel, so a slide shows as the car at an angle.
     let dir = chase_dir(flat, driven.map_or(Vec3::ZERO, |d| d.car.vel));
-    let want_eye = car.translation - dir * 6.8 + Vec3::Y * 2.3;
+    let mut want_eye = car.translation - dir * 6.8 + Vec3::Y * 2.3;
     let want_at = car.translation + dir * 4.0 + Vec3::Y * 0.9;
-    let k = 1.0 - (-time.delta_secs() * 6.0).exp();
+    // Never under the ground behind the car (a crest, a bank).
+    {
+        use vehicle::Ground;
+        want_eye.y = want_eye.y.max(stage.height(want_eye.x, want_eye.z) + 0.8);
+    }
+    let k = 1.0 - (-dt * 6.0).exp();
     let (eye, at) = match *smooth {
         Some((e, a)) => (e.lerp(want_eye, k), a.lerp(want_at, (k * 1.6).min(1.0))),
         None => (want_eye, want_at),
     };
     *smooth = Some((eye, at));
+    // Clear of whatever is between the car and the camera (a car behind, a building, a bank,
+    // a big rock; a thin trunk only when the eye would be inside it): in at once, back out
+    // slowly.
+    let pivot = car.translation + Vec3::Y * 1.1;
+    let mut solids = Vec::new();
+    if let Some(t) = traffic.as_deref() {
+        let m = (pivot + eye) * 0.5;
+        t.obstacles(Vec2::new(m.x, m.z), 8.0, &mut solids);
+    }
+    // First up over it (a car close behind, a low wall), then in if that isn't enough.
+    let lift = [0.0, 1.2, 2.4].into_iter().find(|&y| chase_clearance(pivot, eye + Vec3::Y * y, &*stage, &solids) >= 1.0).unwrap_or(2.4);
+    let rate = if lift > cam_fx.lift { 8.0 } else { 2.0 };
+    cam_fx.lift += (lift - cam_fx.lift) * (1.0 - (-dt * rate).exp());
+    let eye = eye + Vec3::Y * cam_fx.lift;
+    let clear = chase_clearance(pivot, eye, &*stage, &solids);
+    cam_fx.pull = if clear < cam_fx.pull || cam_fx.pull <= 0.0 { clear } else { cam_fx.pull + (clear - cam_fx.pull) * (1.0 - (-dt * 2.5).exp()) };
+    let eye = pivot + (eye - pivot) * cam_fx.pull;
     *cam = Transform::from_translation(eye).looking_at(at, Vec3::Y);
+}
+
+/// Camera effects state: the speed FOV kick (degrees, eased) and the chase camera's lift
+/// (m) and pull-in (share of the boom out), each eased back out.
+#[derive(Default)]
+struct CamFx {
+    fov: f32,
+    lift: f32,
+    pull: f32,
+}
+
+/// Extra vertical field of view (degrees) at `speed` m/s: none to 40 km/h, +7 by 180 km/h.
+pub fn speed_fov(speed: f32) -> f32 {
+    let x = ((speed * 3.6 - 40.0) / 140.0).clamp(0.0, 1.0);
+    7.0 * x * x * (3.0 - 2.0 * x)
+}
+
+/// How much road buzz a surface sends through the seat (gravel = 1).
+fn surface_buzz(s: crate::stage::Surface) -> f32 {
+    use crate::stage::Surface::*;
+    match s {
+        Tarmac => 0.15,
+        Dusty => 0.3,
+        Snow => 0.6,
+        Gravel | Mud => 1.0,
+        Loose => 1.2,
+        Verge => 1.6,
+        Rough | Ditch => 2.0,
+    }
+}
+
+/// Radius (m) the chase camera keeps from solids and the ground.
+const CAM_RADIUS: f32 = 0.3;
+/// The chase camera never pulls in closer than this share of the boom (it sits over the roof).
+const CAM_MIN_PULL: f32 = 0.22;
+
+/// How far from `pivot` towards `eye` (share, [`CAM_MIN_PULL`]..1) the chase camera can sit
+/// before something solid is in the way: the ground, walls, big obstacles (radius ≥ 0.6 m:
+/// boulders, traffic, `extra`) along the whole line; a thin trunk only near the eye (one
+/// passing between the camera and the car isn't worth a jump).
+pub fn chase_clearance(pivot: Vec3, eye: Vec3, ground: &impl vehicle::Ground, extra: &[vehicle::Obstacle]) -> f32 {
+    use vehicle::Give;
+    let (a, b) = (Vec2::new(pivot.x, pivot.z), Vec2::new(eye.x, eye.z));
+    let mid = (a + b) * 0.5;
+    let r = a.distance(b) * 0.5 + 2.0;
+    let mut obs = Vec::new();
+    ground.obstacles(mid, r, &mut obs);
+    obs.extend_from_slice(extra);
+    obs.retain(|o| matches!(o.give, Give::Solid));
+    let mut walls = Vec::new();
+    ground.walls(mid, r, &mut walls);
+    const N: usize = 32;
+    for i in 1..=N {
+        let t = i as f32 / N as f32;
+        let p = pivot.lerp(eye, t);
+        let q = Vec2::new(p.x, p.z);
+        let blocked = p.y < ground.height(p.x, p.z) + CAM_RADIUS
+            || walls.iter().any(|w| p.y < w.top + CAM_RADIUS && w.distance(q) < CAM_RADIUS)
+            || obs.iter().any(|o| (o.radius >= 0.6 || t > 0.8) && p.y < o.top + CAM_RADIUS && q.distance(o.pos) < o.radius + CAM_RADIUS);
+        if blocked {
+            return ((i - 1) as f32 / N as f32).max(CAM_MIN_PULL);
+        }
+    }
+    1.0
 }
 
 /// The chase camera's heading: the car's nose (`flat`), turned up to 60 % towards the direction
@@ -547,6 +680,52 @@ pub fn chase_dir(flat: Vec3, vel: Vec3) -> Vec3 {
 mod tests {
     use super::{chase_dir, keyboard_steer};
     use bevy::math::{Quat, Vec3};
+
+    #[test]
+    fn chase_camera_pulls_in_front_of_a_car_behind() {
+        use crate::stage::Surface;
+        use crate::vehicle::{Flat, Ground, Obstacle, Wall};
+        use bevy::math::Vec2;
+        let pivot = Vec3::new(0.0, 1.1, 0.0);
+        let eye = Vec3::new(0.0, 2.3, 6.8);
+        let g = Flat(0.0, Surface::Gravel);
+        assert_eq!(super::chase_clearance(pivot, eye, &g, &[]), 1.0, "nothing in the way");
+        // A traffic car 4 m behind (its cylinders, 1.4 m tall): the camera stops short of it.
+        let car = [Obstacle::solid(Vec2::new(0.0, 4.0), 0.95, 1.4), Obstacle::solid(Vec2::new(0.0, 5.3), 0.95, 1.4)];
+        let c = super::chase_clearance(pivot, eye, &g, &car);
+        let at = pivot.lerp(eye, c);
+        assert!(c < 1.0 && at.z < 4.0 - 0.95, "{c} {at}");
+        // A thin trunk between the car and the camera: no jump; one at the eye: in front of it.
+        let mid = [Obstacle::solid(Vec2::new(0.0, 3.0), 0.25, 9.0)];
+        assert_eq!(super::chase_clearance(pivot, eye, &g, &mid), 1.0);
+        let at_eye = [Obstacle::solid(Vec2::new(0.0, 6.7), 0.3, 9.0)];
+        assert!(super::chase_clearance(pivot, eye, &g, &at_eye) < 0.9);
+        // A building wall behind.
+        struct Walled;
+        impl Ground for Walled {
+            fn height(&self, _: f32, _: f32) -> f32 {
+                0.0
+            }
+            fn normal(&self, _: f32, _: f32) -> Vec3 {
+                Vec3::Y
+            }
+            fn surface(&self, _: f32, _: f32) -> Surface {
+                Surface::Tarmac
+            }
+            fn obstacles(&self, _: Vec2, _: f32, out: &mut Vec<Obstacle>) {
+                out.clear();
+            }
+            fn walls(&self, _: Vec2, _: f32, out: &mut Vec<Wall>) {
+                out.clear();
+                out.push(Wall::new(Vec2::new(-10.0, 3.5), Vec2::new(10.0, 3.5), 0.2, 6.0));
+            }
+        }
+        let c = super::chase_clearance(pivot, eye, &Walled, &[]);
+        assert!(pivot.lerp(eye, c).z < 3.5 - 0.2, "{c}");
+        // The speed kick: none at hairpin speed, a few degrees flat out.
+        assert_eq!(super::speed_fov(30.0 / 3.6), 0.0);
+        assert!((5.0..=7.0).contains(&super::speed_fov(160.0 / 3.6)));
+    }
 
     #[test]
     fn chase_camera_shows_the_slide() {

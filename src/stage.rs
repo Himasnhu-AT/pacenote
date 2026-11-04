@@ -28,6 +28,8 @@ pub const STEP: f32 = 2.0;
 pub const SPACING: f32 = 2.0;
 /// Keep the road this far inside the map edge.
 const MARGIN: f32 = 260.0;
+/// Straight road before the first feature (metres): the start line's run-up.
+pub const LEAD_IN: f32 = 60.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Biome {
@@ -449,12 +451,20 @@ fn grow_road(def: &StageDef, seed: u64) -> Road {
     let half = half_size(def);
     let start = Vec2::new(libm::cosf(a), libm::sinf(a)) * (half - MARGIN - 80.0);
     let mut heading = angle_of(-start) + rng.range(-0.5, 0.5);
+    // The start line sits on a straight run-up of `LEAD_IN` m: holding the throttle off the
+    // line with the wheels straight keeps the car on the road until the first corner. (It
+    // reaches back towards the map edge, inside the 80 m left above.)
+    let fwd = Vec2::new(libm::cosf(heading), libm::sinf(heading));
+    let lead = (LEAD_IN / STEP) as usize;
+    let mut pts2: Vec<Vec2> = (0..=lead).map(|i| start - fwd * (LEAD_IN - i as f32 * STEP)).collect();
+    let mut curv = vec![0.0f32; pts2.len()];
+    let mut heads = vec![heading; pts2.len()];
     let mut pos = start;
-    let mut pts2 = vec![pos];
-    let mut curv = vec![0.0f32];
-    let mut heads = vec![heading];
     let mut backtracks = 0;
     let mut occupied = SegGrid { cell: 40.0, cells: Default::default() };
+    for (i, p) in pts2.iter().enumerate() {
+        occupied.cells.entry(((p.x / 40.0).floor() as i32, (p.y / 40.0).floor() as i32)).or_default().push(i);
+    }
     let mut k = 0.0f32;
     // A loose route: waypoints the road wanders towards (it would box itself in otherwise).
     let mut waypoints = Vec::new();
@@ -952,6 +962,21 @@ pub fn crests(road: &Road) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_start_line_is_on_a_straight() {
+        // Throttle off the line with the wheels straight stays on the road for the run-up:
+        // the start heading is the road's, and it doesn't bend for `LEAD_IN` m.
+        for def in stages() {
+            let r = generate_road(&def);
+            let (_, h) = r.start();
+            for i in 0..((LEAD_IN - 6.0) / STEP) as usize {
+                let d = r.dir[i];
+                let off = angle_diff(libm::atan2f(d.x, d.y), h).abs();
+                assert!(r.curv[i] == 0.0 && off < 1e-3, "stage {}: bends {:.3} rad at {} m", def.id, off, i as f32 * STEP);
+            }
+        }
+    }
 
     #[test]
     fn twenty_stages_unique_seeds() {

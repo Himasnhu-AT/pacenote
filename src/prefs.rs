@@ -201,7 +201,7 @@ fn register(app: &mut App) {
             key: "damage",
             tab: "Driving",
             label: "Damage",
-            hint: "None: nothing breaks. Cosmetic: parts come off but the car drives as new. Simulation: hits hurt the engine, steering and suspension; a broken car waits for a recover (repaired where it is), and one crash that takes half the car or more is fatal (back home, or the event restarts). In an event, from the next run.",
+            hint: "None: nothing breaks. Cosmetic: parts come off but the car drives as new. Simulation: hits hurt the engine, steering and suspension; a broken car waits for a recover (repaired where it is), and one crash that wrecks most of the car (60 %) is fatal (back home, or the event restarts). In an event, from the next run.",
             kind: FieldKind::Choice { options: crate::vehicle::DamageMode::ALL.iter().map(|m| m.label()).collect() },
             get: |w| p(w).damage.min(2) as f32,
             set: |w, v| pm(w).damage = idx(v, 3),

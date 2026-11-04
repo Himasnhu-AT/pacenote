@@ -55,7 +55,7 @@ fn setup(mut commands: Commands, meshes: Option<ResMut<Assets<Mesh>>>, mats: Opt
     };
     let mut traffic = Traffic::new(&net, TrafficConfig { cars: 90, radius: 280.0, despawn: 400.0, spawn_min: 150.0, ..default() });
     // Half a minute of driving first, so cars are spread over the lanes and in the junctions.
-    let p = Player { pos: Vec3::new(focus.x, focus.y, focus.z) + Vec3::new(0.0, 0.0, 60.0), vel: Vec3::ZERO };
+    let p = Player { pos: Vec3::new(focus.x, focus.y, focus.z) + Vec3::new(0.0, 0.0, 60.0), vel: Vec3::ZERO, fwd: Vec3::ZERO };
     for _ in 0..60 * 30 {
         traffic.step(1.0 / 60.0, Some(p));
     }

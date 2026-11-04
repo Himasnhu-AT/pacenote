@@ -115,13 +115,20 @@ Loading / damage / co-driver (added 30 Oct):
   worktrees on the shared target dir overwrite each other's binary. Give a second worktree its
   own `CARGO_TARGET_DIR`.
 
-Driving:
-- Accel is now 0–100 km/h in ~8 s on gravel (after the LSD + hill-hold fix, `bdb30ba`). The
-  feel still needs tuning on gravel and snow.
-- A car that leaves the road at speed rolls easily. Recover is `R` (+5 s in an event). The HUD says
-  "Car on its roof · R Recover" after 1 s upside down and still (`meta/coach.rs`).
-- At some starts the road curves right away, so throttle with no steering runs off the road.
-  The start heading may want aligning with the first few metres.
+Driving (revision 10, `docs/HANDLING.md` "Crashes, rolls and starts"):
+- 0–100 km/h: 4.1 s on tarmac, 4.6 s on gravel, 7.5 s on snow. That matches an R5.
+- Damage: an 80 km/h tree costs ~0.4 of the engine and the car drives on. A part breaks at
+  ~120 km/h head-on. Death takes 0.6 of the whole car in one crash (~125 km/h nose-on).
+- Every stage starts on a 60 m straight.
+- Side hits on trunks spin the car instead of rolling it. It still rolls sliding sideways off
+  the road down a steep bank. The HUD says "Car on its roof · R Recover" after 1 s upside
+  down and still (`meta/coach.rs`).
+- Recover is `R` (+5 s in an event).
+- Gravel at 100 km/h with a held key overshoots the yaw (~170 %) and swings once; it needs a
+  tyre-lag or yaw-damping pass.
+- Chase camera: it keeps out of traffic, walls and banks. FOV widens with speed, and the
+  cockpit and bonnet views get road buzz.
+- Traffic stops for the player's whole footprint along its own path.
 
 Art (`docs/ART.md`):
 - Trees are flat cards: the planes show up close, and there's no wind. Around 100–150 m a tree

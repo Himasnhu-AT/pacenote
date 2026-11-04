@@ -155,7 +155,7 @@ fn guide_receives_stage_car_and_run_and_never_simulates() {
         let w = p.driver.world_mut();
         let mut q = w.query::<&mut DrivenCar>();
         for mut c in q.iter_mut(w) {
-            c.car.damage.hit(0.3, Vec3::new(-0.6, 0.0, -2.0), pacenote::vehicle::HitZone::Front);
+            c.car.damage.hit(0.3, Vec3::new(-0.2, 0.0, -2.0), pacenote::vehicle::HitZone::Front);
         }
     }
     let want = p.driver.world_mut().query::<&DrivenCar>().iter(p.driver.world()).next().unwrap().car.damage;
