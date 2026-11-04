@@ -836,7 +836,7 @@ pub fn glyph_dist(g: Glyph, p: Vec2) -> f32 {
         Glyph::Check => lines_dist(p, &[(v(0.16, 0.52), v(0.40, 0.76)), (v(0.40, 0.76), v(0.86, 0.24))], 0.075),
         Glyph::Cross => lines_dist(p, &[(v(0.22, 0.22), v(0.78, 0.78)), (v(0.78, 0.22), v(0.22, 0.78))], 0.075),
         Glyph::StarFull => poly_dist(p, &star_points()),
-        Glyph::StarHollow => poly_dist(p, &star_points()).abs() - 0.045,
+        Glyph::StarHollow => (poly_dist(p, &star_points()) + 0.04).abs() - 0.04,
         Glyph::Diamond => (p.x - 0.5).abs() + (p.y - 0.5).abs() - 0.42,
         Glyph::Play => poly_dist(p, &[v(0.22, 0.12), v(0.88, 0.5), v(0.22, 0.88)]),
         Glyph::Ring => (p.distance(v(0.5, 0.5)) - 0.33).abs() - 0.075,
@@ -894,10 +894,10 @@ mod tests {
             // A clear border: the corners are empty.
             assert_eq!(px[3], 0, "{g:?} top-left corner");
         }
-        // Filled vs hollow star: shape carries the meaning.
-        let full = glyph_pixels(Glyph::StarFull, 32).chunks(4).filter(|c| c[3] > 128).count();
-        let hollow = glyph_pixels(Glyph::StarHollow, 32).chunks(4).filter(|c| c[3] > 128).count();
-        assert!(full > hollow + 40, "{full} vs {hollow}");
+        // Filled vs hollow star: shape carries the meaning (the hollow one's middle is empty).
+        let centre = |g: Glyph| glyph_pixels(g, 32)[((17 * 32 + 16) * 4 + 3) as usize];
+        assert_eq!(centre(Glyph::StarFull), 255);
+        assert_eq!(centre(Glyph::StarHollow), 0);
     }
 
     #[test]
