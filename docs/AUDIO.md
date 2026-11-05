@@ -367,3 +367,27 @@ A "procedural voice" in `engine::sound` would let the rally synth run inside the
 A smaller step would be `SoundCtl::set_pitch(voice, ratio)` (like `set_volume`): the
 recorded layers could then be engine voices on the `car` bus. Until then they are played by
 `samples.rs` inside the rally stream.
+
+## Recorded sound effects from Openverse (`tools/audio/`)
+
+Real-world one-shots and ambience beds (crowds, air horn, radar shutter, money, town, church bell,
+birds, crickets, wind in pines, guard-rail scrapes) come from [Openverse](https://openverse.org)
+(mostly Freesound), CC0 / CC BY only, like every other asset.
+
+1. `python3 -I tools/audio/openverse_sounds.py --wishlist` downloads what `tools/audio/sfx_wishlist.json`
+   asks for (each pack: query, count, max length, where the game uses it) into
+   `assets_src/audio/openverse/<pack>/` (gitignored) with `credits.json` / `CREDITS.md` per pack.
+   One-off searches: `openverse_sounds.py "camera shutter" --pack radar_shutter -n 5 --dry-run`.
+   Defaults to licences allowing commercial use and modification, limited to CC0 / PDM / CC BY.
+   Standard library only; it falls back to the system certificate bundle when Python has none.
+2. `python3 -I tools/audio/cook_sfx.py` makes `assets/sounds/sfx/<pack>_<n>.ogg`: mono 48 kHz Vorbis,
+   silence trimmed, one-shots cut to the pack's `max_s` and normalised to -20 LUFS, ambience beds to
+   -26 LUFS and crossfaded (2 s, equal power) into seamless 30 s loops. It writes
+   `assets/sounds/sfx/index.json` (file → author, licence, source, use), the SFX block in
+   `assets/credits.txt` (CC BY lines are required) and the `audio/openverse` section of
+   `assets_src/SOURCES.md`. Needs ffmpeg and oggenc.
+
+Notes: the Openverse front blocks some words (any query with "outdoor" gets a 403 bot check);
+Freesound results carry no `category`, so don't filter on it. Listen to every new file before
+wiring it in: search results vary in quality. Packs with nothing usable today: service park,
+dog bark, car horn, gravel hits (search with other words, or synthesise).

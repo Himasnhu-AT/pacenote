@@ -16,3 +16,16 @@ Recorded by Chippy569 (engine), craigsmith, audible-edge, deerlord, qubodup and 
 
 Thanks:
 Everyone who reads the road out loud.
+
+# SFX BEGIN (tools/audio/cook_sfx.py)
+Sound effects (from Openverse):
+"Church Bell" by bone666138 (BY 4.0, freesound): https://freesound.org/people/bone666138/sounds/198843  [CC BY: credit required]
+"cheering-16.flac" by Halleck (BY 4.0, freesound): https://freesound.org/people/Halleck/sounds/18665  [CC BY: credit required]
+"Metal Scrape 3.wav" by Benboncan (BY 4.0, freesound): https://freesound.org/people/Benboncan/sounds/78488  [CC BY: credit required]
+"Metal Scrape 1.wav" by Benboncan (BY 4.0, freesound): https://freesound.org/people/Benboncan/sounds/78486  [CC BY: credit required]
+"Metal Scrape" by JustInvoke (BY 4.0, freesound): https://freesound.org/people/JustInvoke/sounds/446113  [CC BY: credit required]
+"japanesesodamachinereturn.mp3" by morgantj (BY 4.0, freesound): https://freesound.org/people/morgantj/sounds/59628  [CC BY: credit required]
+"snowstorm city 01 171211_1249.wav" by klankbeeld (BY 4.0, freesound): https://freesound.org/people/klankbeeld/sounds/413518  [CC BY: credit required]
+"city ambience 150906_0765.wav" by klankbeeld (BY 4.0, freesound): https://freesound.org/people/klankbeeld/sounds/376833  [CC BY: credit required]
+CC0 / public domain sounds, with thanks: BurghRecords, Kodack, Moonlight Dancer, PhilllChabbb, Rvgerxini, Sandermotions, SoundsExciting, TRP, Werra, kyles, mcpable, sagetyrtle, snakebarney, zar.265.
+# SFX END

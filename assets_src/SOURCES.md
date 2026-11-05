@@ -890,3 +890,33 @@ When downloading from Sketchfab, pick "glTF" (or "Autoconverted format (glTF)"),
 - All Poly Haven glTFs reference their own `textures/` subfolder; keep each folder intact. Normal maps are OpenGL convention (`nor_gl`), which Bevy expects. `arm` = AO (R), roughness (G), metal (B): Bevy's occlusion + metallic-roughness layout.
 - Triangle counts above are counted from the downloaded glTFs (all variants in the file summed). Multi-node models (e.g. `fir_sapling_a/b/c`) hold several variants: spawn one node each. No LODs are included; generate them (meshopt/Blender).
 - The ambientCG `Displacement` / Poly Haven `disp` maps are heightmaps for terrain blending or parallax.
+
+<!-- SFX BEGIN (tools/audio/cook_sfx.py) -->
+## audio/openverse
+
+Downloaded with `tools/audio/openverse_sounds.py` (packs in `tools/audio/sfx_wishlist.json`), cooked by `tools/audio/cook_sfx.py` into `assets/sounds/sfx/`. Only CC0, PDM and CC BY are cooked.
+
+- `air_horn/Industrial_Air_Horn_d2c87ca6.mp3`: "Industrial Air Horn" by mcpable (CC0 1.0, freesound): https://freesound.org/people/mcpable/sounds/131930 (downloaded 2026-11-05)
+- `air_horn/Air_Horn_Hypewav_02293712.mp3`: "Air Horn Hype.wav" by zar.265 (CC0 1.0, freesound): https://freesound.org/people/zar.265/sounds/581334 (downloaded 2026-11-05)
+- `birds_morning/Birds_In_Spring_Scotland_0e2335ff.mp3`: "Birds In Spring (Scotland)" by BurghRecords (CC0 1.0, freesound): https://freesound.org/people/BurghRecords/sounds/463903 (downloaded 2026-11-05)
+- `birds_morning/Birds_in_Rain_Sounds_Scotlandwav_9a965918.mp3`: "Birds in Rain Sounds (Scotland).wav" by BurghRecords (CC0 1.0, freesound): https://freesound.org/people/BurghRecords/sounds/521360 (downloaded 2026-11-05)
+- `church_bell/Church_Bell_d456505a.mp3`: "Church Bell" by bone666138 (BY 4.0, freesound): https://freesound.org/people/bone666138/sounds/198843 (downloaded 2026-11-05)
+- `finish_crowd/cheering-16flac_26de8445.mp3`: "cheering-16.flac" by Halleck (BY 4.0, freesound): https://freesound.org/people/Halleck/sounds/18665 (downloaded 2026-11-05)
+- `finish_crowd/Crowd_Cheering_9f869849.mp3`: "Crowd Cheering" by SoundsExciting (CC0 1.0, freesound): https://freesound.org/people/SoundsExciting/sounds/365132 (downloaded 2026-11-05)
+- `finish_crowd/Applause_2WAV_baf7990c.mp3`: "Applause 2.WAV" by Sandermotions (CC0 1.0, freesound): https://freesound.org/people/Sandermotions/sounds/277021 (downloaded 2026-11-05)
+- `guardrail_scrape/Metal_Scrape_3wav_fea39c34.mp3`: "Metal Scrape 3.wav" by Benboncan (BY 4.0, freesound): https://freesound.org/people/Benboncan/sounds/78488 (downloaded 2026-11-05)
+- `guardrail_scrape/Metal_Scrape_1wav_875d7fda.mp3`: "Metal Scrape 1.wav" by Benboncan (BY 4.0, freesound): https://freesound.org/people/Benboncan/sounds/78486 (downloaded 2026-11-05)
+- `guardrail_scrape/Metal_Scrape_30a05e16.mp3`: "Metal Scrape" by JustInvoke (BY 4.0, freesound): https://freesound.org/people/JustInvoke/sounds/446113 (downloaded 2026-11-05)
+- `money/japanesesodamachinereturnmp3_c2a455aa.mp3`: "japanesesodamachinereturn.mp3" by morgantj (BY 4.0, freesound): https://freesound.org/people/morgantj/sounds/59628 (downloaded 2026-11-05)
+- `night_insects/Crickets_Night_2_965e8643.mp3`: "Crickets Night 2" by PhilllChabbb (CC0 1.0, freesound): https://freesound.org/people/PhilllChabbb/sounds/245834 (downloaded 2026-11-05)
+- `night_insects/crickets_night_light_air_tone_distant_band_playing_tradition_9f9ad33c.mp3`: "crickets night light +air tone, distant band playing traditional music just outside Pasto Narino, Colombia1.flac" by kyles (CC0 1.0, freesound): https://freesound.org/people/kyles/sounds/450559 (downloaded 2026-11-05)
+- `radar_shutter/Camera_Shutter_Click_3b3d0256.mp3`: "Camera Shutter Click" by Kodack (CC0 1.0, freesound): https://freesound.org/people/Kodack/sounds/271010 (downloaded 2026-11-05)
+- `radar_shutter/Vintage_Camera_Flash_Powder_and_Shutter_5140fe09.mp3`: "Vintage Camera Flash Powder and Shutter" by Werra (CC0 1.0, freesound): https://freesound.org/people/Werra/sounds/232130 (downloaded 2026-11-05)
+- `radar_shutter/iOS_Camera_flash_57683703.mp3`: "iOS Camera flash" by Rvgerxini (CC0 1.0, freesound): https://freesound.org/people/Rvgerxini/sounds/455511 (downloaded 2026-11-05)
+- `start_crowd/Small_Crowd_Clapping_2_b6304efe.mp3`: "Small Crowd Clapping 2" by snakebarney (CC0 1.0, freesound): https://freesound.org/people/snakebarney/sounds/138114 (downloaded 2026-11-05)
+- `start_crowd/smallcrowdwav_7b6094fc.mp3`: "smallcrowd.wav" by sagetyrtle (CC0 1.0, freesound): https://freesound.org/people/sagetyrtle/sounds/32260 (downloaded 2026-11-05)
+- `town_ambience/snowstorm_city_01_171211_1249wav_30efe8a6.mp3`: "snowstorm city 01 171211_1249.wav" by klankbeeld (BY 4.0, freesound): https://freesound.org/people/klankbeeld/sounds/413518 (downloaded 2026-11-05)
+- `town_ambience/city_ambience_150906_0765wav_7c6d19a0.mp3`: "city ambience 150906_0765.wav" by klankbeeld (BY 4.0, freesound): https://freesound.org/people/klankbeeld/sounds/376833 (downloaded 2026-11-05)
+- `wind_pines/Wind_through_Pine_Trees_by_a_lake_d11ae9b3.mp3`: "Wind through Pine Trees by a lake" by Moonlight Dancer (CC0 1.0, freesound): https://freesound.org/people/Moonlight%20Dancer/sounds/264083 (downloaded 2026-11-05)
+- `wind_pines/130914_Wind_in_pine_trees_slow_light_forest_pink_noise_Sarah_31aed815.mp3`: "130914 Wind in pine trees, slow light, forest, pink noise Sarah's cottage ON" by TRP (CC0 1.0, freesound): https://freesound.org/people/TRP/sounds/715696 (downloaded 2026-11-05)
+<!-- SFX END -->
