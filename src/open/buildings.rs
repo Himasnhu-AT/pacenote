@@ -47,7 +47,8 @@ pub enum Use {
     Barn,
     /// Terraced houses: narrow units joined in rows, 2-4 storeys, pitched roofs.
     Terrace,
-    /// The church (with its tower), the town hall, the mill (`bits & 7`: 1, 2, 4).
+    /// The church (with its tower), the town hall, the square's fountain, the mill (`bits & 7`:
+    /// 1, 2, 3, 4).
     Civic,
     /// A timber hut in the mountains: one storey, a gable.
     Hut,
@@ -374,9 +375,9 @@ struct RowStyle {
 const SHOPS: RowStyle = RowStyle { use_: Use::Shop, frontage: (9.0, 14.0), depth: (12.0, 16.0), setback: (0.0, 0.8), row: (40.0, 70.0), alley: 0.85, yard: (5.0, 10.0) };
 /// The centre (within ~200 m of the square): tall terraces, wide fronts, rows broken only by
 /// alleys.
-const CENTRE_ROWS: RowStyle = RowStyle { use_: Use::Terrace, frontage: (8.0, 12.0), depth: (10.0, 13.0), setback: (0.0, 0.5), row: (35.0, 70.0), alley: 0.85, yard: (6.0, 12.0) };
+const CENTRE_ROWS: RowStyle = RowStyle { use_: Use::Terrace, frontage: (8.0, 12.0), depth: (10.0, 13.0), setback: (0.0, 1.5), row: (35.0, 70.0), alley: 0.85, yard: (6.0, 12.0) };
 /// The inner ring: 2-3 storey terraces in shorter rows.
-const INNER_ROWS: RowStyle = RowStyle { use_: Use::Terrace, frontage: (7.5, 10.5), depth: (9.0, 12.0), setback: (0.5, 2.0), row: (25.0, 45.0), alley: 0.5, yard: (10.0, 18.0) };
+const INNER_ROWS: RowStyle = RowStyle { use_: Use::Terrace, frontage: (7.5, 10.5), depth: (9.0, 12.0), setback: (0.5, 4.0), row: (25.0, 45.0), alley: 0.5, yard: (10.0, 18.0) };
 const APARTMENTS: RowStyle = RowStyle { use_: Use::Apartment, frontage: (18.0, 30.0), depth: (12.0, 14.0), setback: (4.0, 6.0), row: (18.0, 30.0), alley: 0.0, yard: (8.0, 16.0) };
 /// Towards the town's edge: semi-detached pairs with front gardens and a gap between pairs.
 const SEMIS: RowStyle = RowStyle { use_: Use::House, frontage: (8.0, 10.0), depth: (8.5, 10.0), setback: (3.0, 6.0), row: (16.0, 20.0), alley: 0.0, yard: (7.0, 12.0) };
@@ -394,6 +395,7 @@ fn town(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
             ("B-W2", _) => civic(net, &mut rng, buildings, Vec2::new(-372.0, pb.min.y + 14.0), Vec2::X, Vec2::new(7.5, 14.0), 3, 1),
             ("A-E1", _) => civic(net, &mut rng, buildings, Vec2::new(pb.min.x + 8.0, pb.min.y + 22.0), Vec2::Y, Vec2::new(10.0, 8.0), 0, 2),
             ("riverside", _) => civic(net, &mut rng, buildings, Vec2::new(pb.min.x + 16.0, pb.max.y - 8.0), Vec2::X, Vec2::new(13.0, 7.5), 1, 4),
+            ("square", _) => civic(net, &mut rng, buildings, (pb.min + pb.max) * 0.5, Vec2::X, Vec2::new(6.0, 6.0), 0, 3),
             _ => {}
         }
         if let LotKind::Rows(u) = pb.kind {
@@ -423,7 +425,8 @@ fn town(net: &RoadNet, blocks: &mut Vec<Block>, buildings: &mut Vec<Building>) {
     }
 }
 
-/// A civic building (`kind`: 1 church, with its tower at the street end; 2 town hall; 4 mill)
+/// A civic building (`kind`: 1 church, with its tower at the street end; 2 town hall; 3 the
+/// square's fountain; 4 mill)
 /// at `c`, its local x along `axis`, front side `front`.
 #[allow(clippy::too_many_arguments)]
 fn civic(net: &RoadNet, rng: &mut Rng, buildings: &mut Vec<Building>, c: Vec2, axis: Vec2, half: Vec2, front: u8, kind: u32) {
@@ -433,6 +436,11 @@ fn civic(net: &RoadNet, rng: &mut Rng, buildings: &mut Vec<Building>, c: Vec2, a
         if kind == 4 {
             // The mill: brick, a gable, three tall storeys.
             (b.wall, b.roof, b.roof_col, b.floors) = (2, Roof::Gable, 1, 3);
+        }
+        if kind == 3 {
+            // The fountain (drawn as a basin and a column, `add_fountain`; one low storey here,
+            // the least a level building keeps).
+            (b.wall, b.roof, b.floors, b.floor_h) = (9, Roof::Flat, 1, 2.0);
         }
         buildings.push(b);
     }
@@ -485,6 +493,10 @@ fn row_edge(net: &RoadNet, rng: &mut Rng, buildings: &mut Vec<Building>, min: Ve
                         b.wall = pick(rng, &[0u8, 1, 4, 5, 6, 7, 9, 3]);
                     }
                     last_wall = b.wall;
+                    // A row's end house stands a storey taller now and then (a corner).
+                    if placed == 0 && style.use_ != Use::House && rng.chance(0.4) {
+                        b.floors = (b.floors + 1).min(4);
+                    }
                     buildings.push(b);
                     placed += 1;
                     t += w;
@@ -1087,6 +1099,10 @@ mod render {
 
     /// Adds a building's walls, roof and details (and the church's tower).
     pub(super) fn add_building(buf: &mut Buf, b: &Building) {
+        if b.use_ == Use::Civic && b.bits & 7 == 3 {
+            add_fountain(buf, b);
+            return;
+        }
         add_body(buf, b);
         if b.use_ == Use::Civic && b.bits & 7 == 1 {
             add_tower(buf, b);
@@ -1231,6 +1247,25 @@ mod render {
         add_building(buf, &t);
     }
 
+    /// The square's fountain: a stone basin with water in it, a column and its cap.
+    fn add_fountain(buf: &mut Buf, b: &Building) {
+        let stone = [0.78, 0.75, 0.68];
+        let block = |buf: &mut Buf, half: Vec2, y0: f32, h: f32| {
+            let part = Building { half, ground: y0, base: y0, floor_h: h, floors: 1, roof: Roof::Flat, ..*b };
+            roof_box(buf, &part, stone);
+        };
+        // A stone basin 0.7 m high.
+        let top = b.ground + 0.7;
+        block(buf, b.half, b.base, top - b.base);
+        // The water, a hand's width under the rim.
+        let w = b.half - Vec2::splat(0.45);
+        let water = [b.at(Vec2::new(-w.x, -w.y)), b.at(Vec2::new(w.x, -w.y)), b.at(Vec2::new(w.x, w.y)), b.at(Vec2::new(-w.x, w.y))];
+        buf.ground(top + 0.01, &water, Vec2::splat(4.0), |_, _| (Tile::Plain, lin([0.32, 0.46, 0.55], 1.0)));
+        block(buf, Vec2::splat(1.6), top, 0.5);
+        block(buf, Vec2::splat(0.7), top + 0.5, 3.0);
+        block(buf, Vec2::splat(1.1), top + 3.5, 0.35);
+    }
+
     fn rng_box(b: &Building, k: i32, lo: f32, hi: f32) -> f32 {
         lo + (hi - lo) * hash(b.bits, k, 911)
     }
@@ -1279,6 +1314,18 @@ mod render {
         match blk.kind {
             LotKind::Plaza | LotKind::Tower => {
                 buf.draped(&walk, lift - 0.01, &rect(lo, hi), Vec2::splat(2.0), |i, j| (Tile::Paving, lin([0.9, 0.86, 0.78], 0.93 + 0.07 * hash(7, i, j))));
+                // Benches round the middle (the fountain), facing it.
+                let c = (lo + hi) * 0.5;
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::TAU / 8.0 + 0.39;
+                    let out = Vec2::new(libm::cosf(a), libm::sinf(a));
+                    let p = c + out * 11.0;
+                    let y = walk(p.x, p.y) + lift;
+                    let seat = Building { centre: p, axis: out.perp(), half: Vec2::new(0.9, 0.25), front: 1, floors: 1, floor_h: 0.45, ground: y, base: y, roof: Roof::Flat, pitch: 0.0, use_: Use::Civic, wall: 0, roof_col: 0, bits: 0 };
+                    roof_box(buf, &seat, [0.45, 0.32, 0.22]);
+                    let back = Building { centre: p + out * 0.22, half: Vec2::new(0.9, 0.05), floor_h: 0.9, ..seat };
+                    roof_box(buf, &back, [0.45, 0.32, 0.22]);
+                }
             }
             LotKind::Parking => {
                 // Rows of bays (5.5 m deep, 2.5 m wide), back to back, with aisles between.
@@ -1713,7 +1760,7 @@ mod tests {
         assert!((80..=130).contains(&outskirts), "{outskirts} in the outskirts and hamlets");
         assert!((25..=35).contains(&steadings), "{steadings} farm steadings");
         assert!((8..=12).contains(&huts), "{huts} huts");
-        assert_eq!(civic, 3, "church, town hall, mill");
+        assert_eq!(civic, 4, "church, town hall, fountain, mill");
         // Nothing else lives up in the mountains.
         let others_high = l.buildings.iter().filter(|b| b.use_ != Use::Hut && b.ground > 250.0).count();
         assert!(others_high <= 2, "{others_high} buildings other than huts above 250 m");
