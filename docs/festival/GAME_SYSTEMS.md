@@ -443,7 +443,12 @@ on the new roads with the §3 rules (tested: ≥ 500 m between same-kind challen
 from junctions and ≥ 50 m from event markers, section lengths). Radars sit at the ends of
 ≥ 250 m straights (road 0 ×2, 7, 2), sections on the long stretches and hairpin runs (Pace:
 roads 6, 3, 7; Slide: 1 tarmac, 2, 4), and the Yump Boards on A's three kickers
-(`RoadNet::yumps`). Thresholds are the §3 placeholders until the star bake (C4), except the
+(`RoadNet::yumps`). Stars come from the bake (`bake_challenges`, an ignored test;
+`PACENOTE_CHALLENGES=bake` writes the file): R is the value of a reference drive, a
+minimum-time speed profile of the road (corners at 0.85 of the surface's grip, the stock Saker's
+measured full-throttle curve, late braking at full grip; Slide: the scorer's 30° rate through
+bends tighter than 80 m, 15 % slower, plus a Switch per change of hand). The pilot can't be the
+bake car (it caps ~107 km/h on straights, crashes on the gully, barely drifts). The exception is the
 Yump Boards: the dev autopilot brakes for crests and never leaves the ground, so each kicker's
 R is its clean distance at 120 km/h (Gully: 105, its fastest clean entry) from the straight
 sweep `kicker_speeds` (Hillclimb 23 m, Pass 20, Gully 18; stars at 0.72 / 0.88 / 1.0 R).
@@ -477,6 +482,8 @@ rows: HUD › Style HUD (Full / Compact / Off), HUD › Challenge cards.
 synthesised at startup: tick ≤ 15/s, bank −14 dBFS above lost −18, a 3D radar shutter, chimes,
 countdown/go, checkpoint, finish, fail and the money roll.
 
-**Not yet.** The star bake (`--bake-challenges`, after A's re-bake). Map and minimap icons
-(`src/map` is A's; the data is `open::challenges::Challenges` plus `Bests`). The board's
-pictogram and best value. The seeded placer (C2: later).
+**Maps and boards.** Stars on the minimap (within 400 m) and the full map (all 13, legend), grey /
+bronze / silver / gold by stars earned. Each board's face (both sides) is drawn in code: the
+kind's picture and your best in seven-segment digits, redrawn when the best changes.
+
+**Not yet.** The seeded placer (C2: later).
