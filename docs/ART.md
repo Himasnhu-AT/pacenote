@@ -162,8 +162,8 @@ machine so ±0.2 ms noise): Low ≈ 0 (within noise), Medium +0.34 ms, High +0.1
 second.
 
 Known gaps: clouds are not in the env map / reflections (engine request) and cast no shadows on
-the ground (needs `terrain.wesl`, stream A's); the cabin fill light in `car.rs` (stream D) is
-fixed at 6000 lm and glares at dusk and night: scale it by `look::daylight_fill_scale`.
+the ground (needs `terrain.wesl`, stream A's); the cabin fill (`car.rs`, D) follows
+`DayClock::daylight`, which this clock now drives.
 
 ## Measurements
 

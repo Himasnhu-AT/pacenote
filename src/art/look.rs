@@ -307,13 +307,6 @@ pub fn stage_look(def: &StageDef, vis: f32) -> Look {
     day_look(stage_hours(def.time), def.weather, vis)
 }
 
-/// How bright fake fill lights tuned for daylight should be at clock hour `hours` (1 at
-/// noon): the keyed exposure relative to noon's. A fixed-power fill (the cabin's) would
-/// otherwise glare at dusk and night, when the exposure opens up by 10+ stops.
-pub fn daylight_fill_scale(hours: f32) -> f32 {
-    2f32.powf(sample(hours).ev - 14.4).clamp(1e-4, 1.0)
-}
-
 /// Clock hours per 0.02° of sun travel (15°/h): the look is rewritten once per step.
 const QUANTUM_H: f32 = 0.02 / 15.0;
 
@@ -421,7 +414,5 @@ mod tests {
         let dusk = light_at(21.0);
         assert_eq!(dusk.elevation, TWILIGHT_EL);
         assert!(dusk.moon == 0.0);
-        assert_eq!(daylight_fill_scale(12.0), 1.0);
-        assert!(daylight_fill_scale(23.0) < 1e-3);
     }
 }
