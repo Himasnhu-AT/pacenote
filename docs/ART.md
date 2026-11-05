@@ -127,7 +127,7 @@ Code: `src/daytime.rs` (clock, settings), `src/art/look.rs` (keyframes → `Look
 
 - **Clock.** `DayClock` runs at 5× real time on `Time<Virtual>` (pause freezes it). Free roam
   starts at World › Start time (Dawn 06:00, Morning 09:00 default, Noon 12:30, Afternoon 16:00,
-  Sunset 19:30, Night 23:00, Real clock, Last) and runs while World › Time passes is on. Night
+  Sunset 19:30, Night 23:00, Now (wall clock), Last) and runs while World › Time passes is on. Night
   is offered only when `art::headlights::Headlights` exists; until then a night start is
   Sunset. Classic stages freeze at their `TimeOfDay` (07:45 / 13:00 / 16:30 / 19:45).
 - **Sun.** Solar formula (46° N, declination 19°, solar noon 13:00): sunrise ≈ 05:37, sunset ≈
