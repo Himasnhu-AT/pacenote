@@ -152,11 +152,17 @@ fn pace_voids_on_a_skipped_gate_a_recover_or_reversing() {
     d.run(&placed, 90.0, 40.0);
     assert_eq!(d.voids(), vec!["Recovered"]);
     assert!(d.finished().is_empty());
-    // Reversing.
+    // Reversing (moving backwards along the car's nose).
     let mut d = Drive::at(50.0, 0.0);
     d.run(&placed, 90.0, 5.0);
     d.run(&placed, -10.0, 2.0);
     assert_eq!(d.voids(), vec!["Reversed"]);
+    // Driving forwards the other way round (a hairpin turning back) is not reversing.
+    let mut d = Drive::at(50.0, 0.0);
+    d.run(&placed, 90.0, 5.0);
+    d.f.fwd = -Vec3::Z;
+    d.run(&placed, -10.0, 2.0);
+    assert!(d.voids().is_empty(), "{:?}", d.out);
 }
 
 #[test]
@@ -506,5 +512,148 @@ fn kicker_speeds() {
             row.push(format!("{kmh:.0}:{}", r.unwrap_or("-".into())));
         }
         eprintln!("{}: {}", p.def.name, row.join(" "));
+    }
+}
+
+/// Share of the surface's grip the bake's reference drive uses (GAME_SYSTEMS §3: pace 0.85).
+const BAKE_PACE: f32 = 0.85;
+const G: f32 = 9.81;
+
+/// The stock Saker's full-throttle acceleration (m/s²) by speed (1 m/s bins), measured with
+/// the sim on flat tarmac; the last bin is its top speed.
+fn accel_curve() -> Vec<f32> {
+    use crate::vehicle::{Car, Flat, Input, Spec};
+    let spec = Spec::default();
+    let ground = Flat(0.0, crate::stage::Surface::Tarmac);
+    let mut car = Car::new(Vec3::Y * 0.6, 0.0);
+    let mut a = vec![0.0f32; 80];
+    let input = Input { throttle: 1.0, ..Default::default() };
+    let mut prev = 0.0f32;
+    for _ in 0..(90.0 / DT) as usize {
+        crate::vehicle::step(&mut car, &spec, input, &ground, DT);
+        let v = car.speed().max(0.0);
+        let k = (v as usize).min(a.len() - 1);
+        a[k] = a[k].max((v - prev) / DT);
+        prev = v;
+    }
+    // Fill gaps (bins it jumped over) from below, and cut at the top speed.
+    let top = a.iter().rposition(|&x| x > 0.05).unwrap_or(a.len() - 1);
+    for k in 1..=top {
+        if a[k] <= 0.0 {
+            a[k] = a[k - 1];
+        }
+    }
+    a.truncate(top + 1);
+    a
+}
+
+/// The bake's reference drive over stations `i0..=i1` of a road: a minimum-time speed profile
+/// (m/s per station): corners at [`BAKE_PACE`] of each surface's grip, accelerating as the
+/// measured Saker, braking at the full grip; from the corner speed at `i0`.
+fn profile(road: &crate::stage::Road, i0: usize, i1: usize, accel: &[f32]) -> Vec<f32> {
+    let ds = crate::stage::STEP;
+    let mu = |i: usize| road.surface[i].grip().0 * BAKE_PACE;
+    let top = accel.len() as f32;
+    let corner = |i: usize| (mu(i) * G / road.curv[i].abs().max(1e-4)).sqrt().min(top);
+    let n = i1 - i0 + 1;
+    let mut v: Vec<f32> = (0..n).map(|k| corner(i0 + k)).collect();
+    for k in 1..n {
+        let a = accel[(v[k - 1] as usize).min(accel.len() - 1)] * (mu(i0 + k) / (1.05 * BAKE_PACE)).min(1.0);
+        v[k] = v[k].min((v[k - 1] * v[k - 1] + 2.0 * a * ds).sqrt());
+    }
+    for k in (0..n - 1).rev() {
+        // Braking late, at the surface's full grip (the risk a Radar Post rewards).
+        let b = mu(i0 + k) / BAKE_PACE * G;
+        v[k] = v[k].min((v[k + 1] * v[k + 1] + 2.0 * b * ds).sqrt());
+    }
+    v
+}
+
+/// The bake value R of a Radar Post / Pace Section / Slide Section from the reference drive.
+fn bake_value(road: &crate::stage::Road, def: &ChallengeDef, accel: &[f32]) -> f32 {
+    let ds = crate::stage::STEP;
+    let g0 = road.station(def.gates[0]);
+    match def.kind {
+        // The speed at the gate, run up from 800 m before (or the road's start).
+        ChallengeKind::RadarPost => {
+            let i0 = road.station(def.gates[0] - 800.0);
+            let i1 = road.station(def.gates[0] + 400.0);
+            profile(road, i0, i1, accel)[g0 - i0] * 3.6
+        }
+        // Mean speed over the section, entered at the corner speed of its start.
+        ChallengeKind::PaceSection => {
+            let i1 = road.station(def.gates[1]);
+            let v = profile(road, g0, i1, accel);
+            let t: f32 = v.iter().map(|v| ds / v.max(0.5)).sum();
+            (i1 - g0) as f32 * ds / t * 3.6
+        }
+        // Raw Slide points: the scorer's rate for a 30° slide (`career::style`) wherever the
+        // road bends tighter than 80 m radius, at the profile's speed less 15 % for the angle,
+        // plus a Switch for each change of hand between such bends.
+        ChallengeKind::SlideSection => {
+            let i1 = road.station(def.gates[1]);
+            let v = profile(road, g0, i1, accel);
+            let (mut pts, mut hand) = (0.0f32, 0.0f32);
+            for (k, v) in v.iter().enumerate() {
+                let c = road.curv[g0 + k];
+                if c.abs() >= 1.0 / 80.0 {
+                    let kmh = v * 0.85 * 3.6;
+                    pts += 4.0 * (30.0 - 10.0) * kmh.min(140.0) / 50.0 * ds / (v * 0.85).max(0.5);
+                    if hand != 0.0 && c.signum() != hand {
+                        pts += 150.0;
+                    }
+                    hand = c.signum();
+                }
+            }
+            pts
+        }
+        ChallengeKind::YumpBoard => def.reference,
+    }
+}
+
+/// Thresholds from the bake value R: 0.72 / 0.88 / 1.0 R, km/h to 5, points to 100, metres to 1.
+pub fn thresholds_from(kind: ChallengeKind, r: f32) -> [f32; 3] {
+    let step = match kind {
+        ChallengeKind::RadarPost | ChallengeKind::PaceSection => 5.0,
+        ChallengeKind::SlideSection => 100.0,
+        ChallengeKind::YumpBoard => 1.0,
+    };
+    let mut t = [0.72, 0.88, 1.0].map(|k| (r * k / step).round() * step);
+    // Keep them rising after rounding.
+    t[1] = t[1].max(t[0] + step);
+    t[2] = t[2].max(t[1] + step);
+    t
+}
+
+#[test]
+fn bake_thresholds_round_and_rise() {
+    assert_eq!(thresholds_from(ChallengeKind::RadarPost, 152.0), [110.0, 135.0, 150.0]);
+    assert_eq!(thresholds_from(ChallengeKind::SlideSection, 4321.0), [3100.0, 3800.0, 4300.0]);
+    let t = thresholds_from(ChallengeKind::SlideSection, 100.0);
+    assert!(t[0] < t[1] && t[1] < t[2], "{t:?}");
+}
+
+/// The star bake: `PACENOTE_CHALLENGES=bake cargo test --features wt_style --lib bake_challenges
+/// -- --ignored --nocapture` works out R for every Radar Post, Pace Section and Slide Section
+/// from the reference drive ([`bake_value`]) and writes R and the thresholds into
+/// challenges.ron. Yump Boards keep theirs (measured over the kickers, `kicker_speeds`).
+/// Without the variable it only prints.
+#[test]
+#[ignore]
+fn bake_challenges() {
+    let (mut defs, o) = committed();
+    let accel = accel_curve();
+    eprintln!("Saker top speed {:.0} km/h", accel.len() as f32 * 3.6);
+    for d in defs.iter_mut().filter(|d| d.kind != ChallengeKind::YumpBoard) {
+        let road = &o.net.roads[d.road as usize].road;
+        let r = bake_value(road, d, &accel);
+        assert_eq!(r, bake_value(road, d, &accel_curve()), "{}: not deterministic", d.name);
+        let t = thresholds_from(d.kind, r);
+        eprintln!("{:>2} {:<22} R {r:8.1} → {t:?} (was {:?})", d.id, d.name, d.thresholds);
+        d.reference = (r * 10.0).round() / 10.0;
+        d.thresholds = t;
+    }
+    if std::env::var("PACENOTE_CHALLENGES").as_deref() == Ok("bake") {
+        std::fs::write(file_path(), to_ron(&defs)).unwrap();
     }
 }

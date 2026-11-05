@@ -25,6 +25,9 @@ const TRAFFIC: usize = 12;
 struct MiniRoot;
 #[derive(Component)]
 struct MiniPivot;
+/// The clipped square the map, dots and arrow sit in.
+#[derive(Component)]
+struct MiniFrame;
 #[derive(Component)]
 struct MiniImage;
 /// Holds the route line's nodes (children of the image); rebuilt when the route changes.
@@ -39,6 +42,12 @@ struct MiniMarker(u32);
 struct MiniTraffic(usize);
 #[derive(Component)]
 struct MiniNorth;
+/// A roadside challenge (index into `open::challenges::Challenges`): a star, shown within
+/// [`CHALLENGE_M`] and tinted by the stars earned.
+#[derive(Component)]
+struct MiniChallenge(usize);
+/// Challenges show on the minimap within this many metres.
+const CHALLENGE_M: f32 = 400.0;
 #[derive(Component)]
 enum MiniText {
     Eyebrow,
@@ -47,7 +56,7 @@ enum MiniText {
 }
 
 pub(super) fn build(app: &mut App) {
-    app.add_systems(Update, (spawn, markers, (place, caption)).chain().run_if(resource_exists::<StageWorld>).run_if(resource_exists::<MapArt>));
+    app.add_systems(Update, (spawn, challenge_marks, markers, challenges, (place, caption)).chain().run_if(resource_exists::<StageWorld>).run_if(resource_exists::<MapArt>));
 }
 
 fn spawn(mut commands: Commands, theme: Res<Theme>, art: Res<MapArt>, events: Option<Res<Events>>, q: Query<(), With<MiniRoot>>) {
@@ -66,6 +75,7 @@ fn spawn(mut commands: Commands, theme: Res<Theme>, art: Res<MapArt>, events: Op
         ))
         .with_children(|root| {
             root.spawn((
+                MiniFrame,
                 Node { width: px(SIDE), height: px(SIDE), overflow: Overflow::clip(), border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(RADIUS * 2.0)), ..default() },
                 BackgroundColor(Color::srgb(0.1, 0.12, 0.1)),
                 BorderColor::all(Color::srgba(0.95, 0.93, 0.88, 0.35)),
@@ -191,6 +201,59 @@ fn heading_angle(h: Vec2) -> f32 {
 fn frame_pos(p: Vec2, car: Vec2, h: Vec2, mpp: f32) -> Vec2 {
     let d = (paint::uv(p) - paint::uv(car)) * (2.0 * crate::open::roads::HALF / mpp);
     Rot2::radians(heading_angle(h)) * d + Vec2::splat(SIDE * 0.5)
+}
+
+/// Star markers for the challenges, once both the minimap and the challenges exist.
+fn challenge_marks(mut commands: Commands, challenges: Option<Res<crate::open::challenges::Challenges>>, icons: Option<Res<crate::hud_challenge::icons::HudIcons>>, frame: Query<Entity, With<MiniFrame>>, have: Query<(), With<MiniChallenge>>) {
+    let (Some(ch), Some(icons), Ok(f)) = (challenges, icons, frame.single()) else { return };
+    if !have.is_empty() || ch.0.is_empty() {
+        return;
+    }
+    let star = icons.get(crate::hud_challenge::icons::Icon::Star);
+    commands.entity(f).with_children(|f| {
+        for k in 0..ch.0.len() {
+            f.spawn((MiniChallenge(k), Node { position_type: PositionType::Absolute, width: px(14), height: px(14), display: Display::None, ..default() }, ImageNode::new(star.clone()), Pickable::IGNORE));
+        }
+    });
+}
+
+/// Places the challenge stars (within [`CHALLENGE_M`] of the car) and tints them by stars.
+#[allow(clippy::type_complexity)]
+fn challenges(
+    stage: Res<StageWorld>,
+    ch: Option<Res<crate::open::challenges::Challenges>>,
+    bests: Option<Res<crate::open::challenges::Bests>>,
+    cars: Query<&DrivenCar>,
+    image: Query<&Node, (With<MiniImage>, Without<MiniChallenge>)>,
+    mut marks: Query<(&MiniChallenge, &mut Node, &mut ImageNode), Without<MiniImage>>,
+) {
+    let (Some(ch), Ok(car)) = (ch, cars.single()) else { return };
+    if !stage.free_roam() {
+        return;
+    }
+    let (pos, h) = car_pose(car);
+    let side = image.iter().next().and_then(|n| if let Val::Px(v) = n.width { Some(v) } else { None }).unwrap_or(1000.0);
+    let mpp = 2.0 * crate::open::roads::HALF / side;
+    let rim = SIDE * 0.5 - 8.0;
+    for (m, mut n, mut img) in &mut marks {
+        let Some(p) = ch.0.get(m.0) else { continue };
+        let at = Vec2::new(p.first().p.x, p.first().p.z);
+        let q = frame_pos(at, pos, h, mpp) - Vec2::splat(SIDE * 0.5);
+        let show = at.distance(pos) <= CHALLENGE_M && q.x.abs() <= rim && q.y.abs() <= rim;
+        let d = if show { Display::Flex } else { Display::None };
+        if n.display != d {
+            n.display = d;
+        }
+        if show {
+            n.left = px(SIDE * 0.5 + q.x - 9.0);
+            n.top = px(SIDE * 0.5 + q.y - 9.0);
+            let stars = bests.as_ref().and_then(|b| b.get(p.def.id)).map_or(0, |b| b.stars);
+            let c = crate::open::challenges::star_tint(stars);
+            if img.color != c {
+                img.color = c;
+            }
+        }
+    }
 }
 
 /// Event dots, the north mark, traffic, and the route line when it changes.

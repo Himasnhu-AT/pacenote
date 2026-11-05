@@ -488,17 +488,18 @@ impl Tracker {
         let p = &placed[s.idx];
         s.t += f.dt;
         let void = |out: &mut Vec<Outcome>, why| out.push(Outcome::Void { idx: s.idx, why });
-        // Off course: off its road for a while, behind the start, reversing or crawling.
-        let (along, _) = p.first().local(f.pos);
-        let speed_along = Vec2::new(f.vel.x, f.vel.z).dot(p.first().dir);
-        s.back = if speed_along < -2.0 { s.back + f.dt } else { 0.0 };
+        // Off course: off its road for a while, reversing or crawling. (Not "behind the start
+        // gate": a hairpin turns the road back past it.)
+        // Reversing: the car moving backwards along its own nose (the road may turn back on
+        // itself in a hairpin, so not against the start gate's direction).
+        s.back = if f.vel.dot(f.fwd) < -2.0 { s.back + f.dt } else { 0.0 };
         let on_road = f.road.is_some_and(|(r, lat)| r == p.def.road && lat <= OFF_COURSE);
         s.off = if on_road { 0.0 } else { s.off + f.dt };
         if s.back > REVERSE_SECS {
             self.section = None;
             return void(out, "Reversed");
         }
-        if s.off > OFF_SECS || along < -OFF_COURSE {
+        if s.off > OFF_SECS {
             self.section = None;
             return void(out, "Left the section");
         }
@@ -606,6 +607,16 @@ impl Tracker {
 }
 
 // --- Results ----------------------------------------------------------------------------
+
+/// A challenge's colour on the maps by the stars earned: grey, bronze, silver, gold.
+pub fn star_tint(stars: u8) -> Color {
+    match stars {
+        0 => Color::srgb(0.62, 0.63, 0.62),
+        1 => Color::srgb(0.80, 0.52, 0.27),
+        2 => Color::srgb(0.84, 0.86, 0.90),
+        _ => Color::srgb(0.98, 0.80, 0.15),
+    }
+}
 
 /// Stars for a value (0..=3): each threshold reached is a star.
 pub fn stars(value: f32, thresholds: &[f32; 3]) -> u8 {

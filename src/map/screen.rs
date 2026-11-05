@@ -128,6 +128,14 @@ fn build_screen(world: &mut World, root: Entity) {
         (!pts.is_empty()).then(|| pts.iter().copied().sum::<Vec2>() / pts.len() as f32)
     });
     let mph = world.get_resource::<Prefs>().is_some_and(|p| p.mph);
+    // The roadside challenges: a star each, tinted by the stars earned.
+    let star = world.get_resource::<crate::hud_challenge::icons::HudIcons>().map(|i| i.get(crate::hud_challenge::icons::Icon::Star));
+    let challenges: Vec<(Vec2, Color)> = {
+        let bests = world.get_resource::<crate::open::challenges::Bests>();
+        world.get_resource::<crate::open::challenges::Challenges>().map_or(Vec::new(), |c| {
+            c.0.iter().map(|p| (Vec2::new(p.first().p.x, p.first().p.z), crate::open::challenges::star_tint(bests.and_then(|b| b.get(p.def.id)).map_or(0, |b| b.stars)))).collect()
+        })
+    };
 
     world.commands().entity(root).with_children(|p| {
         p.spawn((Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() }, BackgroundColor(Color::srgb(0.03, 0.035, 0.03)), Pickable::IGNORE));
@@ -163,6 +171,12 @@ fn build_screen(world: &mut World, root: Entity) {
                     img.spawn((Node { position_type: PositionType::Absolute, left: percent(q.x * 100.0), top: percent(q.y * 100.0), margin: UiRect::new(px(-60), px(0), px(36), px(0)), width: px(120), justify_content: JustifyContent::Center, ..default() }, Pickable::IGNORE)).with_children(|l| {
                         l.spawn((text("VILLAGE", label(SIZE_LABEL), t.text), TextShadow::default()));
                     });
+                }
+                if let Some(star) = &star {
+                    for (at, c) in &challenges {
+                        let q = paint::uv(*at);
+                        img.spawn((Node { position_type: PositionType::Absolute, left: percent(q.x * 100.0), top: percent(q.y * 100.0), width: px(18), height: px(18), margin: UiRect::new(px(-9), px(0), px(-9), px(0)), ..default() }, ImageNode::new(star.clone()).with_color(*c), Pickable::IGNORE));
+                    }
                 }
                 for (k, e) in events.0.iter().enumerate() {
                     let q = paint::uv(start_of(e));
@@ -219,6 +233,14 @@ fn build_screen(world: &mut World, root: Entity) {
                     swatch(l, &t, name, Color::srgb(c[0], c[1], c[2]));
                 }
                 swatch(l, &t, "Route", ROUTE);
+                if let Some(star) = &star {
+                    l.spawn((Node { column_gap: px(6), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|s| {
+                        for k in 0..4u8 {
+                            s.spawn((Node { width: px(14), height: px(14), ..default() }, ImageNode::new(star.clone()).with_color(crate::open::challenges::star_tint(k)), Pickable::IGNORE));
+                        }
+                        s.spawn(text(format!("Challenges ({}) by stars", challenges.len()), label(SIZE_TINY), t.text_muted));
+                    });
+                }
             });
         });
         let hints: &[(&str, &str)] = if gamepad {
