@@ -5,7 +5,7 @@
 //! Despawn on leaving `InGame`; allocate nothing per frame while values are unchanged.
 //!
 //! One card, top centre, in one of four states (free roam only; HUD › Challenge cards):
-//! - **approach** (within 200 m, ahead ±45°, nearest wins, 5 s): `RADAR POST · Mill Straight`,
+//! - **approach** (within 200 m, ahead ±45°, nearest wins, while moving): `RADAR POST · Mill Straight`,
 //!   then `BEST 142 km/h ★★☆ · NEXT ★ 155`;
 //! - **live** (in a section): the value so far large, a bar with a notch per star threshold
 //!   (the threshold printed under it), the distance left;
@@ -27,7 +27,8 @@ use crate::world::StageWorld;
 use icons::{HudIcons, Icon};
 
 const WIDTH: f32 = 600.0;
-const APPROACH_SECS: f32 = 5.0;
+/// The approach card hides below this speed (parked near a challenge).
+const APPROACH_KMH: f32 = 15.0;
 const RESULT_SECS: f32 = 3.5;
 const VOID_SECS: f32 = 2.0;
 const STAR_STEP: f32 = 0.15;
@@ -211,7 +212,6 @@ struct Shown {
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn draw(
-    time: Res<Time>,
     theme: Res<Theme>,
     stage: Res<StageWorld>,
     run: Res<ChallengeRun>,
@@ -225,7 +225,7 @@ fn draw(
     mut bar: Query<&mut Node, (With<Bar>, Without<Root>, Without<Txt>, Without<BarFill>, Without<TickMark>, Without<StarIcon>)>,
     mut fill: Query<&mut Node, (With<BarFill>, Without<Root>, Without<Txt>, Without<Bar>, Without<TickMark>, Without<StarIcon>)>,
     mut ticks: Query<(&TickMark, &mut Node), (Without<Root>, Without<Txt>, Without<Bar>, Without<BarFill>, Without<StarIcon>)>,
-    mut approach: Local<(Option<usize>, f32)>,
+    mut approach: Local<Option<usize>>,
     mut shown: Local<Shown>,
 ) {
     let t = &*theme;
@@ -236,13 +236,10 @@ fn draw(
     let mph = prefs.as_ref().is_some_and(|p| p.mph);
     let calm = access.as_ref().is_some_and(|a| a.reduce_motion);
     let car = cars.single().ok().map(|c| (c.car.pos, c.car.forward()));
+    // The approach card shows while the car is coming (not parked beside a board).
+    let moving = cars.single().is_ok_and(|c| c.car.speed() > APPROACH_KMH / 3.6);
     // Which card.
-    let near = car.and_then(|(p, f)| approaching(placed, p, f));
-    if near != approach.0 {
-        *approach = (near, 0.0);
-    } else {
-        approach.1 += time.delta_secs();
-    }
+    *approach = car.and_then(|(p, f)| approaching(placed, p, f));
     let card = if !on || under || !stage.free_roam() {
         Card::Hidden
     } else if let Some(l) = run.live {
@@ -251,7 +248,7 @@ fn draw(
         Card::Result { idx, age }
     } else if let Some((idx, why, _)) = run.void.filter(|v| v.2 < VOID_SECS) {
         Card::Void { idx, why }
-    } else if let (Some(idx), true) = (approach.0, approach.1 < APPROACH_SECS) {
+    } else if let (Some(idx), true) = (*approach, moving) {
         Card::Approach { idx }
     } else {
         Card::Hidden

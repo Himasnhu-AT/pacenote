@@ -694,3 +694,50 @@ fn beta_sign_and_range() {
     assert!((f.beta() - 20.0).abs() < 0.01, "{}", f.beta());
     assert!((f.kmh() - 50.0).abs() < 0.01);
 }
+
+// --- With the real car: the dev autopilot's drift style on a gravel stage (SK-2) ---
+
+/// Drives `secs` of stage `id` with the dev autopilot and scores every step.
+fn autopilot_run(id: u32, drift: bool, secs: f32) -> (Vec<StyleEvent>, f32) {
+    use crate::autopilot::Autopilot;
+    use crate::vehicle::{Car, Spec, step};
+    let def = crate::stage::stages().into_iter().find(|d| d.id == id).unwrap();
+    let w = crate::world::generate(&def);
+    let mut ap = Autopilot::default();
+    (ap.on, ap.drift, ap.pace) = (true, drift, 0.6);
+    let (p, h) = w.road.start();
+    let spec = Spec::default();
+    let mut car = Car::new(p + Vec3::Y * 0.9, h);
+    let mut d = Detector::default();
+    let mut out = Vec::new();
+    let mut progress = 0.0f32;
+    for _ in 0..(secs * 60.0) as usize {
+        let input = ap.input(&car, &spec, &w, progress, DT);
+        step(&mut car, &spec, input, &w, DT);
+        if let Some(rp) = w.road.nearest(Vec2::new(car.pos.x, car.pos.z), 40.0)
+            && rp.s > progress
+            && rp.s < progress + 40.0
+        {
+            progress = rp.s;
+        }
+        let mut f = StyleFrame::of(&car, DT);
+        f.road = w.road.nearest(Vec2::new(car.pos.x, car.pos.z), 30.0).map(|at| RoadInfo { road: 0, s: at.s, curv: w.road.curv[at.i], half_width: w.road.half_width(&at), lateral: at.lateral });
+        f.in_event = true;
+        d.step(&f, &mut out);
+    }
+    (out, progress)
+}
+
+#[test]
+fn the_autopilot_drifting_a_gravel_stage_scores_slides() {
+    // Stage 15: early gravel hairpins (the autopilot's own drift report uses it).
+    let (events, progress) = autopilot_run(15, true, 40.0);
+    let slides: Vec<u32> = events.iter().filter_map(|e| match e {
+        StyleEvent::Tick { kind: StyleKind::Slide, points, .. } => Some(*points),
+        _ => None,
+    }).collect();
+    let banks = events.iter().filter(|e| matches!(e, StyleEvent::Bank { .. })).count();
+    eprintln!("drift: {progress:.0} m, {} slides {:?}, {banks} banks, events {}", slides.len(), slides, events.len());
+    assert!(!slides.is_empty(), "no Slide in {progress:.0} m of drifting: {events:?}");
+    assert!(banks >= 1);
+}

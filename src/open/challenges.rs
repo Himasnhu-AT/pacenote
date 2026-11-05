@@ -1015,11 +1015,17 @@ mod dev {
                     st.crests = Arc::new(crate::stage::crests(&road));
                     st.road = Arc::new(road);
                 }
+                // As `open.tour`: traffic isn't solid (the autopilot doesn't look out for it).
+                open.traffic_solid.store(false, std::sync::atomic::Ordering::Relaxed);
+                let radius = w.get_resource::<crate::drive::CarSpec>().map_or(0.32, |s| s.0.wheel_radius);
                 let mut q = w.query::<&mut crate::drive::DrivenCar>();
                 for mut c in q.iter_mut(w) {
                     crate::vehicle::recover(&mut c.car, at, heading);
                     let fwd = c.car.forward();
                     c.car.vel = fwd * kmh / 3.6;
+                    for wh in &mut c.car.wheels {
+                        wh.spin = kmh / 3.6 / radius;
+                    }
                     c.prev = (c.car.pos, c.car.rot);
                 }
                 Ok(json!({"id": id, "at": [at.x, at.z], "station": s}))

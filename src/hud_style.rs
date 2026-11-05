@@ -338,7 +338,8 @@ fn draw(
     // Values.
     let mult = (rhythm.mult * 10.0).round() as u32;
     let (total, sub) = match banner {
-        Some((Banner::Banked { style, notes }, _)) if mode == 2 => (style, (2u8, notes)),
+        // (A bank too small to pay shows no Notes line.)
+        Some((Banner::Banked { style, notes }, _)) if mode == 2 => (style, (if notes > 0 { 2u8 } else { 0 }, notes)),
         Some((Banner::Broken { lost, .. }, _)) if mode == 3 => (lost, (3u8, 0)),
         _ => (rhythm.at_stake(), (0u8, 0)),
     };
