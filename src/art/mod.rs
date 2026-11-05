@@ -361,7 +361,8 @@ mod dev {
         let mut q = world.query::<(&Mesh3d, Option<&Name>)>();
         let meshes = world.resource::<Assets<Mesh>>();
         // name -> (entities, unique meshes, sized bytes, render-only meshes)
-        let mut by: HashMap<String, (usize, HashSet<AssetId<Mesh>>, usize, usize)> = HashMap::new();
+        type Row = (usize, HashSet<AssetId<Mesh>>, usize, usize);
+        let mut by: HashMap<String, Row> = HashMap::new();
         for (m, name) in q.iter(world) {
             let key = name.map_or("(unnamed)".to_string(), |n| n.as_str().to_string());
             let e = by.entry(key).or_default();
@@ -374,7 +375,7 @@ mod dev {
             }
         }
         let mut rows: Vec<_> = by.into_iter().collect();
-        rows.sort_by(|a, b| (b.1.2, b.1.0).cmp(&(a.1.2, a.1.0)));
+        rows.sort_by_key(|r| std::cmp::Reverse((r.1.2, r.1.0)));
         // Compact rows, biggest first: [name, entities, unique meshes, MB on the CPU, render-only meshes].
         let rows: Vec<_> = rows.into_iter().take(14).map(|(k, (n, u, b, r))| json!([k, n, u.len(), b / 1_000_000, r])).collect();
         let images = world.resource::<Assets<Image>>();

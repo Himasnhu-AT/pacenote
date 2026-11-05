@@ -576,7 +576,9 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
         terrain: engine::world::desc::TerrainDesc {
             size: [2.0 * half, 2.0 * half],
             spacing: stage::SPACING,
-            chunk_quads: 64,
+            // The open world's horizon is ~4 km away: 256 m chunks (128 quads) keep its draws
+            // under the Low budget (docs/festival/PERF_REPORT.md action 1); stages keep 128 m.
+            chunk_quads: if s.open.is_some() { 128 } else { 64 },
             origin: Some([-half, -half]),
             layers: crate::art::ground::layers(s.def.biome, crate::art::wet(&s.def)),
             ..default()
@@ -589,6 +591,12 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     world.insert_resource(engine::world::TerrainSaveTarget { dir: terrain_dir, heights_dirty: false, splat_dirty: false });
     if let Err(e) = engine::world::desc::spawn_world_with(world, desc, Some((*s.heights).clone())) {
         error!("terrain: {e}");
+    }
+    if s.open.is_some() {
+        // Big chunks: allow LOD from 128 m (not the 256 m chunk size), so GPU cost stays flat.
+        if let Some(mut ws) = world.get_resource_mut::<engine::world::WorldSettings>() {
+            ws.terrain.lod_distance = 128.0;
+        }
     }
     crate::art::spawn_stage(world, s);
     if let Some(o) = &s.open {

@@ -256,7 +256,7 @@ impl CarSynth {
         if self.bank.is_none() {
             self.bank = samples::bank();
         }
-        for fr in out.chunks_exact_mut(2) {
+        for fr in out.as_chunks_mut::<2>().0 {
             let (l, r, pl, pr) = self.sample();
             fr[0] += l + pl;
             fr[1] += r + pr;

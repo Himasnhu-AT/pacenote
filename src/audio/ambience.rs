@@ -216,7 +216,7 @@ impl AmbienceSynth {
     }
 
     pub fn render(&mut self, out: &mut [f32]) {
-        for fr in out.chunks_exact_mut(2) {
+        for fr in out.as_chunks_mut::<2>().0 {
             let (l, r) = self.sample();
             fr[0] += l;
             fr[1] += r;

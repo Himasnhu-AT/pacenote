@@ -86,6 +86,8 @@ struct Player {
     quiet_since: Option<f64>,
     /// Songs still held by the slots.
     holding: bool,
+    /// Real time to release the other slot's song (after a crossfade).
+    drop_other_at: Option<f64>,
 }
 
 impl Player {
@@ -102,6 +104,7 @@ impl Player {
             loading_next: 0,
             quiet_since: None,
             holding: false,
+            drop_other_at: None,
         }
     }
 
@@ -132,6 +135,7 @@ impl Plugin for MusicPlugin {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // a Bevy system: one param per resource
 fn drive(
     mut player: ResMut<Player>,
     state: Option<Res<State<AppState>>>,
@@ -140,7 +144,12 @@ fn drive(
     assets: Option<Res<AssetServer>>,
     clips: Option<Res<Assets<SoundClip>>>,
     time: Res<Time<Real>>,
+    backend: Option<Res<engine::sound::SoundBackend>>,
 ) {
+    // No audio device (headless, --mute, play.py): don't decode songs at all (75-100 MB each).
+    if backend.is_none_or(|b| b.kind() != engine::sound::BackendKind::Device) {
+        return;
+    }
     // No sound system (headless, tests): nothing to do.
     let (Some(state), Some(mut music), Some(assets), Some(clips)) = (state, music, assets, clips) else { return };
     let now = time.elapsed_secs_f64();
@@ -163,16 +172,21 @@ fn drive(
         return;
     }
     player.quiet_since = None;
+    // Release the song that faded out, so only one is held (memory peak during loading).
+    if player.drop_other_at.is_some_and(|t| now > t) {
+        let other = 1 - player.slot;
+        music.add_track(MusicTrack::new(SLOTS[other], 120.0));
+        player.drop_other_at = None;
+    }
 
     // A new mode, or the menu song is about to end: load the next song.
     let pending_for = player.pending.as_ref().map(|(_, p)| *p);
     let song_ending = player.now == Want::Menu && player.length > 0.0 && now - player.started > (player.length - LEAD_OUT).max(1.0) as f64;
-    if pending_for != Some(w) && (player.now != w || song_ending) {
-        if let Some(song) = player.next_song(w) {
+    if pending_for != Some(w) && (player.now != w || song_ending)
+        && let Some(song) = player.next_song(w) {
             let h: Handle<SoundClip> = assets.load(format!("sounds/music/{song}.ogg"));
             player.pending = Some((h, w));
         }
-    }
 
     // Start the pending song once it has decoded.
     let Some((h, for_want)) = player.pending.clone() else { return };
@@ -182,6 +196,7 @@ fn drive(
         music.play(SLOTS[slot], MusicTransition { fade_out: XFADE_OUT, fade_in: XFADE_IN, quantize: Quantize::Immediate });
         player.slot = slot;
         player.holding = true;
+        player.drop_other_at = Some(now + XFADE_OUT as f64 + 0.5);
         player.started = now;
         player.length = clip.duration();
         player.now = for_want;

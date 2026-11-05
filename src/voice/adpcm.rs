@@ -93,7 +93,7 @@ impl Encoder {
         out[0..2].copy_from_slice(&self.state.predictor.to_le_bytes());
         out[2] = self.state.index;
         out[3] = 0;
-        for (i, pair) in pcm.chunks_exact(2).enumerate() {
+        for (i, pair) in pcm.as_chunks::<2>().0.iter().enumerate() {
             let lo = self.state.encode(pair[0]);
             let hi = self.state.encode(pair[1]);
             out[4 + i] = lo | (hi << 4);
