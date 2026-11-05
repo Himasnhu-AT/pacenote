@@ -908,6 +908,85 @@ mod tests {
         assert!(r.clean);
     }
 
+    fn road(width: f32, pts: Vec<Vec2>) -> Road {
+        let n = pts.len();
+        Road::from_centreline(&pts, &vec![0.0; n], vec![width; n], vec![Surface::Tarmac; n])
+    }
+
+    /// A rival at `s` doing `v` m/s on `road` (from a Rookie field on it).
+    fn rival_at(road: &Road, s: f32, v: f32, difficulty: Difficulty) -> Racer {
+        let g = crate::vehicle::Flat(0.0, Surface::Tarmac);
+        let mut r = RaceSim::new(1, difficulty, 0, road, &g, 570, DamageMode::Simulation).rivals.remove(0);
+        let (p, h) = route_pose(road, &g, s, 0.0);
+        r.car = Car::new(p + Vec3::Y * 0.5, h);
+        r.car.vel = r.car.forward() * v;
+        r.progress = s;
+        r
+    }
+
+    #[test]
+    fn a_rookie_rival_yields_within_3_s_of_being_caught() {
+        let rd = road(7.0, (0..600).map(|i| Vec2::new(0.0, i as f32 * 2.0)).collect());
+        let mut r = rival_at(&rd, 400.0, 20.0, Difficulty::Rookie);
+        // The player 12 m behind at 25 m/s on the left of the road: caught.
+        let mut yielded_at = None;
+        for step in 0..(4 * 60) {
+            racecraft(&mut r, 0, &[(400.0, 20.0, 0.0, false)], (388.0, 25.0, 1.0, false), Difficulty::Rookie, &rd, 7, 1200.0);
+            if r.yield_left > 0.0 && yielded_at.is_none() {
+                yielded_at = Some(step as f32 * DT);
+                // To the edge away from the player, capped at 85 % of its speed.
+                assert!(r.pilot.offset_target.is_some_and(|o| o < -1.0), "{:?}", r.pilot.offset_target);
+                assert!(r.pilot.speed_cap.is_some_and(|c| (c - 17.0).abs() < 0.5), "{:?}", r.pilot.speed_cap);
+            }
+        }
+        let t = yielded_at.expect("never yielded");
+        assert!(t <= 3.0, "yielded after {t:.2} s");
+        // A Legend never yields.
+        let mut l = rival_at(&rd, 400.0, 20.0, Difficulty::Legend);
+        for _ in 0..(4 * 60) {
+            racecraft(&mut l, 0, &[(400.0, 20.0, 0.0, false)], (388.0, 25.0, 1.0, false), Difficulty::Legend, &rd, 7, 1200.0);
+            assert!(l.yield_left <= 0.0);
+        }
+    }
+
+    #[test]
+    fn no_passing_on_a_narrow_hairpin() {
+        // A 3.4 m road: straight, a 180° hairpin of radius 12 m, straight back.
+        let mut pts: Vec<Vec2> = (0..100).map(|i| Vec2::new(0.0, i as f32 * 2.0)).collect();
+        let c = Vec2::new(12.0, 198.0);
+        for k in 1..19 {
+            let a = std::f32::consts::PI * k as f32 / 19.0;
+            pts.push(c + Vec2::new(-12.0 * a.cos(), 12.0 * a.sin()));
+        }
+        pts.extend((0..100).map(|i| Vec2::new(24.0, 198.0 - i as f32 * 2.0)));
+        let rd = road(3.4, pts);
+        // A rival close behind a slower car entering the hairpin: it follows, never pulls out.
+        for s in [180.0, 195.0, 205.0, 215.0] {
+            let mut r = rival_at(&rd, s, 14.0, Difficulty::Legend);
+            racecraft(&mut r, 0, &[(s, 14.0, 0.0, false), (s + 8.0, 9.0, 0.0, false)], (0.0, 0.0, 0.0, true), Difficulty::Legend, &rd, 7, 500.0);
+            assert_eq!(r.pilot.offset_target, None, "at {s} m it pulled out to pass");
+            assert!(r.pilot.speed_cap.is_some_and(|c| c < 14.0), "at {s} m it doesn't hold back: {:?}", r.pilot.speed_cap);
+        }
+    }
+
+    #[test]
+    fn hud_gaps_are_within_a_tenth_of_the_truth() {
+        // Ground truth: the leader accelerates (s = 18t + 0.4t²), the chaser runs 20 m/s from
+        // 30 m back. Gap = now − the time the leader was where the chaser is now.
+        let lead = |t: f32| 18.0 * t + 0.4 * t * t;
+        let lead_time_at = |s: f32| (-18.0 + (18.0f32 * 18.0 + 4.0 * 0.4 * s).sqrt()) / (2.0 * 0.4);
+        let hist: Vec<f32> = (0..=400).map(|k| lead(k as f32 * HIST_STEPS as f32 * DT)).collect();
+        for now in [5.0f32, 17.3, 42.0, 77.7] {
+            let chaser = 20.0 * now - 30.0;
+            if chaser <= 0.0 {
+                continue;
+            }
+            let truth = now - lead_time_at(chaser);
+            let got = RaceSim::gap(&hist, chaser, now).unwrap();
+            assert!((got - truth).abs() < 0.1, "at {now} s: {got:.3} vs {truth:.3}");
+        }
+    }
+
     #[test]
     fn gaps_from_history() {
         // b went 0, 10, 20, 30 m at 0.25 s steps; a is at 15 m now (t = 1.0 s): b was there

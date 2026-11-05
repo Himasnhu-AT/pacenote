@@ -604,6 +604,19 @@ mod dev {
                     Ok(json!({"sent": true}))
                 },
             )
+            .add_control_command("career.damage", "Dev: damage the driven car (engine, steering and suspension to `amount`, 0..1)", params(&[("amount", "number", "0..1 (default 0.4)")]), |w, v: Value| {
+                let a = v.get("amount").and_then(Value::as_f64).unwrap_or(0.4).clamp(0.0, 0.95) as f32;
+                let mut q = w.query::<&mut DrivenCar>();
+                let mut n = 0;
+                for mut c in q.iter_mut(w) {
+                    let d = &mut c.car.damage;
+                    d.engine = a;
+                    d.steering = a;
+                    d.suspension = a;
+                    n += 1;
+                }
+                Ok(json!({"cars": n, "amount": a}))
+            })
             .add_control_command("career.give", "Dev: add Notes", params(&[("notes", "integer", "amount")]), |w, v: Value| {
                 let n = v.get("notes").and_then(Value::as_u64).unwrap_or(10_000) as u32;
                 w.write_message(Payout { amount: n, reason: PayReason::Rhythm });

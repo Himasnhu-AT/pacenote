@@ -60,6 +60,8 @@ pub struct Autopilot {
     pub crash_at_m: Option<f32>,
     /// The driver (its state between steps).
     pilot: Pilot,
+    /// The rivals' positions last step (their speeds, for keeping a gap in a race).
+    rivals_before: Vec<Vec3>,
     /// What it's doing, for `autopilot.state`.
     doing: &'static str,
     /// Drift tuning: shortest handbrake pull (s), the slide angle that ends it (°), and the
@@ -76,7 +78,7 @@ pub struct Autopilot {
 impl Default for Autopilot {
     fn default() -> Self {
         let p = PilotParams::default();
-        Autopilot { on: false, pace: p.pace, drift: p.drift, crash_at_m: None, pilot: Pilot::new(p), doing: "off", hb_min: p.hb_min, hb_release: p.hb_release, power_beta: p.power_beta, hb_steer: p.hb_steer, top_speed: p.top_speed }
+        Autopilot { on: false, pace: p.pace, drift: p.drift, crash_at_m: None, pilot: Pilot::new(p), rivals_before: Vec::new(), doing: "off", hb_min: p.hb_min, hb_release: p.hb_release, power_beta: p.power_beta, hb_steer: p.hb_steer, top_speed: p.top_speed }
     }
 }
 
@@ -140,10 +142,35 @@ impl Autopilot {
         p.hb_steer = self.hb_steer;
         p.top_speed = self.top_speed;
         self.pilot.crash_at_m = self.crash_at_m;
+        self.pilot.speed_cap = self.gap_cap(car, w, progress, dt);
         // Steers round trees and rocks, not the race's cars (it would dodge off the road).
         let input = self.pilot.input(car, spec, &w.road, &w.corners, &NoRacers(w), progress, dt);
         self.doing = self.pilot.doing;
         input
+    }
+}
+
+impl Autopilot {
+    /// In a race: a speed cap that keeps a 0.6 s gap behind the rival ahead in its lane (so the
+    /// autopilot doesn't run into their backs). `None` with no rival close ahead.
+    fn gap_cap(&mut self, car: &Car, w: &StageWorld, progress: f32, dt: f32) -> Option<f32> {
+        let poses: Vec<Vec3> = w.racers.as_ref().and_then(|r| r.0.read().ok().map(|v| v.iter().map(|p| p.0).collect())).unwrap_or_default();
+        let before = std::mem::replace(&mut self.rivals_before, poses.clone());
+        let me = w.road.nearest(Vec2::new(car.pos.x, car.pos.z), 40.0)?;
+        let v = car.speed().max(0.0);
+        let mut cap: Option<f32> = None;
+        for (k, p) in poses.iter().enumerate() {
+            let Some(rp) = w.road.nearest(Vec2::new(p.x, p.z), 40.0) else { continue };
+            let gap = rp.s - me.s.max(progress.min(me.s + 1.0)) - 4.5;
+            if !(-2.0..60.0).contains(&gap) || (rp.lateral - me.lateral).abs() > 2.0 {
+                continue;
+            }
+            let v_ahead = before.get(k).map_or(v, |b| Vec2::new(p.x - b.x, p.z - b.z).length() / dt.max(1e-3));
+            let room = gap - (2.0 + 0.6 * v);
+            let c = if room >= 0.0 { (v_ahead * v_ahead + 2.0 * 4.0 * room).sqrt() } else { (v_ahead + room * 0.5).max(0.0) };
+            cap = Some(cap.map_or(c, |x: f32| x.min(c)));
+        }
+        cap
     }
 }
 
