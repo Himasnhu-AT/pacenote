@@ -404,7 +404,7 @@ enum Yump {
     #[default]
     Idle,
     Up { idx: usize, from: Vec3, t: f32, hits: u32 },
-    Landing { idx: usize, dist: f32, window: f32, hits: u32 },
+    Landing { idx: usize, dist: f32, window: f32, hits: u32, scrape: f32 },
 }
 
 /// The attempts in progress. One section at a time; Radar Posts and Yump Boards work inside a
@@ -581,22 +581,24 @@ impl Tracker {
             Yump::Up { idx, from, t, hits } => {
                 if t < YUMP_MIN_AIR {
                     Yump::Idle
-                } else if f.hits > hits || f.body_contact || f.up_y < 0.85 {
+                } else if f.hits > hits || f.up_y < 0.85 {
                     out.push(Outcome::Void { idx, why: "Bad landing" });
                     Yump::Idle
                 } else {
-                    Yump::Landing { idx, dist: flat(f.pos, from), window: 0.0, hits }
+                    Yump::Landing { idx, dist: flat(f.pos, from), window: 0.0, hits, scrape: if f.body_contact { f.dt } else { 0.0 } }
                 }
             }
-            Yump::Landing { idx, dist, window, hits } => {
-                if f.hits > hits || f.body_contact || f.up_y < 0.85 {
+            Yump::Landing { idx, dist, window, hits, scrape } => {
+                // The same clean landing as the Air skill (`career::style`).
+                let scrape = scrape + if f.body_contact { f.dt } else { 0.0 };
+                if f.hits > hits || scrape > crate::career::style::LANDING_SCRAPE + 1e-3 || f.up_y < 0.85 {
                     out.push(Outcome::Void { idx, why: "Bad landing" });
                     Yump::Idle
                 } else if window + f.dt >= LANDING_WINDOW - 1e-3 {
                     out.push(Outcome::Finished { idx, value: dist, pos: placed[idx].first().p });
                     Yump::Idle
                 } else {
-                    Yump::Landing { idx, dist, window: window + f.dt, hits }
+                    Yump::Landing { idx, dist, window: window + f.dt, hits, scrape }
                 }
             }
         };

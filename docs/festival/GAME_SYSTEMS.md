@@ -443,7 +443,12 @@ on the new roads with the §3 rules (tested: ≥ 500 m between same-kind challen
 from junctions and ≥ 50 m from event markers, section lengths). Radars sit at the ends of
 ≥ 250 m straights (road 0 ×2, 7, 2), sections on the long stretches and hairpin runs (Pace:
 roads 6, 3, 7; Slide: 1 tarmac, 2, 4), and the Yump Boards on A's three kickers
-(`RoadNet::yumps`). Thresholds are the §3 placeholders until the star bake (C4). After another
+(`RoadNet::yumps`). Thresholds are the §3 placeholders until the star bake (C4), except the
+Yump Boards: the dev autopilot brakes for crests and never leaves the ground, so each kicker's
+R is its clean distance at 120 km/h (Gully: 105, its fastest clean entry) from the straight
+sweep `kicker_speeds` (Hillclimb 23 m, Pass 20, Gully 18; stars at 0.72 / 0.88 / 1.0 R).
+The clean-landing rule allows 0.3 s of body-on-ground (the springs bottom out on most
+landings); longer, a hit, or `up.y` < 0.85 is a bad landing (Air and Yump). After another
 re-bake: `PACENOTE_CHALLENGES=reanchor cargo test --features wt_style --lib write_challenges --
 --ignored` moves them by their x,z; `the_13_challenges_sit_on_their_roads` fails while a gate is
 more than 3 m off.

@@ -53,6 +53,9 @@ const FLAT_END: f32 = 0.5;
 const AIR_MIN: f32 = 0.30;
 const LANDING_WINDOW: f32 = 0.6;
 const LANDING_UP: f32 = 0.85;
+/// Seconds of body-on-ground a landing may have (the suspension bottoming out touches the
+/// body on most landings in this sim); longer is a belly flop.
+pub const LANDING_SCRAPE: f32 = 0.3;
 /// "Big Air" from this many metres.
 pub const BIG_AIR_M: f32 = 25.0;
 // Close Shave.
@@ -388,7 +391,7 @@ enum Air {
     #[default]
     Ground,
     Up { t: f32, from: Vec3 },
-    Landing { t: f32, dist: f32, window: f32, hits: u32 },
+    Landing { t: f32, dist: f32, window: f32, hits: u32, scrape: f32 },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -785,13 +788,14 @@ impl Detector {
             Air::Up { t, from } if f.contacts == 0 => Air::Up { t: t + f.dt, from },
             Air::Up { t, from } => {
                 if t >= AIR_MIN - EPS {
-                    Air::Landing { t, dist: flat_dist(f.pos, from), window: 0.0, hits: f.hits }
+                    Air::Landing { t, dist: flat_dist(f.pos, from), window: 0.0, hits: f.hits, scrape: if f.body_contact { f.dt } else { 0.0 } }
                 } else {
                     Air::Ground
                 }
             }
-            Air::Landing { t, dist, window, hits } => {
-                if hit || f.hits > hits || f.body_contact || f.up.y < LANDING_UP {
+            Air::Landing { t, dist, window, hits, scrape } => {
+                let scrape = scrape + if f.body_contact { f.dt } else { 0.0 };
+                if hit || f.hits > hits || scrape > LANDING_SCRAPE + EPS || f.up.y < LANDING_UP {
                     // A bad landing voids it (a hit also breaks the Rhythm, above).
                     Air::Ground
                 } else if window + f.dt >= LANDING_WINDOW - EPS {
@@ -799,7 +803,7 @@ impl Detector {
                     self.complete(StyleKind::Air, points, if dist >= BIG_AIR_M { StyleTag::BigAir } else { StyleTag::None }, out);
                     Air::Ground
                 } else {
-                    Air::Landing { t, dist, window: window + f.dt, hits }
+                    Air::Landing { t, dist, window: window + f.dt, hits, scrape }
                 }
             }
         };

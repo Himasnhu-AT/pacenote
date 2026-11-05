@@ -432,3 +432,79 @@ fn step_cost() {
     eprintln!("style + challenges: {ms:.4} ms per step");
 }
 
+
+/// The level's three kickers, driven straight at 95 km/h on full throttle: a Yump Board result
+/// (a clean landing, though the body scrapes as the springs bottom out) and an Air skill.
+#[test]
+fn every_kicker_jumps_clean_at_95() {
+    use crate::career::style::{Detector, StyleEvent, StyleFrame, StyleKind};
+    let (defs, o) = committed();
+    let placed = place(&defs, &o.net);
+    let spec = crate::vehicle::Spec::default();
+    for (idx, p) in placed.iter().enumerate().filter(|(_, p)| p.def.kind == ChallengeKind::YumpBoard) {
+        let road = &o.net.roads[p.def.road as usize].road;
+        let j = road.station(p.def.gates[0] - 40.0);
+        let (at, d) = (road.pts[j], road.dir[j]);
+        let mut car = crate::vehicle::Car::new(at + Vec3::Y * 0.6, libm::atan2f(d.x, d.y));
+        car.vel = car.forward() * 95.0 / 3.6;
+        for w in &mut car.wheels {
+            w.spin = 95.0 / 3.6 / spec.wheel_radius;
+        }
+        let input = crate::vehicle::Input { throttle: 1.0, ..Default::default() };
+        let (mut t, mut det) = (Tracker::default(), Detector::default());
+        let (mut out, mut style) = (Vec::new(), Vec::new());
+        for _ in 0..240 {
+            crate::vehicle::step(&mut car, &spec, input, &o, DT);
+            let f = ChallengeFrame { dt: DT, live: true, pos: car.pos, vel: car.vel, fwd: car.forward(), up_y: car.up().y, contacts: car.wheels.iter().filter(|w| w.contact).count() as u8, hits: car.damage.hits, body_contact: car.body_contact, slide_meter: 0.0, road: Some((p.def.road, 0.0)) };
+            t.step(&f, &placed, &mut out);
+            det.step(&StyleFrame::of(&car, DT), &mut style);
+        }
+        let got: Vec<f32> = out.iter().filter_map(|x| match x {
+            Outcome::Finished { idx: i, value, .. } if *i == idx => Some(*value),
+            _ => None,
+        }).collect();
+        eprintln!("{}: {got:?} m, style {style:?}", p.def.name);
+        assert_eq!(got.len(), 1, "{}: {out:?}", p.def.name);
+        assert!(got[0] > 8.0, "{}: {} m", p.def.name, got[0]);
+        assert!(style.iter().any(|e| matches!(e, StyleEvent::Tick { kind: StyleKind::Air, .. })), "{}: no Air in {style:?}", p.def.name);
+    }
+}
+
+/// Yump distances by entry speed (straight, full throttle), clean landings only: what the
+/// placeholder thresholds are set from until the star bake (C4).
+#[test]
+#[ignore]
+fn kicker_speeds() {
+    let (defs, o) = committed();
+    let placed = place(&defs, &o.net);
+    let spec = crate::vehicle::Spec::default();
+    for (idx, p) in placed.iter().enumerate().filter(|(_, p)| p.def.kind == ChallengeKind::YumpBoard) {
+        let road = &o.net.roads[p.def.road as usize].road;
+        let mut row = Vec::new();
+        for kmh in (80..=140).step_by(5) {
+            let kmh = kmh as f32;
+            let j = road.station(p.def.gates[0] - 40.0);
+            let (at, d) = (road.pts[j], road.dir[j]);
+            let mut car = crate::vehicle::Car::new(at + Vec3::Y * 0.6, libm::atan2f(d.x, d.y));
+            car.vel = car.forward() * kmh / 3.6;
+            for w in &mut car.wheels {
+                w.spin = kmh / 3.6 / spec.wheel_radius;
+            }
+            let input = crate::vehicle::Input { throttle: 0.3, ..Default::default() };
+            let mut t = Tracker::default();
+            let mut out = Vec::new();
+            for _ in 0..240 {
+                crate::vehicle::step(&mut car, &spec, input, &o, DT);
+                let f = ChallengeFrame { dt: DT, live: true, pos: car.pos, vel: car.vel, fwd: car.forward(), up_y: car.up().y, contacts: car.wheels.iter().filter(|w| w.contact).count() as u8, hits: car.damage.hits, body_contact: car.body_contact, slide_meter: 0.0, road: Some((p.def.road, 0.0)) };
+                t.step(&f, &placed, &mut out);
+            }
+            let r = out.iter().find_map(|x| match x {
+                Outcome::Finished { idx: i, value, .. } if *i == idx => Some(format!("{value:.1}")),
+                Outcome::Void { idx: i, .. } if *i == idx => Some("bad".into()),
+                _ => None,
+            });
+            row.push(format!("{kmh:.0}:{}", r.unwrap_or("-".into())));
+        }
+        eprintln!("{}: {}", p.def.name, row.join(" "));
+    }
+}
