@@ -950,9 +950,9 @@ mod tests {
         for c in all_cells() {
             let (k, w) = c.index();
             assert!(k % COLS + w <= COLS, "{c:?} runs off its row");
-            for j in k..k + w {
-                assert!(!used[j], "{c:?} overlaps cell {j}");
-                used[j] = true;
+            for (j, slot) in used.iter_mut().enumerate().skip(k).take(w) {
+                assert!(!*slot, "{c:?} overlaps cell {j}");
+                *slot = true;
             }
         }
         for v in SPEEDS {

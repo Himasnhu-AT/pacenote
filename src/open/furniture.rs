@@ -1627,4 +1627,23 @@ mod measure {
             view("warning", s.pos + n * 10.0 + Vec3::Y * 1.8 + n.cross(Vec3::Y) * 1.5, s.pos + Vec3::Y * 2.0);
         }
     }
+
+    /// What the hooks cost: `dip` + `surface_override` at points along the roads.
+    #[test]
+    #[ignore]
+    fn hook_cost() {
+        let w = tests::world();
+        let f = &*w.furniture;
+        let pts: Vec<Vec2> = w.net.roads.iter().flat_map(|r| r.road.pts.iter().map(|p| xz(*p))).collect();
+        let t = std::time::Instant::now();
+        let mut acc = 0.0;
+        for _ in 0..10 {
+            for p in &pts {
+                acc += dip(f, p.x, p.y);
+                acc += surface_override(f, p.x, p.y).is_some() as u8 as f32;
+            }
+        }
+        let n = pts.len() * 10;
+        eprintln!("{n} calls: {:.1} ns each ({acc})", t.elapsed().as_secs_f64() * 1e9 / n as f64);
+    }
 }
