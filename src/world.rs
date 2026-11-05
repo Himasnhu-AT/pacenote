@@ -38,7 +38,7 @@ pub enum PropKind {
     /// A bush the car drives through.
     Shrub,
     /// Open-world roadside furniture (`open::furniture`, drawn by `art::signs`): a reflector
-    /// post, a km stone, a sign or chevron board on its pole. `seed` is the index in
+    /// post, a km stone, a chevron board on its pole. `seed` is the index in
     /// `Furniture::signs`.
     Reflector,
     KmStone,
@@ -327,8 +327,7 @@ fn generate_open(def: &StageDef) -> StageWorld {
     tiles.dedup();
     forest.fill(&tiles);
     world.forest = Some(Arc::new(forest));
-    // Posts and signs the car knocks down (`open::furniture`; town boards and street lights
-    // stand): props, in the furniture's own (fixed) order, so ids are the same everywhere.
+    // Posts and chevrons the car knocks down (`open::furniture::breakable`): props, in the furniture's own (fixed) order, so ids are the same everywhere.
     let mut grid: HashMap<(i32, i32), Vec<Obstacle>> = HashMap::new();
     let mut props = Vec::new();
     for (k, s) in o.furniture.signs.iter().enumerate() {

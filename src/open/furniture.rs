@@ -41,15 +41,17 @@ use crate::stage::{self, Road, STEP, Surface};
 use crate::vehicle::Wall;
 
 /// Furniture revision: bump when the generated furniture changes how the car drives.
-/// 1: rails, street-light stubs, potholes, wet, mud, washouts, ice. 2: posts and signs snap off
+/// 1: rails, street-light stubs, potholes, wet, mud, washouts, ice. 2: posts and chevrons snap off
 /// (`world::generate_open` makes them breakable props).
 pub const REV: u32 = 2;
 
 /// Is this sign or post one the car knocks down (a breakable prop in the sim, drawn by
-/// `art::props`), rather than fixed furniture? Reflector and km posts, warning and speed signs,
-/// chevron boards; town boards and street lights stand.
+/// `art::props`), rather than fixed furniture? Reflector and km posts and chevron boards.
+/// Warning and speed signs stay in the merged meshes: as props, each of their ~40 faces is
+/// its own batch (twice with Medium's depth prepass), which put a hairpin view at +24 draws
+/// against the +20 budget. Town boards and street lights stand.
 pub fn breakable(kind: SignKind) -> bool {
-    matches!(kind, SignKind::Reflector | SignKind::KmPost(_) | SignKind::Warning(_) | SignKind::Speed(_) | SignKind::Chevron(_))
+    matches!(kind, SignKind::Reflector | SignKind::KmPost(_) | SignKind::Chevron(_))
 }
 
 /// Guard-rail material.
@@ -1467,7 +1469,7 @@ pub(crate) mod tests {
         let n = |k: crate::world::PropKind| w.props.iter().filter(|p| p.kind == k).count();
         let f = &w.open.as_ref().unwrap().furniture;
         assert_eq!(w.props.len(), f.signs.iter().filter(|s| breakable(s.kind)).count());
-        assert!(n(crate::world::PropKind::Reflector) > 100 && n(crate::world::PropKind::RoadSign) > 100 && n(crate::world::PropKind::KmStone) > 3);
+        assert!(n(crate::world::PropKind::Reflector) > 100 && n(crate::world::PropKind::RoadSign) > 100 && n(crate::world::PropKind::KmStone) > 3, "furniture props");
         let open = w.open.as_ref().unwrap();
         // One on a gravel road (no traffic there, for the in-game check too).
         let post = w
