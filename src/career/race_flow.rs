@@ -75,7 +75,7 @@ impl Plugin for RaceFlowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Attempts>()
             .add_systems(FixedUpdate, race_pre.before(SimulateSet).run_if(resource_exists::<RaceRun>))
-            .add_systems(FixedUpdate, (race_step.run_if(resource_exists::<RaceRun>), other_cars).chain().after(SimulateSet))
+            .add_systems(FixedUpdate, (race_step.run_if(resource_exists::<RaceRun>), other_cars).chain().after(SimulateSet).before(super::style::StyleSet))
             .add_systems(Update, (draw_rivals, no_ghosts_in_races).run_if(resource_exists::<RaceRun>))
             .add_systems(Update, despawn_rivals.run_if(not(resource_exists::<RaceRun>)))
             .add_systems(OnExit(AppState::InGame), |w: &mut World| end(w));
