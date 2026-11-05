@@ -59,6 +59,13 @@ enum Phase {
     Settle,
 }
 
+impl Loading {
+    /// The world is still being generated (the load's memory peak).
+    pub fn generating(&self) -> bool {
+        self.phase == Phase::Generate
+    }
+}
+
 impl Phase {
     /// 1-based step of the four, for "2/4".
     fn step(self) -> u32 {

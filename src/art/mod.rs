@@ -59,10 +59,30 @@ impl Plugin for ArtPlugin {
         trees::register(app);
         app.add_systems(Update, (trees::ingest, trees::stream).chain())
             .add_systems(Update, dressing::tag_cover)
+            .add_systems(PostUpdate, gpu_only_textures)
             .add_systems(Update, traffic_car::lamps_update.run_if(resource_exists::<crate::open::traffic::Traffic>))
             .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin))
             // Festival streams (wave 0 stubs): C sky, D exhaust + headlights, B signs + conditions.
             .add_plugins((sky::SkyPlugin, exhaust::ExhaustPlugin, headlights::HeadlightsPlugin, signs::SignsPlugin, conditions::ConditionsPlugin));
+    }
+}
+
+/// Cooked texture sets (`.ktx2` from disk) are only ever sampled on the GPU: once loaded, drop
+/// their CPU copy (it was ~100 MB at Low; docs/festival/PERF_REPORT.md). Generated images (the
+/// map, the canopy, boards) and glTF textures (the car builds their mips on the CPU) keep theirs.
+fn gpu_only_textures(mut events: MessageReader<AssetEvent<Image>>, server: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
+    use bevy::asset::RenderAssetUsages;
+    for ev in events.read() {
+        let AssetEvent::LoadedWithDependencies { id } = ev else { continue };
+        if !server.get_path(*id).is_some_and(|p| p.path().extension().is_some_and(|e| e == "ktx2")) {
+            continue;
+        }
+        if let Some(img) = images.get(*id)
+            && img.asset_usage != RenderAssetUsages::RENDER_WORLD
+            && let Some(mut img) = images.get_mut(*id)
+        {
+            img.asset_usage = RenderAssetUsages::RENDER_WORLD;
+        }
     }
 }
 

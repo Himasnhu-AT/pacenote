@@ -308,23 +308,15 @@ fn generate_open(def: &StageDef) -> StageWorld {
         racers: None,
     };
     let (graph, inputs) = dressing(&world);
-    let net = world.open.as_ref().unwrap().net.clone();
-    // Every trunk and boulder is solid (the car can leave the roads). The tiles a road passes
-    // through (and their neighbours) are built now, on all cores; the rest around the car as
-    // it drives (`open::forest`).
+    // Every trunk and boulder is solid (the car can leave the roads). Only the tiles around
+    // the spawn are built now; the rest as the car (or a racer, a check) gets near them
+    // (`open::forest`: prefetch around the car, built on demand otherwise). Building every
+    // tile along every road here took 5-10 s of the load and ~300 MB at its peak
+    // (docs/festival/PERF_REPORT.md).
     let o = world.open.as_ref().unwrap();
     let forest = crate::open::forest::ForestSolids::with_overrides(graph, inputs, &o.trees, &o.dressing);
-    let mut tiles: Vec<(i32, i32)> = net
-        .roads
-        .iter()
-        .flat_map(|r| r.road.pts.iter().step_by(16))
-        .flat_map(|p| {
-            let (tx, tz) = crate::open::forest::ForestSolids::tile_of(Vec2::new(p.x, p.z));
-            (-1..=1).flat_map(move |dz| (-1..=1).map(move |dx| (tx + dx, tz + dz)))
-        })
-        .collect();
-    tiles.sort_unstable();
-    tiles.dedup();
+    let (sx, sz) = crate::open::forest::ForestSolids::tile_of(Vec2::new(start.x, start.z));
+    let tiles: Vec<(i32, i32)> = (-3..=3).flat_map(|dz| (-3..=3).map(move |dx| (sx + dx, sz + dz))).filter(|&t| crate::open::forest::ForestSolids::in_world(t)).collect();
     forest.fill(&tiles);
     world.forest = Some(Arc::new(forest));
     // Posts and chevrons the car knocks down (`open::furniture::breakable`): props, in the furniture's own (fixed) order, so ids are the same everywhere.
@@ -639,8 +631,13 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     }
     if s.open.is_some() {
         // Big chunks: allow LOD from 128 m (not the 256 m chunk size), so GPU cost stays flat.
+        // Low: LOD from 64 m and a 4 px error (the mountain view was over 10 ms GPU p95).
+        let low = world.get_resource::<engine::settings::CoreSettings>().is_some_and(|c| c.quality.index() == 0);
         if let Some(mut ws) = world.get_resource_mut::<engine::world::WorldSettings>() {
-            ws.terrain.lod_distance = 128.0;
+            ws.terrain.lod_distance = if low { 64.0 } else { 128.0 };
+            if low {
+                ws.terrain.pixel_error = 4.0;
+            }
         }
     }
     crate::art::spawn_stage(world, s);
