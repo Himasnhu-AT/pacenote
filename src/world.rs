@@ -653,6 +653,7 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
                 e.insert(crate::open::live::LiveBuilding);
             }
         }
+        spawn_parked(world, o);
         // Traffic shares its solids with the car's ground (the same Arc).
         world.insert_resource(o.traffic.clone());
         if crate::art::visual(world) {
@@ -660,6 +661,39 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
         }
     }
     world.insert_resource(s.clone());
+}
+
+/// Fernhollow's parked cars (`open::town::parked`; solid as walls in `OpenWorld`): traffic car
+/// bodies standing still, in four looks only (two shapes, two paints) so their parts batch
+/// into ~10 draws. Nothing in headless runs.
+fn spawn_parked(world: &mut World, o: &crate::open::OpenWorld) {
+    use crate::art::traffic_car::{TrafficArt, shape_of, spawn_parts};
+    if !crate::art::visual(world) {
+        return;
+    }
+    if !world.contains_resource::<TrafficArt>() {
+        let art = world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| TrafficArt::new(&mut meshes, &mut world.resource_mut::<Assets<StandardMaterial>>()));
+        world.insert_resource(art);
+    }
+    // A car id per look: shapes 0 and 1, the solid paint (id bit 3 clear).
+    let id_for = |shape: usize| (1u32..10_000).find(|&id| shape_of(id) == shape && (id >> 3) & 1 == 0).unwrap_or(1);
+    let looks = [(id_for(0), 1u8), (id_for(0), 4), (id_for(1), 1), (id_for(1), 4)];
+    let parking: Vec<(Vec2, Vec2)> = o.buildings.blocks.iter().filter(|b| b.kind == crate::open::buildings::LotKind::Parking && b.cell.is_some()).map(|b| (b.min, b.max)).collect();
+    let cars = crate::open::town::parked(&o.net, &o.buildings);
+    world.resource_scope(|world, art: Mut<TrafficArt>| {
+        let mut commands = world.commands();
+        for c in &cars {
+            let in_lot = parking.iter().any(|(lo, hi)| c.pos.cmpge(*lo).all() && c.pos.cmple(*hi).all());
+            // On the car park's paving, or up on the sidewalk.
+            let y = o.heights.height_at(c.pos.x, c.pos.y) + if in_lot { 0.04 } else { crate::open::junctions::SIDEWALK_TOP };
+            let (id, paint) = looks[c.look as usize % 4];
+            let at = Transform::from_translation(Vec3::new(c.pos.x, y, c.pos.y)).looking_to(Vec3::new(c.dir.x, 0.0, c.dir.y), Vec3::Y);
+            commands
+                .spawn((Name::new("parked car"), at, Visibility::default(), engine::render_budget::Scenery, crate::open::live::LiveBuilding, engine::level::GeneratedBy("pacenote::town (parked cars)")))
+                .with_children(|p| spawn_parts(p, &art, id, paint));
+        }
+    });
+    world.flush();
 }
 
 #[cfg(test)]
