@@ -143,7 +143,12 @@ pub fn paint(src: &Source, n: u32) -> Vec<u8> {
             let h0 = h[y * w + x];
             let hx = h[y * w + x + 1];
             let hs = h[(y + 1) * w + x]; // one pixel down the image (+z)
-            let nrm = Vec3::new(-(hx - h0) / m_per_px, 1.0, -(hs - h0) / m_per_px).normalize();
+            // Shading over ±3 px (~12 m): the hills and gullies, not the erosion's fine streaks.
+            let k = 3usize;
+            let (x0, x1, y0, y1) = (x.saturating_sub(k), (x + k).min(w - 1), y.saturating_sub(k), (y + k).min(w - 1));
+            let gx = (h[y * w + x1] - h[y * w + x0]) / ((x1 - x0) as f32 * m_per_px);
+            let gz = (h[y1 * w + x] - h[y0 * w + x]) / ((y1 - y0) as f32 * m_per_px);
+            let nrm = Vec3::new(-gx, 1.0, -gz).normalize();
             let lit = nrm.dot(light);
             let flat = Vec3::Y.dot(light);
             let shade = (1.0 + (lit - flat) * 1.6).clamp(0.45, 1.35);

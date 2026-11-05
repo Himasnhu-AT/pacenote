@@ -168,13 +168,61 @@ fn zone_of(p: Vec2, h: f32) -> Zone {
 
 /// The shared land for `seed` (built on first use).
 pub fn land(seed: u64) -> Arc<Land> {
-    static CACHE: OnceLock<Mutex<HashMap<u64, Arc<Land>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(Default::default);
-    if let Some(l) = cache.lock().unwrap().get(&seed) {
+    if let Some(l) = cache().lock().unwrap().get(&seed) {
         return l.clone();
     }
     let l = Arc::new(build(seed));
-    cache.lock().unwrap().entry(seed).or_insert(l).clone()
+    cache().lock().unwrap().entry(seed).or_insert(l).clone()
+}
+
+fn cache() -> &'static Mutex<HashMap<u64, Arc<Land>>> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, Arc<Land>>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// The land a baked level keeps beside its terrain (`open/land.bin`), so loading it doesn't run
+/// the erosion again (a few seconds in a dev build). Bump [`LAND_REV`] when the generator
+/// changes what it builds: a cache of another revision is ignored (and the land built).
+pub const LAND_FILE: &str = "land.bin";
+pub const LAND_REV: u32 = 2;
+const MAGIC: &[u8; 8] = b"PNLAND\0\0";
+
+impl Land {
+    /// Writes the land (heights, moisture, crag mask as exact f32s) for [`Land::load`].
+    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let mut out = Vec::with_capacity(24 + 12 * N * N);
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&LAND_REV.to_le_bytes());
+        out.extend_from_slice(&self.seed.to_le_bytes());
+        out.extend_from_slice(&(N as u32).to_le_bytes());
+        for v in [&self.h, &self.wet, &self.crag] {
+            for x in v.iter() {
+                out.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        std::fs::write(path, out)
+    }
+
+    /// The land saved by [`Land::save`] for `seed`, if the file is there, of this revision and
+    /// whole.
+    pub fn load(path: &std::path::Path, seed: u64) -> Option<Land> {
+        let b = std::fs::read(path).ok()?;
+        let n2 = N * N;
+        if b.len() != 24 + 12 * n2 || &b[..8] != MAGIC {
+            return None;
+        }
+        let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        if u32_at(8) != LAND_REV || u64::from_le_bytes(b[12..20].try_into().unwrap()) != seed || u32_at(20) as usize != N {
+            return None;
+        }
+        let grid = |k: usize| -> Vec<f32> { (0..n2).map(|i| f32::from_le_bytes(b[24 + 4 * (k * n2 + i)..][..4].try_into().unwrap())).collect() };
+        Some(Land { seed, h: grid(0), wet: grid(1), crag: grid(2), river: river_line(seed) })
+    }
+}
+
+/// Uses `l` as the land for its seed from now on (a level's cached land), unless one is built.
+pub fn preload(l: Land) {
+    cache().lock().unwrap().entry(l.seed).or_insert_with(|| Arc::new(l));
 }
 
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -637,6 +685,16 @@ mod tests {
         let (lo, hi) = l.h.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
         let at_lo = l.h.iter().position(|v| *v == lo).unwrap();
         assert!(lo > 60.0 && hi - lo > 360.0 && hi - lo < 480.0, "relief {lo}..{hi}, lowest at cell {} {}", at_lo % N, at_lo / N);
+    }
+
+    /// The committed level's cached land is what the generator builds (else bump `LAND_REV`
+    /// and re-bake).
+    #[test]
+    fn committed_land_cache_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/levels/open").join(LAND_FILE);
+        let cached = Land::load(&path, crate::open::SEED).expect("assets/levels/open/land.bin of this revision");
+        let built = land(crate::open::SEED);
+        assert!(cached.h == built.h && cached.wet == built.wet && cached.crag == built.crag, "the cached land is stale: re-bake");
     }
 
     #[test]

@@ -413,8 +413,10 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
                 rects.push(road((lo + hi) * 0.5, (hi - lo) * 0.5, 0.0));
                 continue;
             }
-            // The sidewalk and 3 m inside it, round the block.
-            let strip = SIDEWALK + 3.5;
+            // The sidewalk and the row of buildings behind it (22 m: the deepest unit and its
+            // setback), round the block; the yard in the middle keeps a few trees. (One rect per
+            // edge, not one per building: the tree graph checks every rect.)
+            let strip = SIDEWALK + 0.5 + 22.0;
             let c = (lo + hi) * 0.5;
             let h = (hi - lo) * 0.5;
             rects.push(road(Vec2::new(c.x, lo.y + strip * 0.5), Vec2::new(h.x, strip * 0.5), 0.0));
@@ -428,8 +430,8 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         for (c, h, yaw) in crate::art::water::channel(&o.net.land.river, |x, z| hf.height_at(x, z)) {
             rects.push(Rect { center: c, half: h, yaw, y: hf.height_at(c.x, c.y), tag: "road".into() });
         }
-        for b in &o.buildings.buildings {
-            let garden = if b.use_ == Use::House && !crate::open::town::in_core(b.centre) { 7.0 } else { 3.0 };
+        for b in o.buildings.buildings.iter().filter(|b| !crate::open::town::in_core(b.centre) || b.use_ == Use::Civic) {
+            let garden = if b.use_ == Use::House { 7.0 } else { 3.0 };
             rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(garden), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
         }
     }
