@@ -585,14 +585,13 @@ const CAM_MIN_PULL: f32 = 0.22;
 /// boulders, traffic, `extra`) along the whole line; a thin trunk only near the eye (one
 /// passing between the camera and the car isn't worth a jump).
 pub fn chase_clearance(pivot: Vec3, eye: Vec3, ground: &impl vehicle::Ground, extra: &[vehicle::Obstacle]) -> f32 {
-    use vehicle::Give;
     let (a, b) = (Vec2::new(pivot.x, pivot.z), Vec2::new(eye.x, eye.z));
     let mid = (a + b) * 0.5;
     let r = a.distance(b) * 0.5 + 2.0;
     let mut obs = Vec::new();
     ground.obstacles(mid, r, &mut obs);
     obs.extend_from_slice(extra);
-    obs.retain(|o| matches!(o.give, Give::Solid));
+    obs.retain(|o| o.give.is_solid());
     let mut walls = Vec::new();
     ground.walls(mid, r, &mut walls);
     const N: usize = 32;

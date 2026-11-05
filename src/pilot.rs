@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::stage::{self, Corner, Road, Surface, Turn};
-use crate::vehicle::{self, Car, Give, Ground, Input, Obstacle, Spec};
+use crate::vehicle::{self, Car, Ground, Input, Obstacle, Spec};
 
 /// How a pilot drives (a difficulty row of GAME_SYSTEMS §5, plus the per-rival spread).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -103,7 +103,7 @@ impl Pilot {
             let left = Vec2::new(d.y, -d.x);
             let c = Vec2::new(road.pts[i].x, road.pts[i].z) + left * line;
             ground.obstacles(c, 3.2, &mut obs);
-            for o in obs.iter().filter(|o| o.give == Give::Solid) {
+            for o in obs.iter().filter(|o| o.give.is_solid()) {
                 let rel = o.pos - c;
                 if rel.dot(d).abs() > 3.0 {
                     continue;

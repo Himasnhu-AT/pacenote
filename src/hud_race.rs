@@ -9,7 +9,7 @@
 //!
 //! Block: `P2/6 ▲1`, the car ahead and behind with the gap in seconds, a strip with a dot per
 //! rival and the player, and a status line (pursuit release countdown, the Recover hold).
-//! Results: Enter = Retry (the fee isn't charged again), F = Free roam. Settings › HUD ›
+//! Results: Enter = Continue (free roam), Backspace = Retry (the fee isn't charged again). Settings › HUD ›
 //! Race positions hides the block (the race runs anyway).
 
 use std::fmt::Write;
@@ -62,7 +62,7 @@ impl Plugin for RaceHudPlugin {
                 }
             },
         })
-        .add_systems(Update, (spawn_block, update_block, results_card, results_keys).chain().run_if(resource_exists::<RaceRun>))
+        .add_systems(Update, (spawn_block, update_block, results_card, results_keys).chain().distributive_run_if(resource_exists::<RaceRun>))
         .add_systems(Update, despawn_all.run_if(not(resource_exists::<RaceRun>)));
     }
 }
@@ -301,7 +301,7 @@ fn results_card(
                 }
                 c.spawn(text(format!("Balance {} N", notes(wallet.balance)), label(SIZE_LABEL), t.text));
                 c.spawn((Node { height: px(6), ..default() }, Pickable::IGNORE));
-                c.spawn(text("Enter  Retry      F  Free roam", label(SIZE_TINY + 1.0), t.text_dim));
+                c.spawn(text("Enter  Continue      Backspace  Retry", label(SIZE_TINY + 1.0), t.text_dim));
             });
         });
 }
@@ -310,17 +310,21 @@ fn car_name(id: &str) -> String {
     crate::career::garage::def(id).map_or(id.to_string(), |d| d.name.to_string())
 }
 
-/// Enter: Retry (same field, no new fee); F: back to free roam.
+/// Enter / F: Continue, back to free roam where the car is. Backspace: Retry (same field, no
+/// new fee). Continue is on Enter because that's what a player presses to get past a results
+/// card; a retry should be asked for.
 fn results_keys(world: &mut World) {
-    if !world.resource::<RaceRun>().done || world.get_resource::<engine::ui::prelude::Screens>().is_some_and(|s| s.top().is_some()) {
+    // Leaving the event removes the race (the pause menu's Abandon may have run this frame).
+    if !world.get_resource::<RaceRun>().is_some_and(|r| r.done) || world.get_resource::<engine::ui::prelude::Screens>().is_some_and(|s| s.top().is_some()) {
         return;
     }
     let Some(keys) = world.get_resource::<ButtonInput<KeyCode>>() else { return };
-    let (retry, roam) = (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter), keys.just_pressed(KeyCode::KeyF));
-    if retry {
-        crate::meta::restart_stage(world);
-    } else if roam {
+    let roam = keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::KeyF]);
+    let retry = keys.just_pressed(KeyCode::Backspace);
+    if roam {
         crate::open::events::leave(world);
+    } else if retry {
+        crate::meta::restart_stage(world);
     }
 }
 

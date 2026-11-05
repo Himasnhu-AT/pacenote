@@ -60,19 +60,20 @@ impl Difficulty {
     }
     /// Share of the surface's grip used in corners (GAME_SYSTEMS §5).
     pub fn pace(self) -> f32 {
-        [0.55, 0.68, 0.80, 0.92][self as usize]
+        [0.62, 0.74, 0.85, 0.94][self as usize]
     }
     /// Share of grip used braking.
     pub fn brake(self) -> f32 {
-        [0.50, 0.55, 0.60, 0.65][self as usize]
+        [0.55, 0.60, 0.65, 0.70][self as usize]
     }
     /// Chance of a mistake at each corner of grade ≤ 2.
     pub fn mistake(self) -> f32 {
-        [0.15, 0.08, 0.04, 0.01][self as usize]
+        [0.10, 0.05, 0.025, 0.01][self as usize]
     }
-    /// Chance a rival lets the player past when caught (Legend never: it defends the centre).
+    /// Chance a rival lets the player past when caught (Ace and Legend never: they defend the
+    /// centre). Rookie rivals still make room sometimes; the rest make the player earn a pass.
     pub fn yields(self) -> f32 {
-        [1.0, 1.0, 0.5, 0.0][self as usize]
+        [0.5, 0.2, 0.0, 0.0][self as usize]
     }
     /// The player's start slot, 1-based (1 = front).
     pub fn player_slot(self) -> u8 {
@@ -154,7 +155,7 @@ pub struct Racer {
 /// The racers' poses after the last step, `(position, forward)` per car (the same shape as
 /// `open::traffic::TrafficSolids`, DECISIONS R4). Shared by `Arc` with the `StageWorld`.
 #[derive(Resource, Clone, Default)]
-pub struct RacerSolids(pub Arc<RwLock<Vec<(Vec3, Vec3)>>>);
+pub struct RacerSolids(pub Arc<RwLock<Vec<crate::open::traffic::SolidPose>>>);
 
 impl RacerSolids {
     /// Collision cylinders for racers within `r` of `p`, appended to `out` (the traffic shape:
@@ -350,7 +351,7 @@ pub fn pick_cars(player_pi: u16, seed: u64) -> Vec<(&'static CarDef, Upgrades)> 
 /// car of the race as solids.
 pub struct RivalGround<'a, G: Ground> {
     pub base: &'a G,
-    pub others: &'a [(Vec3, Vec3)],
+    pub others: &'a [crate::open::traffic::SolidPose],
 }
 
 impl<G: Ground> Ground for RivalGround<'_, G> {
@@ -374,9 +375,9 @@ impl<G: Ground> Ground for RivalGround<'_, G> {
     }
 }
 
-/// A car's solid pose: (centre on the ground, forward).
-pub fn solid_pose(car: &Car) -> (Vec3, Vec3) {
-    (car.pos - car.up() * 0.45, car.forward())
+/// A car's solid pose: (centre on the ground, forward, velocity).
+pub fn solid_pose(car: &Car) -> crate::open::traffic::SolidPose {
+    (car.pos - car.up() * 0.45, car.forward(), car.vel)
 }
 
 /// The player as the race sees it each step.
@@ -527,16 +528,16 @@ impl RaceSim {
         if self.armed && self.step.is_multiple_of(HIST_STEPS) && self.player_hist.len() as u32 <= self.step / HIST_STEPS {
             self.player_hist.push(player.progress);
         }
-        let poses: Vec<(Vec3, Vec3, bool)> = self.rivals.iter().map(|r| (solid_pose(&r.car).0, solid_pose(&r.car).1, r.ghost > 0.0)).collect();
+        let poses: Vec<(crate::open::traffic::SolidPose, bool)> = self.rivals.iter().map(|r| (solid_pose(&r.car), r.ghost > 0.0)).collect();
         let mut others = Vec::with_capacity(RIVALS);
         let player_pose = solid_pose(player.car);
         let snapshot: Vec<(f32, f32, f32, bool)> = self.rivals.iter().map(|r| (r.progress, r.car.speed(), lateral_on(road, &r.car), r.finish.is_some())).collect();
         let player_lat = lateral_on(road, player.car);
         for k in 0..self.rivals.len() {
             others.clear();
-            if !poses[k].2 {
+            if !poses[k].1 {
                 others.push(player_pose);
-                others.extend(poses.iter().enumerate().filter(|(j, p)| *j != k && !p.2).map(|(_, p)| (p.0, p.1)));
+                others.extend(poses.iter().enumerate().filter(|(j, p)| *j != k && !p.1).map(|(_, p)| p.0));
             }
             let g = RivalGround { base: ground, others: &others };
             let held = !self.armed || self.step < self.rivals[k].release || self.rivals[k].finish.is_some();
@@ -705,7 +706,7 @@ fn touching(a: &Car, b: &Car) -> bool {
         return false;
     }
     let (pa, pb) = (solid_pose(a), solid_pose(b));
-    let circles = |p: (Vec3, Vec3)| {
+    let circles = |p: crate::open::traffic::SolidPose| {
         let c = Vec2::new(p.0.x, p.0.z);
         let f = Vec2::new(p.1.x, p.1.z).normalize_or_zero();
         [c - f * 1.3, c, c + f * 1.3]
@@ -773,8 +774,9 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
 
     if let Some((d, v_ahead, lat_ahead)) = ahead {
         let gap_m = (d - 4.5).max(0.0);
-        let wants = me_v.max(v_ahead) >= v_ahead * 1.03 || gap_m < 0.6 * me_v;
-        if min_w >= 4.5 && wants && gap_m < 25.0 && (gentle || r.pass_side != 0.0 && straight) {
+        // Goes for a pass when even a little quicker, or close behind (pressure).
+        let wants = me_v.max(v_ahead) >= v_ahead * 1.01 || gap_m < 0.9 * me_v;
+        if min_w >= 4.3 && wants && gap_m < 35.0 && (gentle || r.pass_side != 0.0 && straight) {
             // Overtake: the side away from the car ahead (kept once chosen).
             let room = min_w * 0.5 - 1.1;
             if r.pass_side == 0.0 {
@@ -787,9 +789,9 @@ fn racecraft(r: &mut Racer, k: usize, cars: &[(f32, f32, f32, bool)], player: (f
             }
         } else {
             r.pass_side = 0.0;
-            // Follow at a 0.6 s headway: the speed it can still brake from to the car ahead's
-            // speed within the gap left (≈ 4 m/s², all surfaces).
-            let want_gap = 2.0 + 0.6 * me_v;
+            // Follow at a 0.35 s headway, on the car ahead's bumper: the speed it can still
+            // brake from to the car ahead's speed within the gap left (≈ 4 m/s², all surfaces).
+            let want_gap = 1.5 + 0.35 * me_v;
             let room = gap_m - want_gap;
             let cap = if room >= 0.0 { (v_ahead * v_ahead + 2.0 * 4.0 * room).sqrt() } else { (v_ahead + room * 0.5).max(0.0) };
             r.pilot.speed_cap = Some(cap);

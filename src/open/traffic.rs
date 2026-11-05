@@ -596,6 +596,12 @@ struct Agent {
     behind_player: bool,
 }
 
+impl Agent {
+    fn solid(&self) -> SolidPose {
+        (self.pose.0, self.pose.1, self.pose.1 * self.v)
+    }
+}
+
 /// What's drawn of a car: its pose now and before the last step (for interpolation).
 #[derive(Clone, Copy, Debug)]
 pub struct CarView {
@@ -717,7 +723,7 @@ impl Traffic {
     /// them with the world's).
     pub fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
         for a in &self.agents {
-            push_solids(a.pose, p, r, out);
+            push_solids(a.solid(), p, r, out);
         }
     }
 
@@ -1225,16 +1231,20 @@ fn idm(v: f32, v0: f32, lead: Option<(f32, f32)>) -> f32 {
     (free - inter).clamp(-B_MAX, A_MAX)
 }
 
-/// Collision cylinders of one car at `pose` (position, forward) within `r` of `p`: three
-/// circles along it. Shared with the rivals (`career::racers::RacerSolids`).
-pub fn push_solids(pose: (Vec3, Vec3), p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
+/// A car as a solid: (centre on the ground, forward, velocity m/s).
+pub type SolidPose = (Vec3, Vec3, Vec3);
+
+/// Collision cylinders of one car at `pose` (position, forward, velocity) within `r` of `p`:
+/// three circles along it, moving with the car. Shared with the rivals
+/// (`career::racers::RacerSolids`).
+pub fn push_solids(pose: SolidPose, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
     let c = xz(pose.0);
     if c.distance_squared(p) > (r + 3.0) * (r + 3.0) {
         return;
     }
     let f = xz(pose.1).normalize_or_zero();
     for k in SOLID_AT {
-        out.push(Obstacle { pos: c + f * k, radius: SOLID_R, top: pose.0.y + SOLID_TOP, give: Give::Solid });
+        out.push(Obstacle { pos: c + f * k, radius: SOLID_R, top: pose.0.y + SOLID_TOP, give: Give::Car { vx: pose.2.x, vz: pose.2.z } });
     }
 }
 
@@ -1301,7 +1311,7 @@ pub struct TrafficPlugin;
 /// The cars' collision cylinders after the last step, shareable with a `Ground` (clone the
 /// `Arc` into it and read with [`TrafficSolids::obstacles`]).
 #[derive(Resource, Clone, Default)]
-pub struct TrafficSolids(pub Arc<RwLock<Vec<(Vec3, Vec3)>>>);
+pub struct TrafficSolids(pub Arc<RwLock<Vec<SolidPose>>>);
 
 impl TrafficSolids {
     /// Cylinders for cars within `r` of `p`, appended to `out`.
@@ -1332,7 +1342,7 @@ fn step(time: Res<Time<Fixed>>, mut traffic: ResMut<Traffic>, cars: Query<&crate
     traffic.step(time.delta_secs(), player);
     if let Ok(mut s) = solids.0.write() {
         s.clear();
-        s.extend(traffic.agents.iter().map(|a| a.pose));
+        s.extend(traffic.agents.iter().map(|a| a.solid()));
     }
 }
 
