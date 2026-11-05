@@ -171,7 +171,10 @@ fn local_offset(secs: i64) -> i64 {
     let mut tm = Tm { ints: [0; 9], gmtoff: 0, rest: [0; 4] };
     // SAFETY: `localtime_r` reads `secs` and writes at most a `struct tm` into `tm`, which is larger.
     let ok = unsafe { !localtime_r(&secs, &mut tm).is_null() };
-    if ok { tm.gmtoff as i64 } else { 0 }
+    // `c_long` is i64 on 64-bit targets, i32 on 32-bit ones.
+    #[allow(clippy::useless_conversion)]
+    let off = i64::from(tm.gmtoff);
+    if ok { off } else { 0 }
 }
 
 #[cfg(not(unix))]

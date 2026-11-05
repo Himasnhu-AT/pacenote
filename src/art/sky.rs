@@ -167,6 +167,7 @@ fn dome_mesh() -> Mesh {
         .with_inserted_indices(Indices::U32(idx))
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Spawns the dome once per stage (an atmosphere sky only: grey weather keeps its gradient).
 fn spawn_clouds(
     mut commands: Commands,

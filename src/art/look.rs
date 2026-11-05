@@ -66,7 +66,7 @@ const NIGHT_KEY: Key = Key {
     vis: 1600.0,
     haze: [0.022, 0.028, 0.045],
     glow: [0.05, 0.06, 0.09],
-    amb: 3.0,
+    amb: 0.3,
     amb_col: [0.45, 0.55, 1.0],
     cover: 0.3,
 };
@@ -82,27 +82,27 @@ const KEYS: [Key; 13] = [
     NIGHT_KEY,
     Key { h: 4.2, ..NIGHT_KEY },
     // Sun ≈ −7.5°: blue hour.
-    Key { h: 4.8, ev: 3.6, vis: 2000.0, haze: [0.06, 0.065, 0.1], glow: [0.16, 0.12, 0.13], amb: 8.0, amb_col: [0.5, 0.58, 0.95], cover: 0.35, ..NIGHT_KEY },
+    Key { h: 4.8, ev: 3.6, vis: 2000.0, haze: [0.06, 0.065, 0.1], glow: [0.16, 0.12, 0.13], amb: 2.0, amb_col: [0.5, 0.58, 0.95], cover: 0.35 },
     // Sun ≈ −3.5°: dawn glow.
-    Key { h: 5.35, ev: 7.6, vis: 3000.0, haze: [0.3, 0.3, 0.38], glow: [0.7, 0.5, 0.4], amb: 40.0, amb_col: [0.55, 0.62, 0.9], cover: 0.35, ..NIGHT_KEY },
+    Key { h: 5.35, ev: 7.6, vis: 3000.0, haze: [0.3, 0.3, 0.38], glow: [0.7, 0.5, 0.4], amb: 40.0, amb_col: [0.55, 0.62, 0.9], cover: 0.35 },
     // Sun ≈ +3.7°: low gold, a little valley mist.
-    Key { h: 6.0, ev: 10.6, vis: 4000.0, haze: [0.72, 0.68, 0.68], glow: [1.0, 0.72, 0.5], amb: 150.0, amb_col: [0.66, 0.72, 0.95], cover: 0.35, ..NIGHT_KEY },
+    Key { h: 6.0, ev: 10.6, vis: 4000.0, haze: [0.72, 0.68, 0.68], glow: [1.0, 0.72, 0.5], amb: 150.0, amb_col: [0.66, 0.72, 0.95], cover: 0.35 },
     // Sun ≈ +8.5°.
-    Key { h: 6.5, ev: 11.6, vis: 5000.0, haze: [0.74, 0.74, 0.76], glow: [1.0, 0.82, 0.62], amb: 230.0, amb_col: [0.7, 0.74, 0.95], cover: 0.35, ..NIGHT_KEY },
+    Key { h: 6.5, ev: 11.6, vis: 5000.0, haze: [0.74, 0.74, 0.76], glow: [1.0, 0.82, 0.62], amb: 230.0, amb_col: [0.7, 0.74, 0.95], cover: 0.35 },
     // Sun 34°.
-    Key { h: 9.0, ev: 13.6, vis: 8000.0, haze: [0.7, 0.77, 0.88], glow: [1.0, 0.94, 0.82], amb: 450.0, amb_col: [0.75, 0.82, 1.0], cover: 0.38, ..NIGHT_KEY },
+    Key { h: 9.0, ev: 13.6, vis: 8000.0, haze: [0.7, 0.77, 0.88], glow: [1.0, 0.94, 0.82], amb: 450.0, amb_col: [0.75, 0.82, 1.0], cover: 0.38 },
     // Sun 60°.
-    Key { h: 12.0, ev: 14.4, vis: 9000.0, haze: [0.72, 0.79, 0.9], glow: [1.0, 0.96, 0.88], amb: 600.0, amb_col: [0.78, 0.84, 1.0], cover: 0.5, ..NIGHT_KEY },
+    Key { h: 12.0, ev: 14.4, vis: 9000.0, haze: [0.72, 0.79, 0.9], glow: [1.0, 0.96, 0.88], amb: 600.0, amb_col: [0.78, 0.84, 1.0], cover: 0.5 },
     // Sun 45°.
-    Key { h: 16.0, ev: 14.1, vis: 8000.0, haze: [0.72, 0.78, 0.88], glow: [1.0, 0.94, 0.84], amb: 550.0, amb_col: [0.78, 0.83, 1.0], cover: 0.45, ..NIGHT_KEY },
+    Key { h: 16.0, ev: 14.1, vis: 8000.0, haze: [0.72, 0.78, 0.88], glow: [1.0, 0.94, 0.84], amb: 550.0, amb_col: [0.78, 0.83, 1.0], cover: 0.45 },
     // Sun 13.5°.
-    Key { h: 19.0, ev: 12.4, vis: 5500.0, haze: [0.76, 0.74, 0.74], glow: [1.0, 0.8, 0.58], amb: 300.0, amb_col: [0.68, 0.72, 0.95], cover: 0.4, ..NIGHT_KEY },
+    Key { h: 19.0, ev: 12.4, vis: 5500.0, haze: [0.76, 0.74, 0.74], glow: [1.0, 0.8, 0.58], amb: 300.0, amb_col: [0.68, 0.72, 0.95], cover: 0.4 },
     // Sun ≈ +3.7°: sunset.
-    Key { h: 20.0, ev: 10.4, vis: 4000.0, haze: [0.72, 0.64, 0.62], glow: [1.0, 0.66, 0.42], amb: 140.0, amb_col: [0.62, 0.66, 0.95], cover: 0.4, ..NIGHT_KEY },
+    Key { h: 20.0, ev: 10.4, vis: 4000.0, haze: [0.72, 0.64, 0.62], glow: [1.0, 0.66, 0.42], amb: 140.0, amb_col: [0.62, 0.66, 0.95], cover: 0.4 },
     // Sun ≈ −1°: dusk glow.
-    Key { h: 20.5, ev: 8.8, vis: 3000.0, haze: [0.38, 0.36, 0.44], glow: [0.8, 0.52, 0.4], amb: 70.0, amb_col: [0.55, 0.6, 0.95], cover: 0.35, ..NIGHT_KEY },
+    Key { h: 20.5, ev: 8.8, vis: 3000.0, haze: [0.38, 0.36, 0.44], glow: [0.8, 0.52, 0.4], amb: 70.0, amb_col: [0.55, 0.6, 0.95], cover: 0.35 },
     // Sun ≈ −7.5°: blue hour.
-    Key { h: 21.3, ev: 3.6, vis: 2000.0, haze: [0.06, 0.065, 0.1], glow: [0.16, 0.12, 0.13], amb: 8.0, amb_col: [0.5, 0.58, 0.95], cover: 0.35, ..NIGHT_KEY },
+    Key { h: 21.3, ev: 3.6, vis: 2000.0, haze: [0.06, 0.065, 0.1], glow: [0.16, 0.12, 0.13], amb: 2.0, amb_col: [0.5, 0.58, 0.95], cover: 0.35 },
 ];
 
 fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
@@ -307,6 +307,13 @@ pub fn stage_look(def: &StageDef, vis: f32) -> Look {
     day_look(stage_hours(def.time), def.weather, vis)
 }
 
+/// How bright fake fill lights tuned for daylight should be at clock hour `hours` (1 at
+/// noon): the keyed exposure relative to noon's. A fixed-power fill (the cabin's) would
+/// otherwise glare at dusk and night, when the exposure opens up by 10+ stops.
+pub fn daylight_fill_scale(hours: f32) -> f32 {
+    2f32.powf(sample(hours).ev - 14.4).clamp(1e-4, 1.0)
+}
+
 /// Clock hours per 0.02° of sun travel (15°/h): the look is rewritten once per step.
 const QUANTUM_H: f32 = 0.02 / 15.0;
 
@@ -414,5 +421,7 @@ mod tests {
         let dusk = light_at(21.0);
         assert_eq!(dusk.elevation, TWILIGHT_EL);
         assert!(dusk.moon == 0.0);
+        assert_eq!(daylight_fill_scale(12.0), 1.0);
+        assert!(daylight_fill_scale(23.0) < 1e-3);
     }
 }

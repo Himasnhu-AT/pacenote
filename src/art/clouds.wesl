@@ -203,7 +203,7 @@ fn fragment(in: VOut) -> @location(0) vec4<f32> {
             // the "powder" darkening of edges facing away from the light.
             let beer = max(exp(-tau), 0.3 * exp(-tau * 0.18));
             let powder = 1.0 - 0.6 * exp(-dens * 4.0);
-            let sun = c.sun_rad.rgb * beer * mix(powder, 1.0, 0.5 + 0.5 * cos_t) * phase * 2.6;
+            let sun = c.sun_rad.rgb * beer * mix(powder, 1.0, 0.5 + 0.5 * cos_t) * phase * 4.0;
             let amb = mix(c.amb_bot.rgb, c.amb_top.rgb, clamp(h * 1.3, 0.0, 1.0)) * mix(0.35, 1.0, h);
             let s = sun + amb;
             // Energy-conserving step (Hillaire): what this slab scatters, seen through what's

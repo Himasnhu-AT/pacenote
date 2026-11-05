@@ -119,6 +119,52 @@ memgate -- blender -b --factory-startup -P tools/art/build_rallycar.py -- assets
   down) → bonnet → chase. The lamp pod is hidden in cockpit and bonnet views.
   glTF images get CPU-built mips at load, then drop their CPU copy.
 
+## Sky, clouds and time of day (festival, stream C)
+
+Code: `src/daytime.rs` (clock, settings), `src/art/look.rs` (keyframes → `Look`),
+`src/art/sky.rs` + `src/art/clouds.wesl` (cloud shell, stars, street lamps). Design:
+`docs/festival/ART_BIBLE.md` §2, `DECISIONS.md` L1-L8. Shots: `docs/festival/shots/`.
+
+- **Clock.** `DayClock` runs at 5× real time on `Time<Virtual>` (pause freezes it). Free roam
+  starts at World › Start time (Dawn 06:00, Morning 09:00 default, Noon 12:30, Afternoon 16:00,
+  Sunset 19:30, Night 23:00, Real clock, Last) and runs while World › Time passes is on. Night
+  is offered only when `art::headlights::Headlights` exists; until then a night start is
+  Sunset. Classic stages freeze at their `TimeOfDay` (07:45 / 13:00 / 16:30 / 19:45).
+- **Sun.** Solar formula (46° N, declination 19°, solar noon 13:00): sunrise ≈ 05:37, sunset ≈
+  20:23. The light is the raw sun above the atmosphere (110 000 lux, near white): Bevy's
+  atmosphere reddens and dims it for the sky and for every lit surface, so keying a warm, dim
+  sun reddens it twice (that turned dawn brown). Through twilight the light is held at −2.5°
+  and dimmed a decade per 1.9° of true depression (keeps the afterglow); below −10° it becomes
+  the moon (opposite azimuth, 35° up, 0.6 lux, blue), so `SkyMode` never changes.
+- **Keyframes** (`look.rs` `KEYS`): exposure EV100, haze (fog colour matched to the horizon,
+  5-9 km by day), flat fill 450-600 cd/m² by day (was 2400), cloud cover. Auto exposure
+  (Medium+) adapts −1.5 / +1 EV around the key. Tonemapper Khronos PBR Neutral (keeps the deep
+  blue zenith; Tony and AgX washed it to grey-lavender, compared in game).
+- **Cadence.** `drive_look` rewrites `Look` only when the sun moved 0.02° (≈ 1 Hz at 5×; measured
+  31 writes in 30 s); the sky light refilters every 20 s (`LookConfig::env_refresh_hz` 0.05), or
+  within a second after a dev jump.
+- **Clouds.** A camera-centred dome (r 40 km) drawn in the transparent pass after the atmosphere,
+  depth-tested, unlit, premultiplied. It marches the 1.8-3.2 km shell of a curved earth: Low 1
+  sample of a flat layer, Medium 4 steps + 1 light tap, High+ 8 steps + 2 taps. Density = macro
+  coverage × Perlin-Worley shape (256² RGBA8) × height profile, eroded by a 32³ Worley volume
+  (both generated at startup, 0.3 MB). Beer with a multiple-scattering floor, dual HG phase,
+  sky fill, ground bounce, far clouds melt into the haze. Wind 11.5 m/s from the WSW on game
+  time; coverage follows the keys plus a slow wander. Stars (rotating about the pole) come from
+  the same shader once the sun is 6° down.
+- **Street lamps.** 24 pooled `PointLight`s (8 on Low), 1 800 lm, no shadows, moved twice a
+  second to the nearest of B's `SignKind::StreetLight` posts, lit below sun 4°.
+- **Dev commands.** `look.time {time, speed, stop}` (replaces the engine's timeline command),
+  `look.speed {x}`, `day.get`, `sky.clouds {on}` (A/B; also returns the look write count).
+
+Cost (M5 Pro, 1080p offscreen, same binary, clouds on vs off, sky ≈ 60 % of the view, shared
+machine so ±0.2 ms noise): Low ≈ 0 (within noise), Medium +0.34 ms, High +0.14 ms (budgets
+0.05 / 0.5 / 0.7). +1 draw. CPU: one material uniform update per frame, one `Look` write per
+second.
+
+Known gaps: clouds are not in the env map / reflections (engine request) and cast no shadows on
+the ground (needs `terrain.wesl`, stream A's); the cabin fill light in `car.rs` (stream D) is
+fixed at 6000 lm and glares at dusk and night: scale it by `look::daylight_fill_scale`.
+
 ## Measurements
 
 Apple M5 Pro, dev build, offscreen 1920×1080, High quality, governor off, chase camera at the
