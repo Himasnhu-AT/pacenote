@@ -312,10 +312,8 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("show_fps", "Video", Some("Show frame rate"), None),
     // World (stream C's `daytime::DaySettings` rows): when free roam starts, whether the
     // clock runs.
-    ("start", "World", None, None),
-    ("start_time", "World", None, None),
-    ("time_passes", "World", None, None),
-    ("clock_runs", "World", None, None),
+    ("day_start", "World", None, None),
+    ("day_time_passes", "World", None, None),
     // Interface.
     ("language", "Interface", None, None),
     ("ui_scale", "Interface", Some("Menu and HUD size"), Some("Scales menus and the HUD as a whole.")),
