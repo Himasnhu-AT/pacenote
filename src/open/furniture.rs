@@ -905,10 +905,20 @@ fn warnings(net: &RoadNet, heights: &Heightfield, r: usize, info: &RoadInfo, che
         }
     }
 
-    // Blind crests (R_v under 100 m), and jumps (under 55 m: the yumps).
+    // The jumps (`net.yumps`: kickers taken towards higher stations): the jump sign.
+    let yumps: Vec<usize> = net.yumps.iter().filter(|y| y.0 == r).map(|y| y.1).collect();
+    if dir > 0 {
+        for &y in &yumps {
+            // The kicker starts 50 m before the lip.
+            push(y.saturating_sub((50.0 / STEP) as usize), warn::JUMP, 4);
+        }
+    }
+    // Blind crests (R_v under 100 m), bar the jumps.
     for (a, e) in spans(n, |i| kv(road, i).is_some_and(|v| v < -1.0 / 100.0)) {
-        let top = (a..e).map(|i| kv(road, i).unwrap_or(0.0)).fold(0.0f32, f32::min);
-        push(first(a, e), if top < -1.0 / 55.0 { warn::JUMP } else { warn::CREST }, 4);
+        if yumps.iter().any(|&y| y + 40 >= a && y <= e + 40) {
+            continue;
+        }
+        push(first(a, e), warn::CREST, 4);
     }
 
     // Side roads joining the B-road.
@@ -1360,6 +1370,18 @@ pub(crate) mod tests {
         }
         eprintln!("{hairpins} hairpins, {warned} warned approaches");
         assert!(hairpins > 10);
+    }
+
+    #[test]
+    fn every_jump_has_its_sign() {
+        let w = world();
+        let f = &*w.furniture;
+        assert!(!w.net.yumps.is_empty(), "the level has jumps");
+        for &(r, y) in &w.net.yumps {
+            let s_lip = y as f32 * STEP;
+            let ok = f.signs.iter().filter(|s| s.kind == SignKind::Warning(warn::JUMP)).filter_map(|s| station_of(w, r, s)).any(|(s, lat)| (40.0..=250.0).contains(&(s_lip - s)) && lat <= 0.0);
+            assert!(ok, "no jump sign before the jump on road {r} at {s_lip} m");
+        }
     }
 
     #[test]
