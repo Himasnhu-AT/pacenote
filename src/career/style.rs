@@ -1065,6 +1065,10 @@ fn road_info(stage: &crate::world::StageWorld, p: Vec2) -> Option<RoadInfo> {
     Some(RoadInfo { road: k, s: at.s, curv: road.curv[at.i.min(road.len() - 1)], half_width: road.half_width(&at), lateral: at.lateral })
 }
 
+/// What stops scoring: the pause, the loading screen, being the guide.
+pub(crate) type Gates<'w> = (Option<Res<'w, engine::pause::Paused>>, Option<Res<'w, crate::loading::Loading>>, Option<Res<'w, crate::meta::Role>>);
+type ScoreLocals<'s> = (Local<'s, Vec<StyleEvent>>, Local<'s, Vec<(u32, f32)>>, Local<'s, usize>);
+
 #[allow(clippy::too_many_arguments)]
 fn score(
     time: Res<Time<Fixed>>,
@@ -1072,11 +1076,11 @@ fn score(
     run: Res<crate::drive::StageRun>,
     cars: Query<&crate::drive::DrivenCar>,
     others: Res<super::racers::OtherCars>,
-    (paused, loading, role): (Option<Res<engine::pause::Paused>>, Option<Res<crate::loading::Loading>>, Option<Res<crate::meta::Role>>),
+    (paused, loading, role): Gates,
     mut state: ResMut<StyleState>,
     mut rhythm: ResMut<Rhythm>,
     (mut events, mut pay): (MessageWriter<StyleEvent>, MessageWriter<super::Payout>),
-    (mut buf, mut rivals, mut splits): (Local<Vec<StyleEvent>>, Local<Vec<(u32, f32)>>, Local<usize>),
+    (mut buf, mut rivals, mut splits): ScoreLocals,
 ) {
     if role.is_some_and(|r| *r == crate::meta::Role::Guide) {
         return;

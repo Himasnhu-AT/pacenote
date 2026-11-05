@@ -373,3 +373,41 @@ fn write_challenges() {
     std::fs::write(file_path(), to_ron(&defs)).unwrap();
 }
 
+
+/// Cost per fixed step of Style + challenges as the game runs them (dev profile): the road
+/// lookups on the committed level, the scorer with 40 cars about, the challenge tracker.
+/// Budget (DECISIONS §4 F): style ≤ 0.05 ms.
+#[test]
+#[ignore]
+fn step_cost() {
+    use crate::career::racers::{OtherCar, OtherKind};
+    use crate::career::style::{Detector, RoadInfo, StyleFrame};
+    let (defs, o) = committed();
+    let placed = place(&defs, &o.net);
+    let road = &o.net.roads[0].road;
+    let others: Vec<OtherCar> = (0..40).map(|k| OtherCar { id: k, kind: OtherKind::Traffic, pos: road.pts[(k as usize * 37) % road.len()], fwd: Vec3::X, speed: 15.0 }).collect();
+    let mut d = Detector::default();
+    let mut t = Tracker::default();
+    let mut out = Vec::new();
+    let mut co = Vec::new();
+    let car = crate::vehicle::Car::new(road.pts[0], 0.0);
+    let n = 20_000;
+    let start = std::time::Instant::now();
+    for k in 0..n {
+        let i = (k / 4) % road.len();
+        let p = road.pts[i];
+        let xz = Vec2::new(p.x, p.z);
+        let mut f = StyleFrame::of(&car, 1.0 / 60.0);
+        f.pos = p;
+        f.vel = Vec3::new(road.dir[i].x, 0.0, road.dir[i].y) * 30.0;
+        f.others = &others;
+        f.road = o.net.nearest(xz, 30.0).map(|n| RoadInfo { road: n.road as u32, s: n.at.s, curv: 0.0, half_width: 3.0, lateral: n.at.lateral });
+        d.step(&f, &mut out);
+        let cf = ChallengeFrame { dt: 1.0 / 60.0, live: true, pos: p, vel: f.vel, fwd: f.fwd, up_y: 1.0, contacts: 4, hits: 0, body_contact: false, slide_meter: 0.0, road: o.net.nearest(xz, 60.0).map(|n| (n.road as u32, n.at.lateral.abs())) };
+        t.step(&cf, &placed, &mut co);
+        out.clear();
+        co.clear();
+    }
+    let ms = start.elapsed().as_secs_f64() * 1000.0 / n as f64;
+    eprintln!("style + challenges: {ms:.4} ms per step");
+}

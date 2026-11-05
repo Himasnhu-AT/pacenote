@@ -395,6 +395,6 @@ mod tests {
     fn lost_is_never_louder_than_bank() {
         // Both clips are peak-normalised: the cue levels decide (AUDIO_PASS §8 item 7).
         const { assert!(LOST_DB < BANK_DB) };
-        assert!(1.0 / MAX_TICKS >= 1.0 / 15.0);
+        const { assert!(MAX_TICKS <= 15.0) };
     }
 }

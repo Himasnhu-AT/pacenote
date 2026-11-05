@@ -764,7 +764,7 @@ fn track(
     run: Res<crate::drive::StageRun>,
     cars: Query<&crate::drive::DrivenCar>,
     rhythm: Res<crate::career::style::Rhythm>,
-    (paused, loading, role): (Option<Res<engine::pause::Paused>>, Option<Res<crate::loading::Loading>>, Option<Res<crate::meta::Role>>),
+    (paused, loading, role): crate::career::style::Gates,
     mut state: ResMut<ChallengeRun>,
     mut bests: ResMut<Bests>,
     dir: Option<Res<engine::paths::DataDir>>,
