@@ -250,3 +250,106 @@ mod tests {
         assert!(l[2 * 8 + 1] > l[3 * 8 + 3] && l[2 * 8 + 1] < 255);
     }
 }
+
+// ---------------------------------------------------------------- beyond the map
+
+/// Metres past the map's edge of each ring of the land beyond it (the first tucked 4 m under
+/// the terrain's edge).
+const HORIZON_RINGS: [f32; 14] = [-4.0, 30.0, 80.0, 160.0, 300.0, 500.0, 800.0, 1200.0, 1800.0, 2600.0, 3600.0, 5000.0, 7000.0, 9500.0];
+/// Points along each side of a ring.
+const HORIZON_SIDE: usize = 48;
+
+/// The land beyond the open world's edge (one low mesh, one draw): from the terrain's own edge
+/// heights it rolls out into forested hills rising to a ring of mountains 5-10 km out, which
+/// the fog takes. Nothing drives there; it only keeps the edge of the map from being a flat
+/// plain on the horizon. Positions and vertex colours (forest green to grey), `heights` the
+/// map's terrain, `half` its half size.
+pub fn horizon_mesh(heights: &dyn Fn(f32, f32) -> f32, half: f32, seed: u64) -> Mesh {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::{Indices, PrimitiveTopology};
+    let per = 4 * HORIZON_SIDE;
+    let mut pos: Vec<[f32; 3]> = Vec::new();
+    let mut col: Vec<[f32; 4]> = Vec::new();
+    for &d in &HORIZON_RINGS {
+        let a = half + d;
+        for u in 0..per {
+            let (side, f) = (u / HORIZON_SIDE, (u % HORIZON_SIDE) as f32 / HORIZON_SIDE as f32);
+            let t = -a + 2.0 * a * f;
+            let p = match side {
+                0 => Vec2::new(t, -a),
+                1 => Vec2::new(a, t),
+                2 => Vec2::new(-t, a),
+                _ => Vec2::new(-a, -t),
+            };
+            // The terrain's height where this ray leaves the map.
+            let e = p.clamp(Vec2::splat(-half + 1.0), Vec2::splat(half - 1.0));
+            let edge = heights(e.x, e.y);
+            let out = d.max(0.0);
+            let hills = crate::stage::fbm(p / 2200.0, 4, seed ^ 0x4012) * 0.5 + 0.5;
+            let rise = (60.0 + 420.0 * (out / 7000.0).min(1.0)) * (0.45 + 0.8 * hills);
+            let k = (out / 600.0).min(1.0);
+            let k = k * k * (3.0 - 2.0 * k);
+            // Knolls near the edge (the land doesn't stop being land), hills further out.
+            let knolls = crate::stage::fbm(p / 380.0, 3, seed ^ 0x4013) * 18.0 * k;
+            let y = if d < 0.0 { edge - 0.6 } else { edge + rise * k + knolls - 25.0 * k * (1.0 - (out / 2500.0).min(1.0)) };
+            pos.push([p.x, y, p.y]);
+            // The map's own mix of forest and open ground near, paler far (the fog does the
+            // rest).
+            let far = (out / 6000.0).min(1.0);
+            let shade = 0.85 + 0.3 * hills;
+            // Patches of forest (dark) and open ground, as on the map.
+            let wood = ((crate::stage::fbm(p / 320.0, 3, seed ^ 0x4014) + 0.1) * 3.0).clamp(0.0, 1.0);
+            let near = [0.30 - 0.17 * wood, 0.33 - 0.12 * wood, 0.22 - 0.10 * wood];
+            col.push([(near[0] + 0.10 * far) * shade, (near[1] + 0.08 * far) * shade, (near[2] + 0.16 * far) * shade, 1.0]);
+        }
+    }
+    let mut idx: Vec<u32> = Vec::new();
+    for r in 0..HORIZON_RINGS.len() - 1 {
+        for u in 0..per {
+            let (a, b) = ((r * per + u) as u32, (r * per + (u + 1) % per) as u32);
+            let (c, d) = (a + per as u32, b + per as u32);
+            // Facing up: along the ring, then outward.
+            idx.extend_from_slice(&[a, b, c, b, d, c]);
+        }
+    }
+    let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+    m.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
+    m.insert_indices(Indices::U32(idx));
+    m.compute_smooth_normals();
+    m
+}
+
+/// Spawns [`horizon_mesh`] for the open world (nothing in headless runs).
+pub fn spawn_horizon(world: &mut World, heights: &engine::world::Heightfield, half: f32, seed: u64) {
+    if !super::visual(world) {
+        return;
+    }
+    let mesh = horizon_mesh(&|x, z| heights.height_at(x, z), half, seed);
+    let aabb = bevy::camera::primitives::MeshAabb::get_aabb(&mesh);
+    let h = world.resource_mut::<Assets<Mesh>>().add(mesh);
+    let mat = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 1.0, reflectance: 0.2, ..default() });
+    let mut e = world.spawn((Name::new("beyond the map"), Mesh3d(h), MeshMaterial3d(mat), Transform::IDENTITY, engine::prelude::Scenery, engine::prelude::KeepDetail, bevy::light::NotShadowCaster));
+    if let Some(a) = aabb {
+        e.insert((a, bevy::camera::visibility::NoAutoAabb));
+    }
+}
+
+#[cfg(test)]
+mod horizon_tests {
+    /// The land beyond meets the map's edge (tucked just under it) and rises away from it.
+    #[test]
+    fn meets_the_edge_and_rises() {
+        let m = super::horizon_mesh(&|x, _| 100.0 + x * 0.01, 2000.0, 1);
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) = m.attribute(bevy::mesh::Mesh::ATTRIBUTE_POSITION) else { panic!() };
+        let per = 4 * super::HORIZON_SIDE;
+        for q in &p[..per] {
+            let edge = 100.0 + q[0].clamp(-1999.0, 1999.0) * 0.01;
+            assert!((q[1] - (edge - 0.6)).abs() < 0.01, "{q:?}");
+        }
+        let last = &p[p.len() - per..];
+        assert!(last.iter().all(|q| q[1] > 150.0), "far hills");
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(n)) = m.attribute(bevy::mesh::Mesh::ATTRIBUTE_NORMAL) else { panic!() };
+        assert!(n.iter().all(|v| v[1] > 0.0), "faces up");
+    }
+}

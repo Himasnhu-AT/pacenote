@@ -409,9 +409,45 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         Some(o) => crate::open::ecology::masks(&o.net),
         None => (Vec::new(), Vec::new(), Vec::new()),
     };
+    // Fernhollow's back yards (each block's middle, behind its rows) get garden trees, and the
+    // market square a row of trees along each long side.
+    let (mut gardens, mut planted) = (Vec::new(), pcg_core::PointSet::default());
+    if let Some(o) = &w.open {
+        use crate::open::buildings::LotKind;
+        for blk in o.buildings.blocks.iter().filter(|b| b.cell.is_some()) {
+            match blk.kind {
+                LotKind::Rows(_) => {
+                    let (lo, hi) = (blk.min + Vec2::splat(22.0), blk.max - Vec2::splat(22.0));
+                    if hi.x - lo.x > 4.0 && hi.y - lo.y > 4.0 {
+                        gardens.push(Rect::new((lo + hi) * 0.5, (hi - lo) * 0.5));
+                    }
+                }
+                LotKind::Plaza => {
+                    let mut plant = |p: Vec2| planted.push(pcg_core::Point { pos: Vec3::new(p.x, w.heights.height_at(p.x, p.y), p.y), seed: pcg_core::mix64(w.def.seed ^ (p.x.to_bits() as u64) << 32 ^ p.y.to_bits() as u64), ..Default::default() });
+                    // Rows round the edge, 10 m apart, 3 m in.
+                    let (lo, hi) = (blk.min + Vec2::splat(3.0), blk.max - Vec2::splat(3.0));
+                    let mut z = lo.y;
+                    while z <= hi.y + 0.1 {
+                        plant(Vec2::new(lo.x, z));
+                        plant(Vec2::new(hi.x, z));
+                        z += 10.0;
+                    }
+                    let mut x = lo.x + 10.0;
+                    while x < hi.x - 5.0 {
+                        plant(Vec2::new(x, lo.y));
+                        plant(Vec2::new(x, hi.y));
+                        x += 10.0;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     let hf = &w.heights;
     let inputs = Inputs::default()
         .rects("area", vec![Rect::new(Vec2::ZERO, Vec2::splat(half - 4.0))])
+        .rects("gardens", gardens)
+        .points("planted", planted)
         .rects("road", rects)
         .rects("alpine", alpine)
         .rects("fields", fields)
@@ -452,7 +488,8 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .node("clearcut", Op::Input { name: "clearcut".into() }, &[])
         .node("trees_low", Op::Difference { against: "alpine".into(), pad: 0.0 }, &["trees_clear"])
         .node("trees_wood", Op::Difference { against: "fields".into(), pad: 0.0 }, &["trees_low"])
-        .node("trees_kept", Op::Difference { against: "clearcut".into(), pad: 0.0 }, &["trees_wood"])
+        .node("trees_cut", Op::Difference { against: "clearcut".into(), pad: 0.0 }, &["trees_wood"])
+        .node("trees_kept", Op::Difference { against: "gardens".into(), pad: 0.0 }, &["trees_cut"])
         .node("trees_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.75, 1.35), jitter: 0.0 }, &["trees_kept"])
         // Stunted trees, few, above the treeline; single trees out on the fields.
         .node("alp_pts", Op::PoissonSample { radius: 24.0 }, &["area"])
@@ -465,7 +502,15 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .node("field_keep", Op::Keep { fraction: 0.4 }, &["field_in"])
         .node("field_clear", Op::Difference { against: "road".into(), pad: 6.0 }, &["field_keep"])
         .node("field_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.8, 1.25), jitter: 0.0 }, &["field_clear"])
-        .node("trees_all", Op::Union, &["trees_tf", "alp_tf", "field_tf"])
+        // Garden trees (smaller, a few to each yard), and the square's planted rows.
+        .node("gardens", Op::Input { name: "gardens".into() }, &[])
+        .node("garden_pts", Op::PoissonSample { radius: 9.0 }, &["gardens"])
+        .node("garden_keep", Op::Keep { fraction: 0.75 }, &["garden_pts"])
+        .node("garden_clear", Op::Difference { against: "road".into(), pad: 2.0 }, &["garden_keep"])
+        .node("garden_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.55, 0.9), jitter: 0.0 }, &["garden_clear"])
+        .node("planted", Op::Input { name: "planted".into() }, &[])
+        .node("planted_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.7, 0.8), jitter: 0.0 }, &["planted"])
+        .node("trees_all", Op::Union, &["trees_tf", "alp_tf", "field_tf", "garden_tf", "planted_tf"])
         .node("trees_on", Op::Project { offset: -0.1, align: false }, &["trees_all"])
         .node("trunks", Op::Emit { port: "trunks".into() }, &["trees_on"])
         // Boulders and rocks.
@@ -530,7 +575,7 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
 pub fn tree_graph(w: &StageWorld) -> (Graph, Inputs) {
     let (full, inputs) = dressing(w);
     let keep = [
-        "area", "road", "tree_pts", "forest", "trees_in", "trees_clear", "alpine", "fields", "clearcut", "trees_low", "trees_wood", "trees_kept", "trees_tf", "alp_pts", "alp_in", "alp_keep", "alp_clear", "alp_tf", "field_pts", "field_in", "field_keep", "field_clear", "field_tf", "trees_all", "trees_on", "trunks",
+        "area", "road", "tree_pts", "forest", "trees_in", "trees_clear", "alpine", "fields", "clearcut", "trees_low", "trees_wood", "trees_cut", "gardens", "trees_kept", "trees_tf", "garden_pts", "garden_keep", "garden_clear", "garden_tf", "planted", "planted_tf", "alp_pts", "alp_in", "alp_keep", "alp_clear", "alp_tf", "field_pts", "field_in", "field_keep", "field_clear", "field_tf", "trees_all", "trees_on", "trunks",
     ];
     let mut g = full;
     g.nodes.retain(|n| keep.contains(&n.id.as_str()));
@@ -561,6 +606,7 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     }
     crate::art::spawn_stage(world, s);
     if let Some(o) = &s.open {
+        crate::art::terrain::spawn_horizon(world, &o.heights, crate::open::roads::HALF, o.net.seed);
         crate::art::roadside::spawn(world, o);
         let hf = o.heights.clone();
         for e in crate::open::buildings::spawn(world, &o.buildings, &move |x, z| hf.height_at(x, z)) {
