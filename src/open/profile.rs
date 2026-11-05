@@ -389,7 +389,9 @@ mod drive {
     /// and stays on its wheels.
     #[test]
     fn the_ditch_drags() {
-        let w = OpenWorld::generate(SEED);
+        // Plain road against the ditch: without the road conditions (mud, washouts) on it.
+        let mut w = OpenWorld::generate(SEED);
+        w.furniture = std::sync::Arc::default();
         let net = &w.net;
         // The straight stretch with a ditch along 120 m that climbs least.
         let mut best: Option<(f32, usize, usize, usize)> = None;

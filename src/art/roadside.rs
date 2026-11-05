@@ -4,21 +4,20 @@
 //! - **Bridge parapets**: stone walls along each side of a bridge's deck (solid: `open::profile::walls`).
 //! - **Culvert headwalls** in the inside ditch of tight corners (solid; the note says "don't cut").
 //! - **Snow poles** on the edge of the high roads, so the line shows against the sky over a crest.
-//! - **Chevron boards** on the outside of deceptive corners: a tight one after a fast run or
-//!   straight over a crest.
+//! - **Chevron boards**, guard rails, signs, posts and road conditions: `open::furniture`
+//!   places them, `art::signs` and `art::conditions` draw them ([`spawn`] calls both).
 //! - **Timber piles** at the road edge of each clear-cut (solid).
 //!
 //! Event boards (100 m to the finish, the flying finish) are put up with the events
 //! (`open::events`). [`items`] is pure (tested); [`spawn`] draws them, one shared mesh and
 //! material per kind.
 
-use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use crate::open::OpenWorld;
 use crate::open::profile::{DITCH_W, PARAPET, SHOULDER};
 use crate::open::roads::{RoadKind, RoadNet};
-use crate::stage::{self, Road, STEP};
+use crate::stage::{Road, STEP};
 
 /// Snow poles above this road height (m).
 pub const SNOW_LINE: f32 = 405.0;
@@ -29,7 +28,6 @@ pub enum Kind {
     Parapet,
     Culvert,
     SnowPole,
-    Chevron,
     TimberPile,
 }
 
@@ -41,7 +39,7 @@ pub struct Item {
     pub pos: Vec2,
     pub yaw: f32,
     pub len: f32,
-    /// Which way a chevron points (+1 = left).
+    /// Which way it points (+1 = left; unused by today's kinds).
     pub turn: f32,
 }
 
@@ -99,32 +97,6 @@ pub fn items(net: &RoadNet, clearcuts: &[pcg_core::Rect]) -> Vec<Item> {
             }
             i += (25.0 / STEP) as usize;
         }
-        // Chevrons: on the outside of a tight corner (hairpin to 2) that comes after a fast run
-        // (nothing tighter than a 4 in the 150 m before) or over a crest.
-        let corners = stage::corners(road);
-        for (k, c) in corners.iter().enumerate() {
-            if c.grade > 2 {
-                continue;
-            }
-            let fast = corners[..k].iter().rev().take_while(|p| p.end > c.start - 150.0).all(|p| p.grade >= 4);
-            if !(fast || c.crest || c.crest_into) {
-                continue;
-            }
-            let (a, b) = (road.station(c.start), road.station(c.end));
-            let apex = (a..=b).max_by(|&x, &y| road.curv[x].abs().total_cmp(&road.curv[y].abs())).unwrap_or(a);
-            let turn = road.curv[apex].signum();
-            // The outside of a left turn is its right (lateral −).
-            let side = -turn;
-            for k in [-6i32, 0, 6] {
-                let j = (apex as i32 + k).clamp(0, n as i32 - 1) as usize;
-                let lat = side * (road.width[j] * 0.5 + SHOULDER + DITCH_W + 0.8);
-                let p = at(road, j, lat);
-                if clear(p) {
-                    // Facing the cars coming (towards lower stations).
-                    out.push(Item { kind: Kind::Chevron, pos: p, yaw: along(road, j) + core::f32::consts::PI, len: 0.0, turn });
-                }
-            }
-        }
     }
     // Timber piles: where each clear-cut meets its road, along the road edge.
     for c in clearcuts {
@@ -164,7 +136,7 @@ pub fn spawn(world: &mut World, open: &OpenWorld) {
         world.entity_mut(e).despawn();
     }
     let list = items(&open.net, &crate::open::ecology::clearcuts(&open.net, crate::open::ecology::CLEARCUTS));
-    let (parapet, culvert, pipe, pole, band, post, board, stroke, log) = {
+    let (parapet, culvert, pipe, pole, band, log) = {
         let mut m = world.resource_mut::<Assets<Mesh>>();
         (
             m.add(Cuboid::new(PARAPET.1 * 2.0, PARAPET.0 + 0.3, 1.0)),
@@ -172,13 +144,10 @@ pub fn spawn(world: &mut World, open: &OpenWorld) {
             m.add(Cylinder::new(0.22, 0.3)),
             m.add(Cylinder::new(0.035, 2.0)),
             m.add(Cylinder::new(0.04, 0.35)),
-            m.add(Cylinder::new(0.04, 1.2)),
-            m.add(Cuboid::new(0.7, 0.55, 0.03)),
-            m.add(Cuboid::new(0.1, 0.36, 0.035)),
             m.add(Cylinder::new(0.2, 6.5)),
         )
     };
-    let (stone, concrete, dark, white, red, orange, wood) = {
+    let (stone, concrete, dark, white, orange, wood) = {
         let mut m = world.resource_mut::<Assets<StandardMaterial>>();
         let mut mat = |c: Color, rough: f32| m.add(StandardMaterial { base_color: c, perceptual_roughness: rough, ..default() });
         (
@@ -186,7 +155,6 @@ pub fn spawn(world: &mut World, open: &OpenWorld) {
             mat(Color::srgb(0.62, 0.62, 0.6), 0.9),
             mat(Color::srgb(0.05, 0.05, 0.05), 1.0),
             mat(Color::srgb(0.92, 0.92, 0.9), 0.6),
-            mat(Color::srgb(0.8, 0.08, 0.06), 0.6),
             mat(Color::srgb(0.95, 0.42, 0.05), 0.6),
             mat(Color::srgb(0.48, 0.33, 0.2), 0.95),
         )
@@ -212,17 +180,6 @@ pub fn spawn(world: &mut World, open: &OpenWorld) {
                 put(world, &pole, &white, Transform::from_translation(base + Vec3::Y * 1.0));
                 put(world, &band, &orange, Transform::from_translation(base + Vec3::Y * 1.8));
             }
-            Kind::Chevron => {
-                put(world, &post, &white, Transform::from_translation(base + Vec3::Y * 0.6));
-                let c = base + Vec3::Y * 1.35;
-                put(world, &board, &red, Transform::from_translation(c).with_rotation(rot));
-                // A white ">" (or "<") pointing the way the road goes.
-                let face = rot * Vec3::Z * 0.02;
-                for (dy, tilt) in [(0.09f32, 0.6f32), (-0.09, -0.6)] {
-                    let t = Transform::from_translation(c + face + Vec3::Y * dy).with_rotation(rot * Quat::from_rotation_z(tilt * it.turn));
-                    world.spawn((Roadside, Mesh3d(stroke.clone()), MeshMaterial3d(white.clone()), t, engine::prelude::Scenery, NotShadowCaster, DespawnOnExit(engine::flow::AppState::InGame), crate::open::live::LiveRoadMesh));
-                }
-            }
             Kind::TimberPile => {
                 let across = rot * Vec3::X;
                 for (row, count) in [(0, 4), (1, 3), (2, 2)] {
@@ -236,6 +193,8 @@ pub fn spawn(world: &mut World, open: &OpenWorld) {
         }
     }
     info!("roadside: {} pieces", list.len());
+    super::signs::spawn(world, open);
+    super::conditions::spawn(world, open);
 }
 
 #[cfg(test)]
@@ -249,17 +208,15 @@ mod tests {
         let list = items(&net, &cuts);
         let count = |k: Kind| list.iter().filter(|i| i.kind == k).count();
         eprintln!(
-            "parapets {}, culverts {}, snow poles {}, chevrons {}, timber piles {}",
+            "parapets {}, culverts {}, snow poles {}, timber piles {}",
             count(Kind::Parapet),
             count(Kind::Culvert),
             count(Kind::SnowPole),
-            count(Kind::Chevron),
             count(Kind::TimberPile)
         );
         assert!(count(Kind::Parapet) >= 8);
         assert!(count(Kind::Culvert) >= 10);
         assert!(count(Kind::SnowPole) >= 20);
-        assert!(count(Kind::Chevron) >= 6);
         assert_eq!(count(Kind::TimberPile), cuts.len());
         // None of it on a road surface.
         for it in &list {

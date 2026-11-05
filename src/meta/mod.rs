@@ -640,6 +640,8 @@ fn stage_ready(world: &mut World) {
             let mut h = board::Hasher::default();
             h.str(&road_hash);
             h.u64(c);
+            // Rails and road conditions change how it drives (stream B).
+            h.u64(crate::open::furniture::REV as u64);
             format!("{:016x}", h.0)
         }
         None => road_hash,
