@@ -749,6 +749,7 @@ fn build_challenges(world: &mut World, root: Entity) {
     let t = world.resource::<Theme>().clone();
     let gl = world.get_resource::<Glyphs>().cloned().unwrap_or_default();
     let list = challenges(world);
+    let progress = world.get_resource::<crate::career::save::CareerProgress>().map(|c| c.challenges.clone()).unwrap_or_default();
     let kinds: [(ChallengeKind, &str, &str, &str); 4] = [
         (ChallengeKind::RadarPost, "Radar Post", "Your speed at the gate line.", "km/h"),
         (ChallengeKind::PaceSection, "Pace Section", "Your average speed between the start and end gates.", "km/h"),
@@ -777,6 +778,7 @@ fn build_challenges(world: &mut World, root: Entity) {
             c.spawn((Node { column_gap: px(GAP_M), ..default() }, Pickable::IGNORE)).with_children(|row| {
                 for (kind, name, what, unit) in kinds {
                     let n = list.iter().filter(|x| x.kind == kind).count();
+                    let got: u32 = list.iter().filter(|x| x.kind == kind).map(|x| progress.get(&x.id).map_or(0, |p| p.stars as u32)).sum();
                     row.spawn(accent_panel(&t, t.line_strong, 22.0, GAP_S)).insert(Node { width: px(400), flex_direction: FlexDirection::Column, row_gap: px(GAP_S), padding: UiRect::all(px(22)), border: UiRect::left(px(3)), border_radius: BorderRadius::all(px(RADIUS)), ..default() }).with_children(|card| {
                         card.spawn(text(name.to_uppercase(), display(34.0), t.text));
                         card.spawn((text(what, body(SIZE_BODY - 2.0), t.text_muted), Node { min_height: px(52), ..default() }));
@@ -787,7 +789,7 @@ fn build_challenges(world: &mut World, root: Entity) {
                             s.spawn((text(format!("  higher {unit}, more stars"), body(18.0), t.text_dim), Node { margin: UiRect::left(px(6)), ..default() }));
                         });
                         if n > 0 {
-                            card.spawn(text(format!("{n} in the valley"), label(18.0), t.text));
+                            card.spawn(text(format!("{n} in the valley \u{b7} {got} / {} stars", n * 3), label(18.0), t.text));
                         }
                     });
                 }
@@ -819,7 +821,8 @@ fn build_logbook(world: &mut World, root: Entity) {
     let (g, lo, hi) = hub::grade_span(xp);
     let me = board::team_key(&p.driver_name, "");
     let mine: Vec<&Record> = b.records.iter().filter(|r| r.team() == me || r.driver == p.driver_name).collect();
-    let events_done = p.events.iter().filter(|e| mine.iter().any(|r| r.stage == e.id)).count();
+    let events = crate::loading::events_progress(world);
+    let stats = world.get_resource::<crate::career::save::CareerProgress>().map(|c| c.stats).unwrap_or_default();
     let stages_done: std::collections::BTreeSet<u32> = mine.iter().filter(|r| r.stage >= 1 && r.stage <= 20).map(|r| r.stage).collect();
     let rows: Vec<(String, String, Option<f32>)> = p.events.iter().map(|e| (e.name.clone(), e.kind.clone(), event_best(&b, &me, e.id))).collect();
     let intro = hub::intro(world, root);
@@ -848,7 +851,9 @@ fn build_logbook(world: &mut World, root: Entity) {
                 stat(s, &t, hub::thousands(w.spent), "Notes spent", t.text, 44.0);
                 stat(s, &t, hub::thousands(xp), "Style banked (xp)", t.text, 44.0);
                 stat(s, &t, mine.len().to_string(), "Times set", t.text, 44.0);
-                stat(s, &t, format!("{events_done} / {}", p.events.len()), "Events finished", t.text, 44.0);
+                stat(s, &t, events.map_or("\u{2014}".into(), |(d, n)| format!("{d} / {n}")), "Events finished", t.text, 44.0);
+                stat(s, &t, hub::thousands(stats.km.round() as u32), "km driven", t.text, 44.0);
+                stat(s, &t, format!("{} / {}", stats.wins, stats.races), "Race wins", t.text, 44.0);
                 stat(s, &t, cars.to_string(), if cars == 1 { "Car" } else { "Cars" }, t.text, 44.0);
             });
             c.spawn(spacer(GAP_S));

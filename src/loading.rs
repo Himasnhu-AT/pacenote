@@ -179,7 +179,7 @@ struct EventsLine;
 
 /// Events finished and in the world: from the loaded world's events when they exist, else the
 /// list remembered from the last drive. Finished = a time on the board or a race finish.
-fn events_progress(world: &World) -> Option<(usize, usize)> {
+pub fn events_progress(world: &World) -> Option<(usize, usize)> {
     let ids: Vec<u32> = match world.get_resource::<crate::open::events::Events>() {
         Some(ev) if !ev.0.is_empty() => ev.0.iter().map(|e| e.id).collect(),
         _ => world.resource::<crate::meta::Profile>().events.iter().map(|e| e.id).collect(),
