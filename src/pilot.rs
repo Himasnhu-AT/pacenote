@@ -37,11 +37,14 @@ pub struct PilotParams {
     pub hb_release: f32,
     pub power_beta: f32,
     pub hb_steer: f32,
+    /// Fastest it goes anywhere (m/s): 30 (108 km/h) for every driver; the dev autopilot can
+    /// raise it (`autopilot.set {max_kmh}`) for speed captures.
+    pub top_speed: f32,
 }
 
 impl Default for PilotParams {
     fn default() -> Self {
-        PilotParams { pace: 0.6, brake: 0.55, line_offset: 0.0, seed: 0, mistake: 0.0, drift: false, hb_min: 0.15, hb_release: 20.0, power_beta: 15.0, hb_steer: 0.5 }
+        PilotParams { pace: 0.6, brake: 0.55, line_offset: 0.0, seed: 0, mistake: 0.0, drift: false, hb_min: 0.15, hb_release: 20.0, power_beta: 15.0, hb_steer: 0.5, top_speed: 30.0 }
     }
 }
 
@@ -170,7 +173,7 @@ impl Pilot {
         // Speed: the slowest corner within braking distance, at `pace` of the surface's grip.
         let pace = p.pace * self.pace_mod;
         let i0 = road.station(s_here);
-        let mut vt = 30.0f32;
+        let mut vt = p.top_speed;
         let horizon = (v * v / 6.0 + 30.0) / stage::STEP;
         let n = road.len();
         for k in 0..horizon as usize {

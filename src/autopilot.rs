@@ -39,6 +39,7 @@ impl Plugin for AutopilotPlugin {
                     ("pace", "number", "share of grip in corners, 0..1.2 (default 0.6)"),
                     ("style", "string", "clean | drift"),
                     ("crash_at_m", "number", "leave the road into the scenery past this many metres (negative: off)"),
+                    ("max_kmh", "number", "top speed on straights, km/h (default 108; speed captures)"),
                 ]),
                 set,
             )
@@ -68,12 +69,14 @@ pub struct Autopilot {
     pub power_beta: f32,
     /// Steering into the corner during the pull (share of full input).
     pub hb_steer: f32,
+    /// Top speed (m/s, `max_kmh`).
+    pub top_speed: f32,
 }
 
 impl Default for Autopilot {
     fn default() -> Self {
         let p = PilotParams::default();
-        Autopilot { on: false, pace: p.pace, drift: p.drift, crash_at_m: None, pilot: Pilot::new(p), doing: "off", hb_min: p.hb_min, hb_release: p.hb_release, power_beta: p.power_beta, hb_steer: p.hb_steer }
+        Autopilot { on: false, pace: p.pace, drift: p.drift, crash_at_m: None, pilot: Pilot::new(p), doing: "off", hb_min: p.hb_min, hb_release: p.hb_release, power_beta: p.power_beta, hb_steer: p.hb_steer, top_speed: p.top_speed }
     }
 }
 
@@ -91,6 +94,9 @@ fn set(w: &mut World, v: Value) -> Result<Value, String> {
             "clean" => false,
             _ => return Err(format!("style: clean | drift, not {s}")),
         };
+    }
+    if let Some(k) = v.get("max_kmh").and_then(Value::as_f64) {
+        ap.top_speed = (k as f32 / 3.6).clamp(5.0, 90.0);
     }
     if let Some(c) = v.get("crash_at_m") {
         ap.crash_at_m = c.as_f64().filter(|m| *m >= 0.0).map(|m| m as f32);
@@ -132,6 +138,7 @@ impl Autopilot {
         p.hb_release = self.hb_release;
         p.power_beta = self.power_beta;
         p.hb_steer = self.hb_steer;
+        p.top_speed = self.top_speed;
         self.pilot.crash_at_m = self.crash_at_m;
         // Steers round trees and rocks, not the race's cars (it would dodge off the road).
         let input = self.pilot.input(car, spec, &w.road, &w.corners, &NoRacers(w), progress, dt);
