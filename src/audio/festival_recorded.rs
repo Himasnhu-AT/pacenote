@@ -18,7 +18,7 @@
 
 use bevy::prelude::*;
 use engine::flow::AppState;
-use engine::sound::{Attenuation, Rolloff, SoundClip, SoundCtl, SoundCue, SoundCues, Steal, VoiceId};
+use engine::sound::{Attenuation, Rolloff, SoundCtl, SoundCue, SoundCues, Steal, VoiceId};
 
 use crate::open::challenges::RunCue;
 use crate::world::StageWorld;
