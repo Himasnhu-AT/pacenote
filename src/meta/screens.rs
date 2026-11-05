@@ -685,16 +685,17 @@ fn build_events(world: &mut World, root: Entity) {
                     // How to drive it: Time Trial, or a Race against rivals at a difficulty.
                     c.spawn((Node { column_gap: px(GAP_XS + 2.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|m| {
                         m.spawn((text("MODE", label(SIZE_LABEL), t.text_dim), Node { width: px(96), ..default() }));
-                        chip(m, &t, "Time trial", "mode_tt", pick.mode == EventMode::TimeTrial, false);
+                        // In the focus order between the event list and Go now (keys reach them).
+                        chip_at(m, &t, "Time trial", "mode_tt", pick.mode == EventMode::TimeTrial, false, Some(20));
                         if !lap {
-                            chip(m, &t, "Race", "mode_race", matches!(pick.mode, EventMode::Race(_)), false);
+                            chip_at(m, &t, "Race", "mode_race", matches!(pick.mode, EventMode::Race(_)), false, Some(21));
                         }
                     });
                     if let EventMode::Race(d) = pick.mode {
                         c.spawn((Node { column_gap: px(GAP_XS + 2.0), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|m| {
                             m.spawn((text("RIVALS", label(SIZE_LABEL), t.text_dim), Node { width: px(96), ..default() }));
                             for (k, x) in DIFFICULTIES.iter().enumerate() {
-                                chip(m, &t, difficulty_name(*x), DIFF_IDS[k], d == *x, false);
+                                chip_at(m, &t, difficulty_name(*x), DIFF_IDS[k], d == *x, false, Some(22 + k as u32));
                             }
                         });
                         c.spawn(text("Five rivals on the road with you. Race runs set no board time.", body(18.0), t.text_dim));
@@ -1036,7 +1037,13 @@ fn keep_stage_focus(world: &mut World) {
 
 /// A weather / time chip in the details panel.
 fn chip(p: &mut ChildSpawnerCommands, t: &Theme, name: &str, id: &'static str, on: bool, is_default: bool) {
-    p.spawn((
+    chip_at(p, t, name, id, on, is_default, None);
+}
+
+/// A chip that keys and the pad can reach (`order` in the screen's focus order).
+#[allow(clippy::too_many_arguments)]
+fn chip_at(p: &mut ChildSpawnerCommands, t: &Theme, name: &str, id: &'static str, on: bool, is_default: bool, order: Option<u32>) {
+    let mut e = p.spawn((
         Button,
         Hovered::default(),
         ActionButton(MenuAction::Custom(id).into()),
@@ -1044,8 +1051,11 @@ fn chip(p: &mut ChildSpawnerCommands, t: &Theme, name: &str, id: &'static str, o
         Node { height: px(34), padding: UiRect::horizontal(px(12)), align_items: AlignItems::Center, border: UiRect::all(px(1)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
         BackgroundColor(Color::NONE),
         BorderColor::all(Color::NONE),
-    ))
-    .with_children(|b| {
+    ));
+    if let Some(order) = order {
+        e.insert(Focusable { order });
+    }
+    e.with_children(|b| {
         let s = if is_default { format!("{}  \u{2022}", name.to_uppercase()) } else { name.to_uppercase() };
         b.spawn(text(s, label(SIZE_SMALL + 1.0), if on { t.on_accent } else { t.text_muted }));
     });

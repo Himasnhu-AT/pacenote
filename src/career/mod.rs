@@ -14,6 +14,7 @@
 pub mod economy;
 pub mod garage;
 pub mod grade;
+pub mod livery;
 pub mod race_flow;
 pub mod racers;
 pub mod save;
@@ -151,6 +152,6 @@ impl Plugin for CareerPlugin {
             .add_message::<CareerRequest>()
             .add_message::<style::StyleEvent>()
             .add_message::<racers::RaceResult>()
-            .add_plugins((economy::EconomyPlugin, racers::RacersPlugin));
+            .add_plugins((economy::EconomyPlugin, racers::RacersPlugin, livery::LiveryPlugin));
     }
 }

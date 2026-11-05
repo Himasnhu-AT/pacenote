@@ -311,7 +311,7 @@ fn other_cars(mut out: ResMut<OtherCars>, race: Option<Res<RaceRun>>, traffic: O
 
 /// An id for `art::traffic_car::spawn_parts` that picks body `shape` and the metallic paint
 /// or not (it hashes the id to choose them).
-fn art_id(shape: usize, metallic: bool) -> u32 {
+pub(crate) fn art_id(shape: usize, metallic: bool) -> u32 {
     (0u32..).find(|&id| crate::art::traffic_car::shape_of(id) == shape && (((id >> 3) & 1) == 1) == metallic).unwrap_or(0)
 }
 
@@ -334,11 +334,16 @@ fn draw_rivals(
     fixed: Res<Time<Fixed>>,
     race: Res<RaceRun>,
     art: Option<Res<crate::art::traffic_car::TrafficArt>>,
+    livery: Option<Res<super::livery::LiveryArt>>,
     meshes: Option<ResMut<Assets<Mesh>>>,
     mats: Option<ResMut<Assets<StandardMaterial>>>,
     mut bodies: Query<(&RivalBody, &mut Transform)>,
 ) {
     let (Some(mut meshes), Some(mut mats)) = (meshes, mats) else { return };
+    if !super::livery::ensure_art(&mut commands, &livery, &mut meshes, &mut mats) {
+        return;
+    }
+    let livery = livery.unwrap();
     let Some(art) = art else {
         commands.insert_resource(crate::art::traffic_car::TrafficArt::new(&mut meshes, &mut mats));
         return;
@@ -357,8 +362,11 @@ fn draw_rivals(
         let shape = garage::def(r.model).map_or(0, |d| body_shape(d.body));
         let id = art_id(shape, r.paint.metallic);
         commands
-            .spawn((Name::new(format!("rival {}", r.name)), RivalBody(r.slot), pose(r), Visibility::default(), engine::render_budget::Actor, DespawnOnExit(AppState::InGame)))
-            .with_children(|p| crate::art::traffic_car::spawn_parts(p, &art, id, r.paint.colour));
+            .spawn((Name::new(format!("rival {}", r.name)), RivalBody(r.slot), super::livery::NeedsRacePaint(r.paint), pose(r), Visibility::default(), engine::render_budget::Actor, DespawnOnExit(AppState::InGame)))
+            .with_children(|p| {
+                crate::art::traffic_car::spawn_parts(p, &art, id, r.paint.colour);
+                super::livery::spawn_livery(p, &livery, shape, r.paint, r.number);
+            });
     }
 }
 

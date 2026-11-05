@@ -339,7 +339,9 @@ fn apply_pending_start(world: &mut World) {
                 return;
             }
             let loading = crate::loading::is_loading(world);
-            crate::open::events::start(world, id);
+            // In the mode picked on the Events screen (Race at a difficulty, or Time Trial).
+            let mode = world.get_resource::<screens::EventPick>().map_or(crate::career::racers::EventMode::TimeTrial, |p| p.mode);
+            crate::open::events::start_as(world, id, mode);
             if loading {
                 // Still behind the loading screen: no pause until it's gone.
                 world.insert_resource(PauseAllowed(false));
