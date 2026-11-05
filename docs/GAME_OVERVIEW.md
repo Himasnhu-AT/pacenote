@@ -373,7 +373,7 @@ buttons), `render_budget` (quality governor, render scale, frame pacing, detail 
 pipeline warm-up). Engine docs: `engine/docs/`, `engine/CLAUDE.md`, `GAME_GUIDE.md`.
 
 Shared by three games: Pacenote, Shroud (an FPS) and Courier (hover-bike delivery). One shared
-Cargo target dir (`shroud/target`); toolchain stable 1.99 via rustup overrides.
+Cargo target dir (`engine/target`, shared with the engine and every game); toolchain stable 1.99 via rustup overrides.
 
 ### 6.2 Determinism
 

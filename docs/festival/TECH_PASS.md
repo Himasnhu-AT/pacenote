@@ -217,7 +217,7 @@ at fixed poses (`art.teleport`), plus screenshots at 06:30 / 12:00 / 19:00 / 23:
 
 ## 6. Build and test logistics (parallel worktrees, 45 GB free)
 
-**Decision: one shared target dir** (`.cargo/config.toml` → `shroud/target`, tracked, so
+**Decision: one shared target dir** (`.cargo/config.toml` → `engine/target`, tracked, so
 worktrees inherit it). A separate debug target costs 10–15 GB (`engine/target-bench` is 15 GB),
 so six would need 60–90 GB, more than the 45 GB free. Rules:
 - Worktrees: `/Users/himanshu/codes/game/pacenote-wt/<stream>` on branch `fest-<stream>` (TEAM.md).
