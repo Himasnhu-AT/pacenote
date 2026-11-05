@@ -154,3 +154,9 @@ Phases from the game log (three runs, Low, busy machine):
 Draws now pass everywhere (256 m terrain chunks). Mountain GPU p95 is 0.3 ms over (the bigger
 chunks; tune `lod_distance` down or pixel error up at Low). Memory is ~150 MB over (actions 2-4).
 Frame p95 (21-51 ms) and load (52.7 s) are not valid on this loaded machine: re-measure idle.
+
+## Open-items round, 5 Nov (Low, busy machine)
+
+Forest solids near the spawn only, GPU-only .ktx2 textures, loading song after Generate, Low terrain
+LOD 64 m / 4 px: load 61.1 → 12.8 s (Generate 59.5 → 2.6 s), peak memory 1663 → 1528 MB, GPU p95
+≤ 6.4 ms, draws p95 ≤ 606. Left: ~28 MB over at the peak (music as i16 needs an engine change).

@@ -41,11 +41,13 @@ Records/ghosts: the re-baked level and `furniture::REV` 2 reset every open-world
 
 Open items:
 - Land is cached at bake (`assets/levels/open/land.bin`): no erosion at load. Re-bake after changing the land generator (`committed_land_cache_is_current` fails otherwise).
-- Perf: see `docs/festival/PERF_REPORT.md` actions 2-5 (forest solids at load, music/texture memory,
-  pipeline cache). Action 1 (256 m terrain chunks) is in.
-- Repair untested in game (unit tests only); 3 AI stories untested (Rookie yield, gap accuracy,
-  recover hold); warning/speed signs aren't knockable (draw budget); packs with no usable sound:
-  service park, dog bark, car horn, gravel hits.
+- Perf (Low, busy machine): load 12.8 s (budget 8), peak memory 1528 MB (budget 1500; music as
+  i16 needs an engine change), GPU p95 ≤ 6.4 ms, draws ≤ 606. Re-measure frame times on an idle Mac.
+- Not built: curved/angled town streets (lots, kerbs and sidewalks are axis-aligned rectangles);
+  parked cars in the square itself. Warning/speed signs aren't knockable (draw budget).
+- Done since: repair checked in game (`career.damage` dev command), AI story tests (Rookie yield,
+  hairpin passing, gap accuracy, recover hold), autopilot keeps a gap to rivals, 114 parked cars,
+  recorded service park / dog / horn / gravel sounds.
 - Rust: rustc 1.97 can't build Bevy 0.20.1; use `cargo +stable` (or add a `rust-toolchain.toml`).
 
 Engine gaps found (engine repo, not changed):
