@@ -175,7 +175,7 @@ fn build_screen(world: &mut World, root: Entity) {
                 if let Some(star) = &star {
                     for (at, c) in &challenges {
                         let q = paint::uv(*at);
-                        img.spawn((Node { position_type: PositionType::Absolute, left: percent(q.x * 100.0), top: percent(q.y * 100.0), width: px(18), height: px(18), margin: UiRect::new(px(-9), px(0), px(-9), px(0)), ..default() }, ImageNode::new(star.clone()).with_color(*c), Pickable::IGNORE));
+                        img.spawn((Node { position_type: PositionType::Absolute, left: percent(q.x * 100.0), top: percent(q.y * 100.0), width: px(22), height: px(22), margin: UiRect::new(px(-11), px(0), px(-11), px(0)), ..default() }, ImageNode::new(star.clone()).with_color(*c), Pickable::IGNORE));
                     }
                 }
                 for (k, e) in events.0.iter().enumerate() {

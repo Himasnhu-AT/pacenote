@@ -707,6 +707,31 @@ pub struct ChallengeSet;
 #[derive(Component)]
 struct Marker;
 
+/// A board's face (its picture and the best), redrawn when the best changes.
+#[derive(Component)]
+struct BoardFace {
+    idx: usize,
+    img: Handle<Image>,
+    /// The best it shows (×10), `Some(None)` for "no result".
+    shown: Option<Option<i64>>,
+}
+
+fn board_faces(challenges: Option<Res<Challenges>>, bests: Option<Res<Bests>>, images: Option<ResMut<Assets<Image>>>, mut faces: Query<&mut BoardFace>) {
+    let (Some(ch), Some(mut images)) = (challenges, images) else { return };
+    for mut f in &mut faces {
+        let Some(p) = ch.0.get(f.idx) else { continue };
+        let best = bests.as_ref().and_then(|b| b.get(p.def.id)).map(|b| b.value);
+        let key = best.map(|v| (v * 10.0).round() as i64);
+        if f.shown == Some(key) {
+            continue;
+        }
+        f.shown = Some(key);
+        if let Some(mut img) = images.get_mut(&f.img) {
+            *img = board::image(p.def.kind, best);
+        }
+    }
+}
+
 /// The radar camera's flash lamp (its material flashes on [`RadarFlash`]).
 #[derive(Component)]
 struct FlashLamp {
@@ -727,7 +752,7 @@ impl Plugin for ChallengesPlugin {
             .add_systems(Update, bests_from_career)
             .configure_sets(FixedUpdate, ChallengeSet.after(crate::career::style::StyleSet))
             .add_systems(FixedUpdate, track.in_set(ChallengeSet).run_if(resource_exists::<StageWorld>).run_if(resource_exists::<Challenges>))
-            .add_systems(Update, (setup, flash).run_if(resource_exists::<StageWorld>))
+            .add_systems(Update, (setup, flash, board_faces).run_if(resource_exists::<StageWorld>))
             .add_systems(OnExit(engine::flow::AppState::InGame), leave);
         #[cfg(feature = "dev")]
         dev::register(app);
@@ -945,6 +970,16 @@ fn markers(world: &mut World, open: &super::OpenWorld, placed: &[Placed]) {
                 let base = Vec3::new(xz.x, open.ground_height(xz.x, xz.y), xz.y);
                 spawn(world, &post, &white, Transform::from_translation(base + Vec3::Y * 1.3));
                 spawn(world, &board, &km, Transform::from_translation(base + Vec3::Y * 2.2).with_rotation(rot));
+                // Its face: the kind's picture and the player's best (redrawn by `board_faces`).
+                let img = world.resource_mut::<Assets<Image>>().add(board::image(kind, None));
+                let face_mat = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color_texture: Some(img.clone()), perceptual_roughness: 0.7, ..default() });
+                let face = world.resource_mut::<Assets<Mesh>>().add(Rectangle::new(1.2, 0.8));
+                // One face each side (cars come both ways), clear of the post (r 0.05).
+                for flip in [0.0, std::f32::consts::PI] {
+                    let r = rot * Quat::from_rotation_y(flip);
+                    spawn(world, &face, &face_mat, Transform::from_translation(base + Vec3::Y * 2.2 + r * Vec3::Z * 0.07).with_rotation(r));
+                }
+                world.spawn((BoardFace { idx, img, shown: None }, DespawnOnExit(AppState::InGame)));
                 if kind == ChallengeKind::RadarPost {
                     // The camera on its own post across the road, looking down the road.
                     let xz = Vec2::new(g.p.x, g.p.z) + g.left() * (g.half + 2.0);
@@ -990,6 +1025,140 @@ fn flash(time: Res<Time>, mut flashes: MessageReader<RadarFlash>, challenges: Op
         }
     }
     lit.retain(|l| l.1 < 0.3);
+}
+
+/// The board faces, drawn in code: the kind's colour, a white pictogram (camera, stopwatch,
+/// slide, jump) and the best in seven-segment digits (no fonts in the world).
+pub mod board {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::prelude::*;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+    use super::ChallengeKind;
+
+    pub const W: u32 = 192;
+    pub const H: u32 = 128;
+
+    fn seg(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+        let ab = b - a;
+        let t = ((p - a).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
+        p.distance(a + ab * t)
+    }
+
+    /// Ink at `p` (pixels) of the kind's picture, drawn in the top 72 px.
+    fn picture(kind: ChallengeKind, p: Vec2) -> bool {
+        let c = Vec2::new(W as f32 * 0.5, 38.0);
+        let q = p - c;
+        match kind {
+            // A camera: body, lens ring, flash.
+            ChallengeKind::RadarPost => {
+                let body = q.x.abs() < 34.0 && q.y.abs() < 20.0 && !(q.length() < 16.0 && q.length() > 0.0 && q.length() < 9.0);
+                let lens = (q.length() - 12.0).abs() < 3.5;
+                let flash = (q - Vec2::new(22.0, -26.0)).abs().max_element() < 6.0;
+                (body && q.length() > 16.0) || lens || flash
+            }
+            // A stopwatch: ring, hand, crown.
+            ChallengeKind::PaceSection => {
+                let q = q + Vec2::new(0.0, -4.0);
+                (q.length() - 24.0).abs() < 4.0 || seg(q, Vec2::ZERO, Vec2::new(10.0, -14.0)) < 3.5 || (q - Vec2::new(0.0, -32.0)).abs().max_element() < 5.0
+            }
+            // A slide: a sweeping S of tyre marks.
+            ChallengeKind::SlideSection => {
+                let x = q.x / 40.0;
+                if x.abs() > 1.0 {
+                    return false;
+                }
+                let y = (x * std::f32::consts::PI).sin() * 18.0;
+                (q.y - y).abs() < 4.0 || (q.y - y - 12.0).abs() < 2.5
+            }
+            // A jump: the hump and an arc over it.
+            ChallengeKind::YumpBoard => {
+                let ground = q.y > 18.0 - 14.0 * (1.0 - (q.x / 26.0).powi(2)).max(0.0) && q.y < 24.0 && q.x.abs() < 44.0;
+                let arc = ((q - Vec2::new(0.0, 22.0)).length() - 40.0).abs() < 3.0 && q.y < 4.0;
+                ground || arc
+            }
+        }
+    }
+
+    /// Seven-segment digit `d` (10 = a dash) in a 20×36 cell at `o`.
+    fn digit(d: u8, p: Vec2, o: Vec2) -> bool {
+        const SEGS: [u8; 11] = [0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111, 0b1111111, 0b1101111, 0b1000000];
+        let (w, h) = (16.0, 30.0);
+        let q = p - o;
+        let lines = [
+            (Vec2::new(0.0, 0.0), Vec2::new(w, 0.0)),
+            (Vec2::new(w, 0.0), Vec2::new(w, h * 0.5)),
+            (Vec2::new(w, h * 0.5), Vec2::new(w, h)),
+            (Vec2::new(0.0, h), Vec2::new(w, h)),
+            (Vec2::new(0.0, h * 0.5), Vec2::new(0.0, h)),
+            (Vec2::new(0.0, 0.0), Vec2::new(0.0, h * 0.5)),
+            (Vec2::new(0.0, h * 0.5), Vec2::new(w, h * 0.5)),
+        ];
+        let m = SEGS[d as usize];
+        lines.iter().enumerate().any(|(k, (a, b))| m & (1 << k) != 0 && seg(q, *a, *b) < 2.6)
+    }
+
+    /// The board: kind colour, picture, and the best (whole units) or a dash.
+    pub fn image(kind: ChallengeKind, best: Option<f32>) -> Image {
+        let digits: Vec<u8> = match best {
+            Some(v) => v.round().max(0.0).min(99_999.0).to_string().bytes().map(|b| b - b'0').collect(),
+            None => vec![10],
+        };
+        let cell = 22.0;
+        let x0 = (W as f32 - digits.len() as f32 * cell) * 0.5 + 3.0;
+        let bg = kind.color().to_srgba();
+        let mut data = Vec::with_capacity((W * H * 4) as usize);
+        for y in 0..H {
+            for x in 0..W {
+                let mut ink = 0u32;
+                for (sx, sy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                    let p = Vec2::new(x as f32 + sx, y as f32 + sy);
+                    let hit = if p.y < 76.0 { picture(kind, p) } else { digits.iter().enumerate().any(|(k, &d)| digit(d, p, Vec2::new(x0 + k as f32 * cell, 86.0))) };
+                    ink += hit as u32;
+                }
+                let a = ink as f32 / 4.0;
+                // A white rule between the picture and the number.
+                let rule = (y == 78 || y == 79) && (12..W - 12).contains(&x);
+                let a = if rule { 0.8 } else { a };
+                // Ink: white, or near-black on a light board (the Yump yellow).
+                let ink_c = if 0.2126 * bg.red + 0.7152 * bg.green + 0.0722 * bg.blue > 0.65 { 0.08 } else { 1.0 };
+                let px = |c: f32| ((c * (1.0 - a) + ink_c * a) * 255.0).round() as u8;
+                data.extend_from_slice(&[px(bg.red), px(bg.green), px(bg.blue), 255]);
+            }
+        }
+        Image::new(Extent3d { width: W, height: H, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn every_board_has_a_picture_and_a_number() {
+            for kind in ChallengeKind::ALL {
+                for best in [None, Some(137.4), Some(18.6), Some(4300.0)] {
+                    let img = image(kind, best);
+                    let d = img.data.as_ref().unwrap();
+                    // Ink: white, or near-black on the light Yump board.
+                    let light = kind == ChallengeKind::YumpBoard;
+                    let white = |y0: u32, y1: u32| (y0..y1).flat_map(|y| (0..W).map(move |x| (y * W + x) as usize * 4)).filter(|&i| if light { d[i] < 40 && d[i + 1] < 40 } else { d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240 }).count();
+                    assert!(white(0, 76) > 300, "{kind:?}: no picture");
+                    assert!(white(84, H) > if best.is_some() { 80 } else { 20 }, "{kind:?} {best:?}: no number");
+                }
+            }
+        }
+
+        /// Writes each board as raw RGBA (`PACENOTE_BOARDS=<dir>`), for a look.
+        #[test]
+        #[ignore]
+        fn dump_boards() {
+            let dir = std::env::var("PACENOTE_BOARDS").unwrap();
+            for (k, kind) in ChallengeKind::ALL.into_iter().enumerate() {
+                let img = image(kind, if k == 0 { None } else { Some([0.0, 137.4, 4320.0, 18.6][k]) });
+                std::fs::write(format!("{dir}/board{k}.rgba"), img.data.unwrap()).unwrap();
+            }
+        }
+    }
 }
 
 #[cfg(feature = "dev")]
