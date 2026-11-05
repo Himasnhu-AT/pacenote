@@ -6,7 +6,9 @@
 //!
 //! The clips are made once at startup (a few kB each) and registered as engine sound cues
 //! (`ui.hover`, `ui.select`, ...) with the recipe's peak level, cooldown and instance limit;
-//! a [`UiSound`] message plays one. Nothing is heard when the engine has no sound device
+//! a [`UiSound`] message plays one. Levels sit over the menu music bed (`audio::music::MUSIC_DB`,
+//! measured with `dump`): select / back / error ≈ +6 dB over the music's short-term RMS, hover ≈ +1,
+//! the transition whoosh ≈ −1 (AUDIO_PASS §3's peaks, raised 1-6 dB once music came in). Nothing is heard when the engine has no sound device
 //! (headless, `--mute`, tests): the engine's mixer drops the voices.
 
 use bevy::prelude::*;
@@ -50,11 +52,11 @@ const RATE: u32 = 48_000;
 fn register_cues(cues: Option<ResMut<SoundCues>>, clips: Option<ResMut<Assets<SoundClip>>>) {
     let (Some(mut cues), Some(mut clips)) = (cues, clips) else { return };
     let ui = |name: &'static str, clip: SoundClip, db: f32, clips: &mut Assets<SoundClip>| SoundCue::new(name).clip(clips.add(clip)).bus("ui").volume(db).max_instances(1, Steal::Oldest);
-    cues.add(ui(UiSound::Hover.cue(), SoundClip::from_mono(hover(), RATE), -26.0, &mut clips).cooldown(0.04).max_instances(2, Steal::Oldest).pitch_jitter(0.5));
-    cues.add(ui(UiSound::Select.cue(), SoundClip::from_mono(select(false), RATE), -16.0, &mut clips));
-    cues.add(ui(UiSound::Back.cue(), SoundClip::from_mono(select(true), RATE), -18.0, &mut clips));
+    cues.add(ui(UiSound::Hover.cue(), SoundClip::from_mono(hover(), RATE), -20.0, &mut clips).cooldown(0.04).max_instances(2, Steal::Oldest).pitch_jitter(0.5));
+    cues.add(ui(UiSound::Select.cue(), SoundClip::from_mono(select(false), RATE), -12.0, &mut clips));
+    cues.add(ui(UiSound::Back.cue(), SoundClip::from_mono(select(true), RATE), -15.0, &mut clips));
     for forward in [true, false] {
-        cues.add(ui(UiSound::Transition { forward }.cue(), SoundClip::from_interleaved(transition(forward), 2, RATE), -20.0, &mut clips));
+        cues.add(ui(UiSound::Transition { forward }.cue(), SoundClip::from_interleaved(transition(forward), 2, RATE), -19.0, &mut clips));
     }
     cues.add(ui(UiSound::Error.cue(), SoundClip::from_mono(error(), RATE), -20.0, &mut clips).cooldown(0.15));
 }
@@ -221,4 +223,19 @@ mod tests {
         let names: std::collections::HashSet<&str> = all.iter().map(|s| s.cue()).collect();
         assert_eq!(names.len(), all.len());
     }
+}
+
+/// Writes the UI clips as WAVs into `$UI_WAV_DIR` (level checks against the music:
+/// `UI_WAV_DIR=/tmp/x cargo test -q --lib audio::ui::dump -- --ignored`).
+#[cfg(test)]
+#[test]
+#[ignore]
+fn dump() {
+    let Ok(dir) = std::env::var("UI_WAV_DIR") else { return };
+    let mono = |n: &str, v: Vec<f32>| std::fs::write(format!("{dir}/{n}.wav"), SoundClip::from_mono(v, RATE).to_wav()).unwrap();
+    mono("hover", hover());
+    mono("select", select(false));
+    mono("back", select(true));
+    mono("error", error());
+    std::fs::write(format!("{dir}/transition.wav"), SoundClip::from_interleaved(transition(true), 2, RATE).to_wav()).unwrap();
 }

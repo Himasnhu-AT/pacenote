@@ -173,6 +173,47 @@ struct RegionMap {
 #[derive(Component)]
 struct RouteDot(f32);
 
+/// The briefing's "Events finished" value (filled in once the world's events are known).
+#[derive(Component)]
+struct EventsLine;
+
+/// Events finished and in the world: from the loaded world's events when they exist, else the
+/// list remembered from the last drive. Finished = a time on the board or a race finish.
+fn events_progress(world: &World) -> Option<(usize, usize)> {
+    let ids: Vec<u32> = match world.get_resource::<crate::open::events::Events>() {
+        Some(ev) if !ev.0.is_empty() => ev.0.iter().map(|e| e.id).collect(),
+        _ => world.resource::<crate::meta::Profile>().events.iter().map(|e| e.id).collect(),
+    };
+    if ids.is_empty() {
+        return None;
+    }
+    let p = world.resource::<crate::meta::Profile>();
+    let me = crate::meta::board::team_key(&p.driver_name, "");
+    let b = &world.resource::<crate::meta::Boards>().0;
+    let races = world.get_resource::<crate::career::save::CareerProgress>().map(|c| c.races.clone()).unwrap_or_default();
+    let done = ids.iter().filter(|id| b.records.iter().any(|r| r.stage == **id && r.team() == me) || races.get(id).is_some_and(|r| r.rookie + r.pro + r.ace + r.legend > 0)).count();
+    Some((done, ids.len()))
+}
+
+/// "Morning" for 9.0 (the open world's start presets' words, by hour).
+pub fn hour_name(h: f32) -> &'static str {
+    match h.rem_euclid(24.0) {
+        h if h < 5.0 => "Night",
+        h if h < 8.0 => "Dawn",
+        h if h < 11.5 => "Morning",
+        h if h < 14.0 => "Noon",
+        h if h < 18.5 => "Afternoon",
+        h if h < 21.0 => "Sunset",
+        _ => "Night",
+    }
+}
+
+/// "09:00".
+pub fn clock_text(h: f32) -> String {
+    let m = (h.rem_euclid(24.0) * 60.0).round() as u32 % (24 * 60);
+    format!("{:02}:{:02}", m / 60, m % 60)
+}
+
 /// Fades the screen into the stage after loading.
 #[derive(Component)]
 struct LoadingFade(f32);
@@ -312,7 +353,14 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
             .join(", "),
         None => surface_name(def.surface).to_string(),
     };
-    let conditions = format!("{}, {}", time_name(def.time), weather_name(def.weather));
+    // The open world's clock starts where Settings › World says (daytime::start_hours); the
+    // stages keep their own time of day.
+    let conditions = if open {
+        let h = crate::daytime::start_hours(&world.get_resource::<crate::daytime::DaySettings>().cloned().unwrap_or_default(), crate::daytime::wall_hours(), crate::daytime::night_available(world));
+        format!("{} {}, {}", hour_name(h), clock_text(h), weather_name(def.weather))
+    } else {
+        format!("{}, {}", time_name(def.time), weather_name(def.weather))
+    };
     let (kicker, name, facts) = match (&event, open) {
         (Some(e), _) => (format!("{} \u{b7} {}", e.kind, conditions), e.name.clone(), format!("{} \u{b7} {:.1} km of closed road \u{b7} start line, then the countdown", e.kind, e.km)),
         (None, true) => (
@@ -332,7 +380,7 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
             (k, def.name.clone(), format!("{} \u{b7} {} \u{b7} {conditions}", biome_name(def.biome), surf))
         }
     };
-    let events_done = p.events.iter().filter(|e| b.records.iter().any(|r| r.stage == e.id && r.team() == me)).count();
+    let events_line = events_progress(world).map_or_else(|| "\u{2014}".to_string(), |(d, n)| format!("{d} of {n}"));
     let chip = hub::car_chip(world.resource::<crate::career::garage::Garage>());
     let balance = world.resource::<crate::career::wallet::Wallet>().balance;
     let (grade, _, _) = hub::grade_span(world.resource::<crate::career::grade::Grade>().xp);
@@ -419,7 +467,10 @@ fn spawn_screen(world: &mut World, def: &StageDef) {
                     if open && event.is_none() {
                         line(card, "Driver grade", format!("Grade {grade}"), t.text);
                         line(card, "Notes", notes(balance), t.text);
-                        line(card, "Events finished", format!("{events_done} of {}", p.events.len()), t.text);
+                        card.spawn((Node { justify_content: JustifyContent::SpaceBetween, column_gap: px(GAP_M), ..default() }, Pickable::IGNORE)).with_children(|row| {
+                            row.spawn(text("Events finished", body(SIZE_BODY), t.text_muted));
+                            row.spawn((EventsLine, text(events_line.clone(), body_bold(SIZE_BODY), t.text)));
+                        });
                         if let Some(e) = &route_to {
                             line(card, "Route set", format!("{} \u{b7} {:.1} km", e.name, e.km), t.accent);
                         }
@@ -728,6 +779,15 @@ fn draw(world: &mut World) {
             t.0 = want.clone();
         }
     }
+    if let Some((d, n)) = events_progress(world) {
+        let v = format!("{d} of {n}");
+        let mut q = world.query_filtered::<&mut Text, With<EventsLine>>();
+        for mut t in q.iter_mut(world) {
+            if t.0 != v {
+                t.0 = v.clone();
+            }
+        }
+    }
     let step = format!("{} / 4", phase.step());
     let mut steps = world.query_filtered::<&mut Text, With<PhaseStep>>();
     for mut t in steps.iter_mut(world) {
@@ -926,5 +986,18 @@ fn fade_out(mut commands: Commands, time: Res<Time<Real>>, mut q: Query<(Entity,
         if a <= 0.0 {
             commands.entity(e).despawn();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_hours_read_as_words_and_a_clock() {
+        assert_eq!((hour_name(9.0), clock_text(9.0)), ("Morning", "09:00".to_string()));
+        assert_eq!((hour_name(16.0), clock_text(16.25)), ("Afternoon", "16:15".to_string()));
+        assert_eq!(hour_name(23.0), "Night");
+        assert_eq!(clock_text(23.999), "00:00");
     }
 }
