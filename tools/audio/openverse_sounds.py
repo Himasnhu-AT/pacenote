@@ -18,6 +18,9 @@ Everything the game wants (tools/audio/sfx_wishlist.json):
     python3 -I tools/audio/openverse_sounds.py --wishlist --dry-run   # just list candidates
     python3 -I tools/audio/openverse_sounds.py --wishlist --only radar_shutter,finish_crowd
 
+A wishlist pack may pin `ids` (Openverse audio ids, chosen by ear) instead of searching; music
+packs (`"music": true`) are cooked as stereo full-length tracks.
+
 Optional (higher rate limits): register an app (https://api.openverse.org/v1/#tag/auth) and set
 OPENVERSE_CLIENT_ID and OPENVERSE_CLIENT_SECRET.
 
@@ -127,7 +130,11 @@ def ext_for(item):
     if m:
         return m.group(1).lower()
     ft = (item.get('filetype') or '').lower()
-    return re.sub(r'\d+$', '', ft) or 'mp3'  # the API sometimes reports e.g. "mp32"
+    # The API sometimes reports e.g. "mp32" (mp3 + a version digit): keep the known name.
+    for known in ('mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus', 'aiff', 'aif'):
+        if ft.startswith(known):
+            return known
+    return 'mp3'
 
 
 def max_ms_ok(item, q):
@@ -147,9 +154,20 @@ def write_credits(out, credits):
 
 def fetch(q, out, token, dry_run):
     """Download up to q['n'] new files for one query into `out`. Returns how many it got."""
-    data = search(q, token)
-    results = [r for r in data.get('results', []) if r.get('url') and max_ms_ok(r, q)]
-    print(f"{data.get('result_count', 0)} matches for '{q['query']}' -> {os.path.relpath(out, ROOT)}")
+    if q.get('ids'):
+        # Pinned picks (listened to and chosen): fetch exactly these, in order.
+        headers = {'Authorization': f'Bearer {token}'} if token else {}
+        results = []
+        for i in q['ids']:
+            body, _ = http(f'{API}/audio/{i}/', headers=headers)
+            results.append(json.loads(body))
+            time.sleep(0.5)
+        results = [r for r in results if r.get('url')]
+        print(f"{len(results)} pinned for '{q.get('pack', q.get('query'))}' -> {os.path.relpath(out, ROOT)}")
+    else:
+        data = search(q, token)
+        results = [r for r in data.get('results', []) if r.get('url') and max_ms_ok(r, q)]
+        print(f"{data.get('result_count', 0)} matches for '{q['query']}' -> {os.path.relpath(out, ROOT)}")
     if not results:
         return 0
     credits_path = os.path.join(out, 'credits.json')

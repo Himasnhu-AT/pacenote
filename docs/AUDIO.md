@@ -391,3 +391,20 @@ Notes: the Openverse front blocks some words (any query with "outdoor" gets a 40
 Freesound results carry no `category`, so don't filter on it. Listen to every new file before
 wiring it in: search results vary in quality. Packs with nothing usable today: service park,
 dog bark, car horn, gravel hits (search with other words, or synthesise).
+
+## Music (menus and loading screen, `src/audio/music.rs`)
+
+Recorded music, picked by ear from Openverse and pinned by id in `tools/audio/sfx_wishlist.json`
+(`menu_music`: "Circuit Synthwave" by Doctor_Dreamchip CC0, "Free (rock instrumental)" by Starfish
+Stories CC BY 3.0, "Drive Clip" by BaDoink CC0; `loading_music`: "Drops" and "At The Edge Of Space (II)"
+by Andrewkn CC0, "Lofi Fusion Background Music" by Seth_Makes_Sounds CC0). `cook_sfx.py` cooks
+`"music": true` packs stereo and full length (-18 LUFS, 1 s fade in, 3 s fade out) into
+`assets/sounds/music/`.
+
+- Menus: a shuffled playlist, crossfading (2.5 s out / 2 s in) into the next song 4 s before the end.
+- Loading screen: a calmer song crossfades in. Driving: the music fades out over 2.5 s; the car and
+  the world's ambience take over. There's no music while driving, on purpose.
+- Played by the engine's `Music` on the `music` bus: Settings › Audio › Music (was hidden), ducked
+  by the pause snapshot. Only the playing song and the one fading in are decoded (~75-100 MB each,
+  stereo f32), and both are released after the fade-out into a drive.
+- `sound.stats` (dev control) shows the playing track and its position.

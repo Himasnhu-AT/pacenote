@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Cook downloaded sound effects: assets_src/audio/openverse/<pack>/* -> assets/sounds/sfx/<pack>_<n>.ogg.
+"""Cook downloaded sound effects: assets_src/audio/openverse/<pack>/* -> assets/sounds/sfx/<pack>_<n>.ogg (music: assets/sounds/music/).
 
-Each file becomes mono, 48 kHz Ogg Vorbis (like the car sounds), leading/trailing silence trimmed,
+Music packs (`"music": true`) stay stereo and full length (-18 LUFS, 1 s / 3 s fades).
+Every other file becomes mono, 48 kHz Ogg Vorbis (like the car sounds), leading/trailing silence trimmed,
 cut to the pack's max length (tools/audio/sfx_wishlist.json `max_s`, else 30 s) with a short fade,
 ambience beds crossfaded into seamless loops, and loudness-normalised (EBU R128, -20 LUFS one-shots, -26 LUFS ambience beds: the game sets the
 mix level). Files whose licence isn't CC0 / PDM / CC BY are refused (assets_src/SOURCES.md).
@@ -27,6 +28,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC = os.path.join(ROOT, 'assets_src', 'audio', 'openverse')
 OUT = os.path.join(ROOT, 'assets', 'sounds', 'sfx')
+OUT_MUSIC = os.path.join(ROOT, 'assets', 'sounds', 'music')
 WISHLIST = os.path.join(ROOT, 'tools', 'audio', 'sfx_wishlist.json')
 CREDITS = os.path.join(ROOT, 'assets', 'credits.txt')
 SOURCES = os.path.join(ROOT, 'assets_src', 'SOURCES.md')
@@ -43,11 +45,31 @@ def wishlist():
 
 
 def is_bed(p):
+    if p.get('music'):
+        return False
     """Ambience beds (long loops) sit quieter than one-shots."""
     return p.get('length') in ('medium', 'long') or (p.get('max_s') or 0) > 20
 
 
 XFADE_S = 2.0  # loop seam of an ambience bed
+
+
+def cook_music(src, dst):
+    """Music: stereo, full length, silence trimmed, 1 s fade in / 3 s fade out, -18 LUFS."""
+    probe = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of',
+                            'csv=p=0', src], capture_output=True, text=True, check=True)
+    dur = float(probe.stdout.strip() or 0)
+    af = ','.join([
+        'silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.05',
+        'loudnorm=I=-18:TP=-1.5:LRA=11',
+        'afade=t=in:d=1',
+        f'afade=t=out:st={max(dur - 3.5, 0)}:d=3',
+    ])
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = os.path.join(tmp, 'x.wav')
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', src, '-ac', '2', '-ar', str(RATE),
+                        '-af', af, '-c:a', 'pcm_s16le', wav], check=True)
+        subprocess.run(['oggenc', '-Q', '-q', '3', '-o', dst, wav], check=True)
 
 
 def cook_one(src, dst, max_s, lufs, bed):
@@ -126,6 +148,7 @@ def main():
         raise SystemExit(f'nothing to cook: {os.path.relpath(SRC, ROOT)} is missing '
                          '(run tools/audio/openverse_sounds.py --wishlist first)')
     os.makedirs(OUT, exist_ok=True)
+    os.makedirs(OUT_MUSIC, exist_ok=True)
     wl = wishlist()
     index, used = {}, []
     for pack in sorted(os.listdir(SRC)):
@@ -145,11 +168,14 @@ def main():
                 print(f'  missing {src}', file=sys.stderr)
                 continue
             name = f'{pack}_{len(entries) + 1}.ogg'
-            dst = os.path.join(OUT, name)
+            dst = os.path.join(OUT_MUSIC if p.get('music') else OUT, name)
             if args.force or not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src):
                 try:
-                    cook_one(src, dst, max_s, lufs, is_bed(p))
-                    print(f'  {pack}/{c["file"]} -> sfx/{name}')
+                    if p.get('music'):
+                        cook_music(src, dst)
+                    else:
+                        cook_one(src, dst, max_s, lufs, is_bed(p))
+                    print(f'  {pack}/{c["file"]} -> {"music" if p.get("music") else "sfx"}/{name}')
                 except subprocess.CalledProcessError:
                     print(f'  ffmpeg failed on {src}', file=sys.stderr)
                     continue
@@ -158,7 +184,8 @@ def main():
                             'source': c.get('source'), 'landing_page': c.get('landing_page')})
             used.append((pack, c))
         if entries:
-            index[pack] = {'use': p.get('use', ''), 'bed': is_bed(p), 'files': entries}
+            index[pack] = {'use': p.get('use', ''), 'bed': is_bed(p), 'music': bool(p.get('music')),
+                           'files': entries}
     with open(os.path.join(OUT, 'index.json'), 'w') as f:
         json.dump(index, f, indent=2)
 

@@ -19,6 +19,7 @@ pub mod body;
 pub mod car;
 pub mod dsp;
 pub mod festival;
+pub mod music;
 pub mod pops;
 pub mod powertrain;
 pub mod samples;
@@ -60,7 +61,7 @@ impl Plugin for RallyAudioPlugin {
             .register_type::<RallyAudioStats>()
             .insert_resource(Link { shared: Arc::new(Shared::default()), started: false, frame: Frame::default() })
             // Festival streams (wave 0 stubs): D pops, F gameplay sounds, E menu sounds.
-            .add_plugins((pops::PopsPlugin, festival::FestivalAudioPlugin, ui::UiSoundPlugin))
+            .add_plugins((pops::PopsPlugin, festival::FestivalAudioPlugin, ui::UiSoundPlugin, music::MusicPlugin))
             .add_systems(Startup, add_buses)
             .add_systems(PostUpdate, (start_output, net_car_sound, gather, capture).chain().after(SoundSet::Mix));
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {

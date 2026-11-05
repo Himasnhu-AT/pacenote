@@ -6,7 +6,7 @@
 //! - [`layout`] (Startup): every row on a rally game's tabs, in order: Driving, Camera, Co-driver,
 //!   HUD, Audio, Voice chat, Video, Interface, Controls. Engine rows are moved, renamed and
 //!   given rally wording by re-registering them (same key, same get/set); rows that do
-//!   nothing in Pacenote (mouse look, music, sprint toggle, generic subtitles) are hidden.
+//!   nothing in Pacenote (mouse look, sprint toggle, generic subtitles) are hidden.
 //! - Side panels: a live HUD preview (units, which readouts) and a co-driver call preview
 //!   (call order, timing).
 
@@ -296,6 +296,7 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("race_positions", "HUD", None, None),
     // Audio.
     ("master_volume", "Audio", Some("Master"), Some("Everything at once.")),
+    ("music_volume", "Audio", Some("Music"), Some("Menu and loading-screen music. None plays while you drive.")),
     ("sfx_volume", "Audio", Some("Car"), Some("Engine, turbo, gearbox, tyres, gravel and impacts.")),
     ("ambience_volume", "Audio", Some("Stage ambience"), Some("Wind, birds, insects and rain around the stage.")),
     ("ui_volume", "Audio", Some("Menus"), Some("Menu clicks and notifications.")),
@@ -332,7 +333,6 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     // Nothing in Pacenote uses these: hidden.
     ("toggle_actions", "", None, None),
     ("rumble", "", None, None),
-    ("music_volume", "", None, None),
     ("voice_volume", "", None, None),
     ("captions", "", None, None),
     ("caption_size", "", None, None),

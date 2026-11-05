@@ -2,6 +2,7 @@
   "air_horn": {
     "use": "race start (GO) and a win",
     "bed": false,
+    "music": false,
     "files": [
       {
         "file": "air_horn_1.ogg",
@@ -26,6 +27,7 @@
   "birds_morning": {
     "use": "forest ambience, dawn and morning (DayClock)",
     "bed": true,
+    "music": false,
     "files": [
       {
         "file": "birds_morning_1.ogg",
@@ -50,6 +52,7 @@
   "church_bell": {
     "use": "Fernhollow church on the hour (DayClock)",
     "bed": false,
+    "music": false,
     "files": [
       {
         "file": "church_bell_1.ogg",
@@ -65,6 +68,7 @@
   "finish_crowd": {
     "use": "event finish: spectators cheer; louder on a win (RunCue finish)",
     "bed": true,
+    "music": false,
     "files": [
       {
         "file": "finish_crowd_1.ogg",
@@ -98,6 +102,7 @@
   "guardrail_scrape": {
     "use": "car scraping a steel guard rail (roadside rails as walls)",
     "bed": false,
+    "music": false,
     "files": [
       {
         "file": "guardrail_scrape_1.ogg",
@@ -128,9 +133,78 @@
       }
     ]
   },
+  "loading_music": {
+    "use": "loading screen: calmer track, fades out into the stage/world ambience",
+    "bed": false,
+    "music": true,
+    "files": [
+      {
+        "file": "loading_music_1.ogg",
+        "title": "Drops",
+        "creator": "Andrewkn",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/Andrewkn/sounds/404460"
+      },
+      {
+        "file": "loading_music_2.ogg",
+        "title": "Andrew kn- At The Edge Of Space (II)",
+        "creator": "Andrewkn",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/Andrewkn/sounds/482919"
+      },
+      {
+        "file": "loading_music_3.ogg",
+        "title": "Lofi Fusion Background Music",
+        "creator": "Seth_Makes_Sounds",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/Seth_Makes_Sounds/sounds/655516"
+      }
+    ]
+  },
+  "menu_music": {
+    "use": "Service Park hub and the car screens: a playlist, crossfaded, ducked under UI sounds",
+    "bed": false,
+    "music": true,
+    "files": [
+      {
+        "file": "menu_music_1.ogg",
+        "title": "Circuit Synthwave",
+        "creator": "Doctor_Dreamchip",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/Doctor_Dreamchip/sounds/460357"
+      },
+      {
+        "file": "menu_music_2.ogg",
+        "title": "Free (rock instrumental)",
+        "creator": "Starfish Stories :: The Band",
+        "license": "by",
+        "license_version": "3.0",
+        "source": "jamendo",
+        "landing_page": "https://www.jamendo.com/track/810513"
+      },
+      {
+        "file": "menu_music_3.ogg",
+        "title": "Drive Clip.wav",
+        "creator": "BaDoink",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/BaDoink/sounds/531865"
+      }
+    ]
+  },
   "money": {
     "use": "Notes earned (MoneyEarned) and a purchase in the Dealership",
     "bed": false,
+    "music": false,
     "files": [
       {
         "file": "money_1.ogg",
@@ -146,6 +220,7 @@
   "night_insects": {
     "use": "night ambience in the valley",
     "bed": true,
+    "music": false,
     "files": [
       {
         "file": "night_insects_1.ogg",
@@ -170,6 +245,7 @@
   "radar_shutter": {
     "use": "Radar Post flash (RadarFlash), under the synthesised chime",
     "bed": false,
+    "music": false,
     "files": [
       {
         "file": "radar_shutter_1.ogg",
@@ -203,6 +279,7 @@
   "start_crowd": {
     "use": "event start line and race grid, before GO",
     "bed": true,
+    "music": false,
     "files": [
       {
         "file": "start_crowd_1.ogg",
@@ -227,6 +304,7 @@
   "town_ambience": {
     "use": "Fernhollow core ambience loop (with traffic)",
     "bed": true,
+    "music": false,
     "files": [
       {
         "file": "town_ambience_1.ogg",
@@ -251,6 +329,7 @@
   "wind_pines": {
     "use": "plateau and mountain pass ambience",
     "bed": true,
+    "music": false,
     "files": [
       {
         "file": "wind_pines_1.ogg",
