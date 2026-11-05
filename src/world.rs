@@ -37,6 +37,12 @@ pub enum PropKind {
     Sapling,
     /// A bush the car drives through.
     Shrub,
+    /// Open-world roadside furniture (`open::furniture`, drawn by `art::signs`): a reflector
+    /// post, a km stone, a chevron board on its pole. `seed` is the index in
+    /// `Furniture::signs`.
+    Reflector,
+    KmStone,
+    RoadSign,
 }
 
 impl PropKind {
@@ -47,13 +53,16 @@ impl PropKind {
             PropKind::Sign => (0.09, 2.0),
             PropKind::Sapling => (0.3, 11.0),
             PropKind::Shrub => (0.85, 1.1),
+            PropKind::Reflector => (0.07, 1.0),
+            PropKind::KmStone => (0.14, 0.8),
+            PropKind::RoadSign => (0.05, 2.7),
         }
     }
 
     /// Least distance (m) from the road's edge to its centre.
     pub fn clearance(self) -> f32 {
         match self {
-            PropKind::Post | PropKind::Sign => 0.8,
+            PropKind::Post | PropKind::Sign | PropKind::Reflector | PropKind::KmStone | PropKind::RoadSign => 0.8,
             PropKind::Sapling => 2.0,
             PropKind::Shrub => 0.6,
         }
@@ -68,6 +77,9 @@ impl PropKind {
             // ~50–110 kg of green wood.
             PropKind::Sapling => Give::Breaks { id, mass: 250.0 * scale, speed: 3.0 },
             PropKind::Shrub => Give::Brush { drag: 0.15 * scale },
+            PropKind::Reflector => Give::Breaks { id, mass: 6.0, speed: 1.0 },
+            PropKind::KmStone => Give::Breaks { id, mass: 40.0, speed: 2.5 },
+            PropKind::RoadSign => Give::Breaks { id, mass: 20.0, speed: 2.0 },
         }
     }
 }
@@ -315,6 +327,25 @@ fn generate_open(def: &StageDef) -> StageWorld {
     tiles.dedup();
     forest.fill(&tiles);
     world.forest = Some(Arc::new(forest));
+    // Posts and chevrons the car knocks down (`open::furniture::breakable`): props, in the furniture's own (fixed) order, so ids are the same everywhere.
+    let mut grid: HashMap<(i32, i32), Vec<Obstacle>> = HashMap::new();
+    let mut props = Vec::new();
+    for (k, s) in o.furniture.signs.iter().enumerate() {
+        use crate::open::furniture::SignKind;
+        let kind = match s.kind {
+            SignKind::Reflector => PropKind::Reflector,
+            SignKind::KmPost(_) => PropKind::KmStone,
+            k if crate::open::furniture::breakable(k) => PropKind::RoadSign,
+            _ => continue,
+        };
+        let id = props.len() as u32;
+        let (r, h) = kind.size();
+        let c = Vec2::new(s.pos.x, s.pos.z);
+        grid.entry(((c.x / OBS_CELL).floor() as i32, (c.y / OBS_CELL).floor() as i32)).or_default().push(Obstacle { pos: c, radius: r, top: s.pos.y + h, give: kind.give(id, 1.0) });
+        props.push(Prop { id, kind, pos: s.pos, yaw: s.yaw, scale: 1.0, seed: k as u64 });
+    }
+    world.obstacles = Arc::new(grid);
+    world.props = Arc::new(props);
     world
 }
 
