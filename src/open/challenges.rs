@@ -943,7 +943,12 @@ fn markers(world: &mut World, open: &super::OpenWorld, placed: &[Placed]) {
 }
 
 /// The radar camera flashes (one white flash, 0.25 s; no strobing).
-fn flash(time: Res<Time>, mut flashes: MessageReader<RadarFlash>, challenges: Option<Res<Challenges>>, lamps: Query<&FlashLamp>, mut mats: ResMut<Assets<StandardMaterial>>, mut lit: Local<Vec<(usize, f32)>>) {
+fn flash(time: Res<Time>, mut flashes: MessageReader<RadarFlash>, challenges: Option<Res<Challenges>>, lamps: Query<&FlashLamp>, mats: Option<ResMut<Assets<StandardMaterial>>>, mut lit: Local<Vec<(usize, f32)>>) {
+    // Headless runs have no materials (and no lamps).
+    let Some(mut mats) = mats else {
+        flashes.clear();
+        return;
+    };
     let dt = time.delta_secs();
     if let Some(ch) = challenges {
         for f in flashes.read() {
