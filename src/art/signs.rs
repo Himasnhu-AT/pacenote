@@ -946,7 +946,7 @@ mod tests {
 
     #[test]
     fn every_cell_fits_the_atlas_without_overlap() {
-        let mut used = vec![false; COLS * COLS];
+        let mut used = [false; COLS * COLS];
         for c in all_cells() {
             let (k, w) = c.index();
             assert!(k % COLS + w <= COLS, "{c:?} runs off its row");

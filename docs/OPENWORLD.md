@@ -100,18 +100,19 @@ three hooks in `OpenWorld`: `dip` (potholes, washout corrugation) in `ground_hei
 `surface_override` (wet tarmac, mud, washouts as loose gravel, shaded ice as snow) in
 `surface_at`, and `walls` (guard rails, stone blocks, street-light stubs) in the wall grid.
 
-- **Guard rails** where the ground 8 m past the edge is over 3 m below it: on the outside of
+- **Guard rails** where the ground 8 m past the edge is over 3.5 m below it: on the outside of
   tarmac corners up to grade 4 (any grade above 250 m), at gravel and forest hairpins, and
-  anywhere it drops over 8 m (WORLD_PASS said 6 m; that put 4-6 km of rail on today's cliffy
-  land). Extended 20 m, gaps under 30 m merged, at least 24 m, never across a junction mouth or
-  a bridge. Steel W-beam on tarmac, timber on gravel and forest. Walls every 4 m, r 0.12, top
-  ground + 0.75: the car scrapes along them.
+  anywhere it drops over 9 m (WORLD_PASS said 3 m / 6 m / 20 m; measured on the re-baked level
+  that gave 2.2 km of rail, this gives 1.4 km against its 1.2-1.6 km). Extended 15 m, gaps
+  under 30 m merged, at least 24 m, never across a junction mouth or a bridge. Steel W-beam on
+  tarmac, timber on gravel and forest. Walls every 4 m, r 0.12, top ground + 0.75: the car
+  scrapes along them.
 - **Stone blocks** instead of rail on the outside of other dropping gravel and forest corners.
 - **Signs** on the right verge, 120 m (tarmac) / 70 m (gravel) before the hazard, one per 50 m
   each way: junction > hairpin > crest / jump > double bend > steep, falling rocks, narrow
   bridge > slippery, loose, deer > bend. **Chevrons** round every hairpin (two boards a post,
-  one for each way). **Speed signs** where `posted_kmh` (the traffic's limit) changes and at
-  town street mouths; town boards at the town limits. **Km posts** on roads 0 and 1,
+  one for each way). **Speed signs** where `traffic::posted_limit` changes (50 through
+  Fernhollow) and at town street mouths; town boards where roads enter `town::in_core`. **Km posts** on roads 0 and 1,
   **reflector posts** every 50 m on rural tarmac (25 m in bends), 100 m on fast gravel;
   **street lights** every 30 m on town streets.
 - **Conditions**: potholes on old stretches of roads 0 and 1 (a dip, grip unchanged), wet

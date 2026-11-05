@@ -13,9 +13,11 @@
 //! bumps [`REV`], which goes into the event `stage_hash`.
 //!
 //! Placement in short (all distances along the road, both directions of travel):
-//! - **Guard rails** where the ground 8 m past the edge is more than 3 m below it, on the outside
-//!   of corners up to grade 4 (grade 5/6 above 250 m), or anywhere it drops over 6 m; extended
-//!   20 m, gaps under 30 m merged, at least 24 m. Steel on tarmac, timber on gravel and forest.
+//! - **Guard rails** where the ground 8 m past the edge is more than 3.5 m below it, on the
+//!   outside of tarmac corners up to grade 4 (any grade above 250 m) and of gravel/forest
+//!   hairpins, or anywhere it drops over 9 m; extended 15 m, gaps under 30 m merged, at least
+//!   24 m. Steel on tarmac, timber on gravel and forest; stone blocks on the other dropping
+//!   gravel corners.
 //! - **Chevrons** round every hairpin (5 boards), tarmac 3-4s that need a big brake (3), and
 //!   gravel 1-2s after a fast run or over a crest (3).
 //! - **Warning triangles** 120 m (tarmac) / 70 m (gravel) before the hazard on the right verge,
@@ -242,10 +244,11 @@ impl Furniture {
 // ------------------------------------------------------------------------ the rules
 
 /// Rail: the drop 8 m past the edge must be over this (m)…
-pub const RAIL_DROP: f32 = 3.0;
-/// …or over this anywhere, corner or not. (WORLD_PASS says 6 m; on the cliffy committed land
-/// that put 4-6 km of rail up, against the 1.2-1.6 km it aims for.)
-pub const RAIL_DROP_ANY: f32 = 8.0;
+pub const RAIL_DROP: f32 = 3.5;
+/// …or over this anywhere, corner or not. (WORLD_PASS says 3 m / 6 m, extended 20 m; measured
+/// on the re-baked level that put 2.2-6 km of rail up against the 1.2-1.6 km it aims for:
+/// 3.5 m / 9 m / 15 m gives 1.4 km.)
+pub const RAIL_DROP_ANY: f32 = 9.0;
 /// Where the drop is measured, past the edge (m).
 const DROP_AT: f32 = 8.0;
 /// Rail centre past the road edge (m): shoulder plus 0.4.
@@ -310,18 +313,16 @@ fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The town the speed signs and boards mark: (centre, radius). Until the town mask lands
-/// (stream A), the village circle the buildings use.
-pub fn town(net: &RoadNet) -> (Vec2, f32) {
-    (net.places().village, super::buildings::VILLAGE_R)
+/// Inside the town (Fernhollow's core, `open::town`), where the town boards stand and the
+/// reflector posts and potholes stop.
+pub fn in_town(p: Vec2) -> bool {
+    super::town::in_core(p)
 }
 
-/// The posted speed limit (km/h, rounded to 10) on road `r` at station `i`: the traffic's
-/// own limit for it (`traffic::limit`, or the road's override), so the signs say what the
-/// traffic drives.
-pub fn posted_kmh(net: &RoadNet, r: usize, _i: usize) -> u8 {
-    let nr = &net.roads[r];
-    let v = nr.limit.unwrap_or_else(|| super::traffic::limit(nr.kind)) * 3.6;
+/// The posted speed limit (km/h, rounded to 10) on road `r` at station `i`: the traffic's own
+/// (`traffic::posted_limit`), so the signs say what the traffic drives.
+pub fn posted_kmh(net: &RoadNet, r: usize, i: usize) -> u8 {
+    let v = super::traffic::posted_limit(net, r, i) * 3.6;
     ((v / 10.0).round() * 10.0).clamp(10.0, 250.0) as u8
 }
 
@@ -339,7 +340,7 @@ struct RoadInfo {
     tarmac: bool,
 }
 
-fn road_info(net: &RoadNet, r: usize, town: (Vec2, f32)) -> RoadInfo {
+fn road_info(net: &RoadNet, r: usize) -> RoadInfo {
     let nr = &net.roads[r];
     let road = &nr.road;
     let n = road.len();
@@ -365,14 +366,13 @@ fn road_info(net: &RoadNet, r: usize, town: (Vec2, f32)) -> RoadInfo {
         // The outside of a left turn is its right (lateral −).
         apex.push((ap, -road.curv[ap].signum()));
     }
-    let in_town = road.pts.iter().map(|p| xz(*p).distance(town.0) < town.1).collect();
+    let in_town = road.pts.iter().map(|p| in_town(xz(*p))).collect();
     RoadInfo { near_j, bridge, corners, corner_at, apex, in_town, tarmac: matches!(nr.kind, RoadKind::BRoad | RoadKind::Street) }
 }
 
 /// The furniture for a road net on its terrain.
 pub fn build(net: &RoadNet, heights: &Heightfield) -> Furniture {
-    let town = town(net);
-    let infos: Vec<RoadInfo> = (0..net.roads.len()).map(|r| road_info(net, r, town)).collect();
+    let infos: Vec<RoadInfo> = (0..net.roads.len()).map(|r| road_info(net, r)).collect();
     let ground = |p: Vec2| {
         let hf = heights.height_at(p.x, p.y);
         super::profile::ground(net, p, hf).unwrap_or(hf)
@@ -475,7 +475,7 @@ struct RailRule {
     min: f32,
 }
 
-const RAIL_RULE: RailRule = RailRule { at: DROP_AT, drop: RAIL_DROP, any: RAIL_DROP_ANY, grade: 4, loose_grade: 0, grow: 20.0, gap: 30.0, min: 24.0 };
+const RAIL_RULE: RailRule = RailRule { at: DROP_AT, drop: RAIL_DROP, any: RAIL_DROP_ANY, grade: 4, loose_grade: 0, grow: 15.0, gap: 30.0, min: 24.0 };
 
 fn rails(net: &RoadNet, heights: &Heightfield, infos: &[RoadInfo], ground: &dyn Fn(Vec2) -> f32) -> Vec<RailRun> {
     rails_with(net, heights, infos, ground, &RAIL_RULE)
@@ -1094,6 +1094,13 @@ fn signs(net: &RoadNet, heights: &Heightfield, infos: &[RoadInfo], rails: &[Rail
             while ((s / STEP) as usize) < n {
                 let i = road.station(s);
                 let mut p = sign_at(road, i, side, SHOULDER + 0.9, SignKind::StreetLight, ground);
+                // Not in a junction, not on a crossing street.
+                let other = net.nearest(xz(p.pos), 12.0).is_some_and(|np| np.road != r && np.at.lateral.abs() < net.roads[np.road].road.half_width(&np.at) + 1.0);
+                if info.near_j[i] || other {
+                    side = -side;
+                    s += 30.0;
+                    continue;
+                }
                 let to_road = left(road, i) * side as f32;
                 p.yaw = libm::atan2f(to_road.x, to_road.y);
                 out.push(p);
@@ -1183,10 +1190,20 @@ pub(crate) mod tests {
         use crate::vehicle::{Car, Input, Spec, step};
         let w = world();
         let f = &*w.furniture;
-        let rail = f.rails.iter().filter(|r| r.kind == RailKind::Steel).max_by(|a, b| (a.to - a.from).total_cmp(&(b.to - b.from))).expect("a steel rail");
+        // A spot on a straight or the outside of a bend (where cars go into rails).
+        let (rail, i) = f
+            .rails
+            .iter()
+            .filter(|r| r.kind == RailKind::Steel && r.to - r.from > 120.0)
+            .find_map(|r| {
+                let road = &w.net.roads[r.road as usize].road;
+                // With 80 m of rail ahead to scrape along.
+                let (a, b) = ((r.from / STEP) as usize + 10, (r.to / STEP) as usize - 40);
+                (a..b).find(|&i| (i - 5..=i + 5).all(|j| road.curv[j] * r.side as f32 <= 0.0)).map(|i| (r, i))
+            })
+            .expect("a steel rail on a straight or a bend's outside");
         let road = &w.net.roads[rail.road as usize].road;
         let side = rail.side as f32;
-        let i = (((rail.from + rail.to) * 0.5) / STEP) as usize;
         let spec = Spec::default();
         for (kmh, deg) in [(60.0f32, 20.0f32), (100.0, 12.0), (90.0, 30.0)] {
             let d = road.dir[i];
@@ -1305,10 +1322,9 @@ pub(crate) mod tests {
     fn every_hairpin_has_chevrons_and_a_warning() {
         let w = world();
         let f = &*w.furniture;
-        let town = town(&w.net);
         let (mut hairpins, mut warned) = (0, 0);
         for r in 0..w.net.roads.len() {
-            let info = road_info(&w.net, r, town);
+            let info = road_info(&w.net, r);
             let road = &w.net.roads[r].road;
             let n = road.len();
             let tarmac = info.tarmac;
@@ -1350,13 +1366,12 @@ pub(crate) mod tests {
     fn reflector_posts_every_50_m_on_rural_tarmac() {
         let w = world();
         let f = &*w.furniture;
-        let town = town(&w.net);
         let mut checked = 0.0;
         for (r, nr) in w.net.roads.iter().enumerate() {
             if nr.kind != RoadKind::BRoad {
                 continue;
             }
-            let info = road_info(&w.net, r, town);
+            let info = road_info(&w.net, r);
             let road = &nr.road;
             for side in [1.0f32, -1.0] {
                 let mut at_s: Vec<f32> = f.signs.iter().filter(|s| s.kind == SignKind::Reflector).filter_map(|s| station_of(w, r, s)).filter(|&(_, lat)| lat * side > 0.0).map(|(s, _)| s).collect();
@@ -1459,9 +1474,8 @@ mod measure {
     #[ignore]
     fn rail_rule_shares() {
         let w = tests::world();
-        let town = town(&w.net);
         for (r, nr) in w.net.roads.iter().enumerate() {
-            let info = road_info(&w.net, r, town);
+            let info = road_info(&w.net, r);
             let road = &nr.road;
             let mut c = [0usize; 6];
             for side in [1.0f32, -1.0] {
@@ -1492,11 +1506,10 @@ mod measure {
     #[ignore]
     fn rail_variants() {
         let w = tests::world();
-        let town = town(&w.net);
-        let infos: Vec<RoadInfo> = (0..w.net.roads.len()).map(|r| road_info(&w.net, r, town)).collect();
+        let infos: Vec<RoadInfo> = (0..w.net.roads.len()).map(|r| road_info(&w.net, r)).collect();
         let ground = |p: Vec2| w.heights.height_at(p.x, p.y);
-        for (at, drop, any, loose_grade, grow) in [(8.0, 3.0, 6.0, 2, 20.0), (8.0, 3.0, 6.0, 1, 20.0), (8.0, 3.0, 8.0, 2, 20.0), (8.0, 3.0, 8.0, 0, 20.0), (6.0, 3.0, 6.0, 2, 20.0), (8.0, 3.0, 10.0, 0, 20.0)] {
-            let rule = RailRule { at, drop, any, grade: 4, loose_grade, grow, gap: 30.0, min: 24.0 };
+        for (at, drop, any, grade, loose_grade, grow) in [(8.0, 3.0, 8.0, 4, 0, 20.0), (8.0, 3.0, 10.0, 4, 0, 20.0), (8.0, 3.0, 8.0, 3, 0, 20.0), (8.0, 3.5, 9.0, 4, 0, 15.0), (8.0, 4.0, 10.0, 4, 0, 15.0), (8.0, 3.0, 99.0, 4, 0, 20.0)] {
+            let rule = RailRule { at, drop, any, grade, loose_grade, grow, gap: 30.0, min: 24.0 };
             let rails = rails_with(&w.net, &w.heights, &infos, &ground, &rule);
             let len: f32 = rails.iter().map(|r| r.to - r.from).sum();
             let steel: f32 = rails.iter().filter(|r| r.kind == RailKind::Steel).map(|r| r.to - r.from).sum();
@@ -1508,9 +1521,8 @@ mod measure {
     #[ignore]
     fn condition_candidates() {
         let w = tests::world();
-        let town = town(&w.net);
         for (r, nr) in w.net.roads.iter().enumerate() {
-            let info = road_info(&w.net, r, town);
+            let info = road_info(&w.net, r);
             let road = &nr.road;
             let n = road.len();
             let mut lows = Vec::new();
@@ -1590,11 +1602,10 @@ mod measure {
             Vec3::new(p.x, road.pts[i].y + up, p.y)
         };
         // Hairpins with steel rails: from 50 m before, driver height, looking at the apex.
-        let town = town(net);
         let mut k = 0;
         for rail in f.rails.iter().filter(|r| r.kind == RailKind::Steel) {
             let r = rail.road as usize;
-            let info = road_info(net, r, town);
+            let info = road_info(net, r);
             for (c, &(ap, _)) in info.corners.iter().zip(&info.apex) {
                 let s = ap as f32 * STEP;
                 if c.grade == stage::HAIRPIN && s > rail.from && s < rail.to && k < 3 {
