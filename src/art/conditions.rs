@@ -102,7 +102,7 @@ fn capsule(m: &mut Mesher, open: &OpenWorld, p: &Patch, open_a: bool, open_b: bo
         // End fade.
         let fa = if open_a { ((s - s0) / (p.radius * 0.8)).clamp(0.0, 1.0) } else { 1.0 };
         let fb = if open_b { ((s1 - s) / (p.radius * 0.8)).clamp(0.0, 1.0) } else { 1.0 };
-        let ripple = if p.kind == PatchKind::Washout { 0.82 + 0.18 * libm::sinf(core::f32::consts::TAU * (p.s0 + s) / 0.9) } else { 1.0 };
+        let ripple = if p.kind == PatchKind::Washout { 0.9 + 0.1 * libm::sinf(core::f32::consts::TAU * (p.s0 + s) / 0.9) } else { 1.0 };
         for &c in &cols {
             let q = p.a + dir * s + across * c * p.radius;
             // Ragged sides: the outer columns pull in a little, seeded by position.
@@ -140,7 +140,8 @@ fn pothole(m: &mut Mesher, open: &OpenWorld, p: &Patch) {
         let a = k as f32 / n as f32 * core::f32::consts::TAU;
         let r = p.radius * (0.78 + 0.34 * jitter(seedp, 20 + k as u32));
         let dir = Vec2::new(libm::cosf(a), libm::sinf(a));
-        for (f, col) in [(1.0f32, hole), (1.18, lin([0.34, 0.33, 0.31, 0.75])), (1.45, lin([0.2, 0.2, 0.2, 0.0]))] {
+        // The broken rim: lighter crumbs round the hole, fading into the road.
+        for (f, col) in [(1.0f32, hole), (1.22, lin([0.46, 0.44, 0.41, 0.9])), (1.55, lin([0.3, 0.3, 0.29, 0.0]))] {
             let q = centre + dir * r * f;
             m.v(Vec3::new(q.x, y(q), q.y), Vec3::Y, MATT, col);
         }

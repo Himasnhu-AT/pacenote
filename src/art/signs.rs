@@ -24,7 +24,41 @@ use crate::open::furniture::{Furniture, RAIL_TOP, RailKind, RailRun, SignKind, w
 pub struct SignsPlugin;
 
 impl Plugin for SignsPlugin {
-    fn build(&self, _app: &mut App) {}
+    fn build(&self, _app: &mut App) {
+        #[cfg(feature = "dev")]
+        dev::register(_app);
+    }
+}
+
+#[cfg(feature = "dev")]
+mod dev {
+    use bevy::prelude::*;
+    use engine::devtools::{AddControlCommand, params};
+    use serde_json::{Value, json};
+
+    use super::FurnitureArt;
+
+    pub fn register(app: &mut App) {
+        app.add_control_command(
+            "roadside.art",
+            "Show or hide the roadside furniture and road-condition meshes (A/B for perf); no params: count them",
+            params(&[("on", "boolean", "show (true) or hide (false)")]),
+            toggle,
+        );
+    }
+
+    fn toggle(world: &mut World, p: Value) -> Result<Value, String> {
+        let on = p.get("on").and_then(Value::as_bool);
+        let mut q = world.query_filtered::<&mut Visibility, With<FurnitureArt>>();
+        let mut n = 0;
+        for mut v in q.iter_mut(world) {
+            n += 1;
+            if let Some(on) = on {
+                *v = if on { Visibility::Inherited } else { Visibility::Hidden };
+            }
+        }
+        Ok(json!({"meshes": n, "on": on}))
+    }
 }
 
 /// Furniture meshes, for despawning when the roads are rebuilt.
@@ -33,8 +67,11 @@ pub struct FurnitureArt;
 
 /// Merged per tile this size (m).
 pub const TILE: f32 = 256.0;
-/// Drawn up to this far from the camera (m), fading over the last 30.
+/// Everything is drawn at least this far from the camera (m).
 pub const RANGE: f32 = 250.0;
+/// Bevy measures a `VisibilityRange` to the mesh's centre, so a tile stays drawn while its
+/// centre is within the range plus its half-diagonal: every piece within [`RANGE`] shows.
+const TILE_RANGE: f32 = RANGE + TILE * 0.71;
 
 // ------------------------------------------------------------------------ atlas layout
 
@@ -846,7 +883,7 @@ pub(super) fn spawn_tiles(world: &mut World, tiles: BTreeMap<(i32, i32), Mesher>
             Transform::from_translation(c),
             Scenery,
             NotShadowCaster,
-            VisibilityRange { start_margin: 0.0..0.0, end_margin: (RANGE - 30.0)..RANGE, use_aabb: true },
+            VisibilityRange { start_margin: 0.0..0.0, end_margin: (TILE_RANGE - 30.0)..TILE_RANGE, use_aabb: true },
             DespawnOnExit(engine::flow::AppState::InGame),
             crate::open::live::LiveRoadMesh,
         ));
@@ -933,7 +970,7 @@ mod tests {
         for p in data[..ATLAS * ATLAS * 4].chunks(4) {
             out.extend_from_slice(&p[..3]);
         }
-        let path = std::env::var("ATLAS_OUT").unwrap_or_else(|_| "atlas.ppm".into());
+        let path = std::env::var("ATLAS_OUT").unwrap_or_else(|_| std::env::temp_dir().join("atlas.ppm").display().to_string());
         std::fs::write(&path, out).unwrap();
         eprintln!("wrote {path}");
     }
