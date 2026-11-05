@@ -118,7 +118,7 @@ three hooks in `OpenWorld`: `dip` (potholes, washout corrugation) in `ground_hei
   tarmac in damp dips, mud on wet gravel, washouts on steep wet gravel, ice on the shaded inside
   of high forest hairpins.
 - **Look**: `art::signs` (one procedural atlas of original pictograms and lettering, one
-  material, one merged mesh per 256 m tile, range 250 m, no shadows) and `art::conditions`
+  material, one merged mesh per 512 m tile, range 250 m, no shadows) and `art::conditions`
   (soft-edged mesh patches over the road, one material, per tile). `art::roadside::spawn` draws
   both.
 

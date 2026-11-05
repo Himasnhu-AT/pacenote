@@ -2,7 +2,7 @@
 //! stone blocks, warning / speed / town signs, chevron boards, km and reflector posts, street
 //! lights. Everything is one material over one procedural atlas (original pictograms and
 //! lettering, drawn here: no fonts, no real-world sign designs), merged into one mesh per
-//! 256 m tile, range 250 m, no shadows: a handful of draws.
+//! 512 m tile, range 250 m, no shadows: a handful of draws.
 //!
 //! **Owner: stream B (ROADSIDE).** Design: `docs/festival/ART_BIBLE.md` §4 (look), `docs/festival/WORLD_PASS.md` §4
 //! (placement), `docs/festival/TECH_PASS.md` §4 (≤ +20 draws), `docs/festival/DECISIONS.md` W3-W4.
@@ -66,7 +66,7 @@ mod dev {
 pub struct FurnitureArt;
 
 /// Merged per tile this size (m).
-pub const TILE: f32 = 256.0;
+pub const TILE: f32 = 512.0;
 /// Everything is drawn at least this far from the camera (m).
 pub const RANGE: f32 = 250.0;
 /// Bevy measures a `VisibilityRange` to the mesh's centre, so a tile stays drawn while its
