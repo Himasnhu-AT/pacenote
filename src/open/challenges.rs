@@ -13,7 +13,8 @@
 //! - geometry: [`place`] turns them into gate lines on the roads ([`Placed`], [`Gate`]);
 //! - the attempt: [`Tracker::step`] is pure (a [`ChallengeFrame`] per fixed step in, [`Outcome`]s
 //!   out); unit-tested with synthetic drives;
-//! - results: [`stars`], [`reward`] and the player's bests ([`Bests`], `<DataDir>/`[`BESTS_FILE`]);
+//! - results: [`stars`], [`reward`] and the player's bests ([`Bests`], kept in the career save
+//!   as `career::save::CareerProgress::challenges`);
 //! - the game: markers by the road (gate stripes, flag posts, kind boards, the radar camera that
 //!   flashes), [`ChallengeResult`] / [`RadarFlash`] / [`RunCue`] / `career::Payout` messages,
 //!   and dev commands `challenges.list`, `challenges.goto`, `challenges.state`.
@@ -33,8 +34,6 @@ use super::roads::RoadNet;
 /// The challenges, under the assets dir (F's file; star thresholds baked by
 /// `--bake-challenges` after A's re-bake).
 pub const CHALLENGES_FILE: &str = "levels/open/challenges.ron";
-/// The player's best result and stars per challenge, in the data dir.
-pub const BESTS_FILE: &str = "challenges.json";
 
 /// Notes for the first 1★, 2★, 3★ on a challenge (2,000 in all).
 pub const STAR_NOTES: [u32; 3] = [400, 600, 1_000];
@@ -619,7 +618,8 @@ pub struct Best {
     pub runs: u32,
 }
 
-/// Every best, by challenge id (`<DataDir>/`[`BESTS_FILE`]).
+/// Every best, by challenge id. A view of `career::save::CareerProgress::challenges` (the
+/// career save, `career.json`): rebuilt when that changes, written back with each result.
 #[derive(Resource, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Bests {
@@ -710,7 +710,8 @@ impl Plugin for ChallengesPlugin {
             .add_message::<RadarFlash>()
             .add_message::<RunCue>()
             .init_resource::<ChallengeRun>()
-            .add_systems(Startup, load_bests)
+            .init_resource::<Bests>()
+            .add_systems(Update, bests_from_career)
             .configure_sets(FixedUpdate, ChallengeSet.after(crate::career::style::StyleSet))
             .add_systems(FixedUpdate, track.in_set(ChallengeSet).run_if(resource_exists::<StageWorld>).run_if(resource_exists::<Challenges>))
             .add_systems(Update, (setup, flash).run_if(resource_exists::<StageWorld>))
@@ -720,9 +721,17 @@ impl Plugin for ChallengesPlugin {
     }
 }
 
-fn load_bests(mut commands: Commands, dir: Option<Res<engine::paths::DataDir>>) {
-    let b: Bests = dir.map(|d| d.load_json(BESTS_FILE)).unwrap_or_default();
-    commands.insert_resource(b);
+/// Bests from the career save (at load, and whenever it changes elsewhere).
+fn bests_from_career(progress: Option<Res<crate::career::save::CareerProgress>>, mut bests: ResMut<Bests>) {
+    let Some(p) = progress.filter(|p| p.is_changed()) else { return };
+    let fresh: BTreeMap<u32, Best> = p
+        .challenges
+        .iter()
+        .map(|(&id, c)| (id, Best { value: c.best, stars: c.stars, runs: bests.by_id.get(&id).map_or(1, |b| b.runs.max(1)) }))
+        .collect();
+    if fresh != bests.by_id {
+        bests.by_id = fresh;
+    }
 }
 
 fn leave(mut commands: Commands, mut run: ResMut<ChallengeRun>) {
@@ -767,7 +776,7 @@ fn track(
     (paused, loading, role): crate::career::style::Gates,
     mut state: ResMut<ChallengeRun>,
     mut bests: ResMut<Bests>,
-    dir: Option<Res<engine::paths::DataDir>>,
+    mut progress: Option<ResMut<crate::career::save::CareerProgress>>,
     (mut results, mut flashes, mut cues): (MessageWriter<ChallengeResult>, MessageWriter<RadarFlash>, MessageWriter<RunCue>),
     (mut pay, mut style): (MessageWriter<crate::career::Payout>, MessageWriter<crate::career::style::StyleCommand>),
     mut out: Local<Vec<Outcome>>,
@@ -802,7 +811,6 @@ fn track(
     let placed = &challenges.0;
     state.tracker.step(&f, placed, &mut out);
     state.live = state.tracker.live(placed, &f);
-    let mut save = false;
     for o in out.drain(..) {
         match o {
             Outcome::Started { .. } => {
@@ -819,7 +827,10 @@ fn track(
             Outcome::Finished { idx, value, pos } => {
                 let def = &placed[idx].def;
                 let r = reward(&mut bests, def, value);
-                save = true;
+                // Into the career save (it marks itself dirty and writes `career.json`).
+                if let (Some(p), Some(b)) = (progress.as_deref_mut(), bests.get(def.id)) {
+                    p.challenges.insert(def.id, crate::career::save::ChallengeProgress { best: b.value, stars: b.stars });
+                }
                 info!("challenge {} {}: {value:.1} {} → {} stars{}, {} Notes", def.id, def.name, def.kind.unit(), r.result.stars, if r.result.new_best { ", best" } else { "" }, r.notes);
                 if def.kind == ChallengeKind::RadarPost {
                     flashes.write(RadarFlash { pos, kmh: value, target_beaten: r.result.stars > 0, personal_best: r.result.new_best });
@@ -835,12 +846,6 @@ fn track(
                 state.void = None;
             }
         }
-    }
-    if save
-        && let Some(d) = dir
-        && let Err(e) = d.save_json(BESTS_FILE, &*bests)
-    {
-        error!("challenges: can't save the bests: {e}");
     }
 }
 

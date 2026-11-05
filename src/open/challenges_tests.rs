@@ -321,6 +321,26 @@ fn the_13_challenges_sit_on_their_roads() {
             }
         }
     }
+    // Gates ≥ 120 m from a junction, ≥ 50 m from an event marker (GAME_SYSTEMS §3).
+    let events = crate::open::events::build(&o.net, &o.data.events);
+    for p in &placed {
+        let shown: Vec<&Gate> = if p.def.kind.section() { vec![p.first(), p.gates.last().unwrap()] } else { vec![p.first()] };
+        for g in shown {
+            let xz = Vec2::new(g.p.x, g.p.z);
+            for j in &o.net.junctions {
+                assert!(j.pos.distance(xz) >= 120.0, "{}: a gate {:.0} m from a junction", p.def.name, j.pos.distance(xz));
+            }
+            for e in &events {
+                let d = e.route.pts[0].distance(g.p);
+                assert!(d >= 50.0, "{}: a gate {d:.0} m from the {} marker", p.def.name, e.name);
+            }
+        }
+    }
+    // Yump Boards stand on the level's jumps (WORLD_PASS §9: `RoadNet::yumps`).
+    for p in placed.iter().filter(|p| p.def.kind == ChallengeKind::YumpBoard) {
+        let near = o.net.yumps.iter().any(|&(k, i)| k == p.def.road as usize && (i as f32 * crate::stage::STEP - p.def.gates[0]).abs() <= 4.0);
+        assert!(near, "{} isn't on a jump ({:?})", p.def.name, o.net.yumps);
+    }
     // Sections are long enough (Pace 1.2-2.5 km, Slide 300-800 m).
     for p in &placed {
         match p.def.kind {
@@ -411,3 +431,4 @@ fn step_cost() {
     let ms = start.elapsed().as_secs_f64() * 1000.0 / n as f64;
     eprintln!("style + challenges: {ms:.4} ms per step");
 }
+
