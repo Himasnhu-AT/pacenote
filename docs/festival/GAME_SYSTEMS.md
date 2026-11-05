@@ -415,3 +415,58 @@ Streams run in parallel against §8. Inside a stream, order = dependency order.
 one small "interfaces" PR. After that the four streams run independently. Every stream keeps
 the house rules: a pure core with unit tests, `DespawnOnExit(InGame)` on in-game UI, nothing
 visual in headless runs, and no frame time or randomness in `vehicle.rs`.
+
+## 9. As built: Style and challenges (stream F1, Nov 2026)
+
+**Style** (`src/career/style.rs`, tests in `style_tests.rs`). `Detector::step(&StyleFrame, &mut
+Vec<StyleEvent>)` is pure; all eleven skills use the §2.2 numbers. How the rules were read:
+- A skill adds to P when it *completes*: a Slide when it ends (0.3 s after dropping below),
+  an Air 0.6 s after a clean landing, a Close Shave 1 s after the pass (no contact around it).
+  Running Slide / Flat Out / Slipstream points live in `Rhythm::live`; they keep the Rhythm
+  alive, add +0.2 every 2 s, and are lost on a break.
+- A Slide's 0.25 s hold counts towards its points (SK-2: 30° at 60 km/h for 2 s = 192).
+  Slipstream's 1 s hold doesn't (SK-4: 3 s behind = 50).
+- Scuffs (a knock with no damaging hit, not a Splinter) halve M at most once per 0.5 s.
+- Contact with another car = a knock with that car within 3.6 m at ≥ 8 km/h relative speed.
+- A recover is seen as a jump in position (the same rule catches respawns and restarts).
+- Banks: timeout, pause/map opening, driving into an event marker, a Pace/Slide Section start
+  gate. Breaks: hit, car contact, recover, rolled (`up.y` < 0.3), an event start or restart, a
+  car swap. Quitting drops the Rhythm silently.
+- `StyleEvent::Tick` carries a `StyleTag` (Big Air, Paint Scraper) for the HUD.
+- `Payout{Rhythm}` on every bank that pays; grade xp comes from `Bank.points` (F2).
+- Dev: `style.state`, `style.inject {skill, points}` (also `bank` / `lose`).
+
+**Challenges** (`src/open/challenges.rs`, tests in `challenges_tests.rs`). The 13 anchors are in
+`assets/levels/open/challenges.ron`: road index + stations, with the world x,z of the first and
+last gate as a check. Radar 2 sits at s 720 (not the anchor's 612) to keep 500 m from Radar 4.
+Thresholds are the §3 placeholders until the star bake (C4). After A's re-bake run
+`PACENOTE_CHALLENGES=reanchor cargo test --features wt_style --lib write_challenges -- --ignored`;
+`the_13_challenges_sit_on_their_roads` fails while a gate is more than 3 m off its x,z.
+- Sections run towards increasing stations. A Pace Section has 4 hidden mid-gates (within
+  15 m of the centreline), spread evenly. A run voids on a missed gate, a recover, 1 s
+  reversing, 3 s off its road, or averaging < 15 km/h. Re-crossing the start restarts it.
+- Slide Section = the raw Slide + Switch points between the gates (`Rhythm::slide_meter`); a
+  damaging hit voids it.
+- Yump Board: take-off within ±8 m of the crest on the road, ≥ 0.15 s in the air, measured
+  take-off → first touchdown; a bad landing voids it.
+- Each star tier pays once (400 / 600 / 1,000, summed in one `Payout{ChallengeStar}`); a new
+  best with no new star pays 50 (`ChallengeBest`). Bests are in `<DataDir>/challenges.json`
+  (to move into `career.json` once F2's save lands).
+- Markers: gate stripes on the road surface, flag posts, a kind-coloured board, and a radar
+  camera whose lamp flashes once (0.25 s) on `RadarFlash`.
+- Dev: `challenges.list`, `challenges.state`, `challenges.goto {id, lead, kmh}`.
+
+**HUD.** `hud_style.rs`: the Rhythm panel above the speedo (×M, P, 3 lines, timeout bar,
+Banked ✓ / Broken ✕ with the total struck through). It is compact in timed events.
+`hud_challenge.rs`: a top-centre card for the approach, live readout (bar with star notches),
+result (stars filling 150 ms apart) and void. ★ ✓ ✕ are drawn as images because the fonts
+don't have them. Reduce motion turns off the shake, bump, slide-in and star fill. Settings
+rows: HUD › Style HUD (Full / Compact / Off), HUD › Challenge cards.
+
+**Sound** (`src/audio/festival.rs`, bus `hud` under `ui`). All AUDIO_PASS §3 festival cues are
+synthesised at startup: tick ≤ 15/s, bank −14 dBFS above lost −18, a 3D radar shutter, chimes,
+countdown/go, checkpoint, finish, fail and the money roll.
+
+**Not yet.** The star bake (`--bake-challenges`, after A's re-bake). Map and minimap icons
+(`src/map` is A's; the data is `open::challenges::Challenges` plus `Bests`). The board's
+pictogram and best value. The seeded placer (C2: later).
