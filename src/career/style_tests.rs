@@ -355,6 +355,8 @@ fn close_shaves_by_gap_and_direction() {
     assert!(pass(1.3, 40.0, false).ticks(StyleKind::CloseShave).is_empty());
     // Too slow: 20 km/h closing.
     assert!(pass(0.5, 20.0, false).ticks(StyleKind::CloseShave).is_empty());
+    // Overlapping bodies (a car driven through, e.g. non-solid dev traffic): no shave.
+    assert!(pass(-0.8, 40.0, false).ticks(StyleKind::CloseShave).is_empty());
     let s = pass(0.5, 40.0, false);
     assert!(s.events.iter().any(|e| matches!(e, StyleEvent::Tick { tag: StyleTag::PaintScraper, .. })));
 }

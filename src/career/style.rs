@@ -59,6 +59,8 @@ pub const BIG_AIR_M: f32 = 25.0;
 const SHAVE_BODY: f32 = 1.8;
 const SHAVE_GAP: f32 = 1.2;
 const SCRAPER_GAP: f32 = 0.6;
+/// Body gaps below this (m) are overlapping bodies: no shave.
+const SHAVE_OVERLAP: f32 = -0.1;
 const SHAVE_CLOSING_KMH: f32 = 25.0;
 const SHAVE_CONFIRM: f32 = 1.0;
 const SHAVE_REPEAT: f32 = 5.0;
@@ -848,7 +850,8 @@ impl Detector {
             if crossed && s.since_shave >= SHAVE_REPEAT - EPS && s.since_contact >= SHAVE_CONFIRM {
                 let gap = lateral.abs() - SHAVE_BODY;
                 let closing = rel.dot(f.fwd).abs() * 3.6;
-                if gap <= SHAVE_GAP && closing >= SHAVE_CLOSING_KMH {
+                // (A negative gap is the bodies overlapping: contact, not a shave.)
+                if (SHAVE_OVERLAP..=SHAVE_GAP).contains(&gap) && closing >= SHAVE_CLOSING_KMH {
                     let scraper = gap <= SCRAPER_GAP;
                     let mut points = if scraper { 250.0 } else { 120.0 };
                     if f.fwd.dot(o.fwd) < 0.0 {
