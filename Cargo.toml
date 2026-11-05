@@ -1,6 +1,6 @@
 [package]
 name = "pacenote"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Two-person rally: a driver who can't see the map and a guide who can't drive, talking over voice."
