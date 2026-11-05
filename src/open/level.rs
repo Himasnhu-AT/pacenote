@@ -585,7 +585,6 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
     let mut app = level_app();
     let world = app.world_mut();
     engine::level::load_level(world, path).map_err(|e| format!("{}: {e:?}", path.display()))?;
-    let data = from_level(world)?;
     let name = world.query::<&WorldDoc>().iter(world).next().map(|d| d.terrain.clone()).unwrap_or_default();
     if name.is_empty() || name.contains("..") || Path::new(&name).is_absolute() {
         return Err(format!("terrain folder {name:?}"));
@@ -599,6 +598,13 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         .map(|l| terrain_dir(&l, &name))
         .find(|d| d.join("terrain.ron").exists())
         .unwrap_or_else(|| terrain_dir(path, &name));
+    // The land under the roads, as baked (no erosion at load), if the level has it.
+    if let Some(seed) = world.query::<&WorldDoc>().iter(world).next().map(|d| d.data.seed)
+        && let Some(l) = super::land::Land::load(&dir.join(super::land::LAND_FILE), seed)
+    {
+        super::land::preload(l);
+    }
+    let data = from_level(world)?;
     let heights = TerrainData::load(&dir).and_then(|t| t.to_heightfield()).map_err(|e| format!("terrain {}: {e:?}", dir.display()))?;
     let mut overrides = |kind: Foliage| world.query::<(&Foliage, &PcgOverrides)>().iter(world).find(|(f, _)| **f == kind).map(|(_, o)| o.clone()).unwrap_or_default();
     let (trees, dressing) = (overrides(Foliage::Trees), overrides(Foliage::Dressing));
@@ -647,6 +653,7 @@ pub fn bake(path: &Path) -> Result<String, String> {
     let n = open.heights.nx();
     let dir = terrain_dir(path, name);
     TerrainData::from_heightfield(&open.heights, [n, open.heights.nz()], None).save(&dir).map_err(|e| format!("{e:?}"))?;
+    open.net.land.save(&dir.join(super::land::LAND_FILE)).map_err(|e| format!("{}: {e}", super::land::LAND_FILE))?;
     let points: usize = world.query::<&Spline>().iter(world).map(|s| s.points.len()).sum();
     Ok(format!(
         "{}: {} roads ({points} control points), {} events, {} buildings, terrain {n}² in {} ({:.1} s)",
