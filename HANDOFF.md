@@ -1,6 +1,7 @@
 # Pacenote handoff
 
-Start here in a new session. State as of 30 Oct 2026: everything below is merged on `main`, and
+Start here in a new session. **5 Nov 2026: the "Valley Trials" festival update is merged** (see
+"Festival update" below; design docs in `docs/festival/`, start with `DECISIONS.md`). Older state as of 30 Oct 2026: everything below is merged on `main`, and
 all tests pass (84 unit tests plus 3 integration binaries).
 
 ## What the game is
@@ -12,6 +13,52 @@ Bevy 0.19.1). There are 20 fixed stages, generated from seeds, and teams race ea
 - **Voice:** the two talk over built-in voice chat.
 
 Full design: `docs/DESIGN.md`.
+
+## Festival update (5 Nov 2026)
+
+Built by 7 parallel streams from `docs/festival/` (GAME_SYSTEMS, ART_BIBLE, WORLD_PASS, AUDIO_PASS,
+UX_PASS, TECH_PASS; `DECISIONS.md` overrides them; `PERF_REPORT.md` has the perf breakdown).
+All merged on `main`; 453 lib tests + integration tests pass.
+
+| Path | What |
+|---|---|
+| `src/career/` | Notes economy (`wallet.rs`, `economy.rs`), 8-car roster + upgrades as `Spec` multipliers + PI/classes (`garage.rs`), grade/xp, `career.json` save (`save.rs`), Style skills + Rhythm (`style.rs`), rivals: pure race sim (`racers.rs`), race flow (`race_flow.rs`), liveries (`livery.rs`) |
+| `src/pilot.rs` | The driving AI (rivals and the dev autopilot) |
+| `src/daytime.rs` | `DayClock` at 5x real time, solar sun, moon; Settings › World (start time, time passes) |
+| `src/camera.rs` | Cockpit / bonnet / spring-arm chase cameras, speed feel (FOV, blur, shake), `perf.draws` |
+| `src/art/` | `sky.rs` + `clouds.wesl` (cloud dome, stars, cloud shadows), `exhaust.rs` (flames), `headlights.rs`, `signs.rs`, `conditions.rs` |
+| `src/audio/` | `pops.rs` (pop/bang scheduler + synth), `festival.rs` (gameplay cues), `festival_recorded.rs` (Openverse sfx), `music.rs` (menu/loading music), `ui.rs` (menu sounds) |
+| `src/open/` | `town.rs` (Fernhollow), `furniture.rs` (rails, signs, posts, road conditions), `challenges.rs` (13 challenges, `assets/levels/open/challenges.ron`) |
+| `src/meta/` | `hub.rs` (Service Park menu), `showroom.rs` (3D car), `garage_ui.rs` (Garage/Upgrades/Dealership), `confirm.rs` |
+| `src/hud_style.rs`, `hud_challenge.rs`, `hud_race.rs` | Rhythm panel, challenge cards, race positions/results |
+| `tools/audio/` | `openverse_sounds.py` (CC0/CC BY downloader, `sfx_wishlist.json`), `cook_sfx.py` |
+| `tools/perf/budget.py` | Per-scenario perf check (tour, town, mountain, pass, event), any checkout |
+
+Dev commands: `career.give/request/state`, `events.start {id, race}`, `challenges.goto/state`,
+`style.state`, `race.state`, `look.time`, `day.get`, `sky.clouds`, `perf.draws`, `autopilot.set`.
+
+Records/ghosts: the re-baked level and `furniture::REV` 2 reset every open-world board.
+
+Open items:
+- The map stream's town square and world-edge skirt were not finished (worktree
+  `../pacenote-wt/world`, branch `fest-world`, uncommitted; kept, not merged). The flat plain past the
+  4 km edge still shows from heights.
+- Perf: see `docs/festival/PERF_REPORT.md` actions 2-5 (forest solids at load, music/texture memory,
+  pipeline cache). Action 1 (256 m terrain chunks) is in.
+- Repair untested in game (unit tests only); 3 AI stories untested (Rookie yield, gap accuracy,
+  recover hold); warning/speed signs aren't knockable (draw budget); packs with no usable sound:
+  service park, dog bark, car horn, gravel hits.
+- Rust: rustc 1.97 can't build Bevy 0.20.1; use `cargo +stable` (or add a `rust-toolchain.toml`).
+
+Engine gaps found (engine repo, not changed):
+- No clouds in Bevy 0.20/engine (game-side dome); clouds aren't in reflections.
+- `LookTimeline` re-applies the look every frame and refilters env lighting 10x/s (p95 11.8 → 17.5
+  ms): needs a cheap "move the sun" path. Switching sky mode in play stalls pipelines.
+- No streamed music: a song decodes to 75-100 MB of f32.
+- Toast has a fixed 48 px top offset (covers the menu top bar).
+- `VisibilityRange { use_aabb }` measures to the mesh centre: big merged tiles vanish when inside.
+- Motion blur only on High+; no GPU memory census tool; offscreen runs render 1080p only and have
+  no audio device (levels measured offline).
 
 ## Read first
 

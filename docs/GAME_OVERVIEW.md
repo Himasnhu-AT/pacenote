@@ -70,20 +70,24 @@ matter inside events. Section 10 asks what the unifying hook should be.
 |---|---|---|
 | Open world (4 x 4 km) | **Playable** | 21 roads (~38 km), smooth eroded terrain, the town of Fernhollow, outskirts, hamlets, farms and huts: 654 buildings, ~238k trees. Stored as a level file the game loads. |
 | World editor (dev) | **Working** | The engine's editor on the game binary: roads, buildings, event starts, trees, terrain; edits rebuild the world live. Needs the engine's `editor` branch. |
-| Free roam | **Playable** | Spawn in town, R recovers onto nearest road, no clock. |
-| Events (7) | **Playable** | 4 forest rallies, 2 gravel sprints, 1 ring lap; AI pace notes; records, ghosts, results. |
+| Free roam | **Playable** | Spawn at the service park; R recovers; a day clock runs at 5x (Settings › World). |
+| Events (5) | **Playable** | Rally/Sprint/Lap in Fernhollow's valley; Time Trial or Race (5 AI rivals, 4 difficulties, grid or pursuit start, purse by position, liveries); AI pace notes; records, ghosts. |
 | Traffic | **Playable** | 40 AI cars around the player; lanes, junction right-of-way; solid. Off during events. |
 | Car handling | **Mature** | Custom deterministic sim, tuned and measured (`docs/HANDLING.md`). |
 | Damage | **Working** | Engine/steering/suspension damage, body parts come off, retire on a fully broken part. |
-| Cockpit / views | **Working** | Cockpit (default), bonnet, chase. Detailed cabin with animated hands. |
-| Audio | **Working** | Recorded CC0 engine + drift; synthesised wind, impacts, ambience. |
+| Cockpit / views | **Working** | Cockpit (default), bonnet, spring-arm chase with speed FOV, motion blur, shake; exhaust flames; headlights. |
+| Audio | **Working** | Recorded CC0 engine + drift; synthesised pops and bangs, gameplay cues, wind; recorded Openverse crowds, horn, radar shutter, money, church bell, rail scrapes, ambience beds; menu and loading music (`tools/audio/`). |
 | AI co-driver voice | **Working** | OS text-to-speech; events only in the open world. |
-| Menus, settings, HUD | **Working** | Engine UI kit; recently ported to Bevy 0.20 picking. |
+| Menus, settings, HUD | **Working** | Service Park hub with 3D showroom, Garage/Upgrades/Dealership, Events, Challenges, Logbook; briefing loading screen; Rhythm (Style) panel, challenge cards, race positions. |
 | Records & ghosts | **Working** | Local leaderboard file, ghost replay (bit-exact). Per event id in the open world. |
 | Driver + guide (2 players) | **Legacy** | Works on the old 20 stages only; not in the open world. |
 | Voice chat | **Legacy** | Works in the driver + guide session; radio for the open world not built. |
 | The 20 old stages | **Hidden** | Still in code; reachable with `--stage N` and from "Play together". |
 | Map / minimap | **Working** | Free-roam minimap (heading up, roads by kind, events, traffic, route); full map on `M` / d-pad up or the pause menu: terrain, roads, village, events, pick one for a route along the roads (`src/map/`). Hidden during events. |
+| Economy & garage | **Working** | Notes currency, 8 cars, 7 upgrade parts as Spec multipliers, PI classes, `career.json` save. |
+| Style & challenges | **Working** | 11 skills chained into a Rhythm (×6 max, banked for Notes and xp); 13 roadside challenges (Radar Posts, Pace/Slide Sections, Yump Boards) with 1-3 stars. |
+| Sky & time of day | **Working** | Bevy atmosphere, cloud dome with stars and cloud shadows, solar sun + moon, street lamps; PBR Neutral tonemapping. |
+| Roadside | **Working** | Guard rails on drops, chevrons, warning/speed/town signs, knockable posts, potholes, wet, mud, washouts. |
 | Online play, matchmaking | **Missing** | LAN / forwarded port only (engine has no relay). |
 | Steam demo build | **Outdated** | Built for the 3-stage demo before the open-world pivot. |
 | Website / store copy | **Outdated** | Describes the stage-based game. |

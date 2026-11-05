@@ -376,3 +376,16 @@ Merge order: D → C → A → B → F → E.
      never louder than Bank); item 9 with 5 rivals.
   6. Pacing check holds (E3): a fresh career has 12,000 N and the Saker; a newcomer can afford an
      Engine Gravel or a second car within ~25 min (show the arithmetic in the hand-back).
+
+
+## 5. After the build (5 Nov 2026)
+
+- **Built** as decided, except the deviations each stream wrote up: GAME_SYSTEMS §9 (Style and
+  challenges), `F2_ECONOMY_RIVALS.md` (economy, rivals), UX_PASS §9, ART.md (look), AUDIO.md.
+- **Changed by the owner:** the loading screen and menus now have **music** (AUDIO_PASS / UX said
+  none; owner asked on 5 Nov). Recorded CC0/CC BY tracks from Openverse, `src/audio/music.rs`; no music
+  while driving.
+- **Added by the owner:** recorded sound effects from Openverse (`tools/audio/openverse_sounds.py`,
+  `sfx_wishlist.json`), wired in `src/audio/festival_recorded.rs`.
+- **Not built:** Fernhollow's town square rework and a terrain skirt past the world edge (left in the
+  `fest-world` worktree, uncommitted). Perf actions 2-5 in `PERF_REPORT.md`.
