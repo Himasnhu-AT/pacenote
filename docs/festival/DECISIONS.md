@@ -387,5 +387,4 @@ Merge order: D → C → A → B → F → E.
   while driving.
 - **Added by the owner:** recorded sound effects from Openverse (`tools/audio/openverse_sounds.py`,
   `sfx_wishlist.json`), wired in `src/audio/festival_recorded.rs`.
-- **Not built:** Fernhollow's town square rework and a terrain skirt past the world edge (left in the
-  `fest-world` worktree, uncommitted). Perf actions 2-5 in `PERF_REPORT.md`.
+- **Not built:** angled/curved town streets, parked cars; perf actions 2-5 in `PERF_REPORT.md`.

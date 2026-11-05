@@ -40,9 +40,7 @@ Dev commands: `career.give/request/state`, `events.start {id, race}`, `challenge
 Records/ghosts: the re-baked level and `furniture::REV` 2 reset every open-world board.
 
 Open items:
-- The map stream's town square and world-edge skirt were not finished (worktree
-  `../pacenote-wt/world`, branch `fest-world`, uncommitted; kept, not merged). The flat plain past the
-  4 km edge still shows from heights.
+- Land is cached at bake (`assets/levels/open/land.bin`): no erosion at load. Re-bake after changing the land generator (`committed_land_cache_is_current` fails otherwise).
 - Perf: see `docs/festival/PERF_REPORT.md` actions 2-5 (forest solids at load, music/texture memory,
   pipeline cache). Action 1 (256 m terrain chunks) is in.
 - Repair untested in game (unit tests only); 3 AI stories untested (Rookie yield, gap accuracy,
