@@ -154,6 +154,11 @@ fn drive(
     let (Some(state), Some(mut music), Some(assets), Some(clips)) = (state, music, assets, clips) else { return };
     let now = time.elapsed_secs_f64();
     let w = want(*state.get(), loading.is_some());
+    // While the world generates (the load's memory peak), the menu song carries on; the
+    // loading song (75-100 MB decoded) comes in after (docs/festival/PERF_REPORT.md).
+    if w == Want::Loading && player.now == Want::Menu && loading.as_deref().is_some_and(|l| l.generating()) {
+        return;
+    }
 
     if w == Want::Quiet {
         if player.now != Want::Quiet {

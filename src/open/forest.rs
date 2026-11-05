@@ -51,7 +51,7 @@ impl ForestSolids {
         ((p.x / TILE).floor() as i32, (p.y / TILE).floor() as i32)
     }
 
-    fn in_world(t: (i32, i32)) -> bool {
+    pub fn in_world(t: (i32, i32)) -> bool {
         let n = (super::roads::HALF / TILE).ceil() as i32;
         (-n..n).contains(&t.0) && (-n..n).contains(&t.1)
     }
