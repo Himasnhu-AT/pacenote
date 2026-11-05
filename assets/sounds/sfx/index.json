@@ -1,353 +1,110 @@
 {
-  "air_horn": {
-    "use": "race start (GO) and a win",
+  "car_horn": {
+    "use": "traffic honks after a near miss or when blocked",
     "bed": false,
     "music": false,
     "files": [
       {
-        "file": "air_horn_1.ogg",
-        "title": "Industrial Air Horn",
-        "creator": "mcpable",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/mcpable/sounds/131930"
-      },
-      {
-        "file": "air_horn_2.ogg",
-        "title": "Air Horn Hype.wav",
-        "creator": "zar.265",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/zar.265/sounds/581334"
-      }
-    ]
-  },
-  "birds_morning": {
-    "use": "forest ambience, dawn and morning (DayClock)",
-    "bed": true,
-    "music": false,
-    "files": [
-      {
-        "file": "birds_morning_1.ogg",
-        "title": "Birds In Spring (Scotland)",
-        "creator": "BurghRecords",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/BurghRecords/sounds/463903"
-      },
-      {
-        "file": "birds_morning_2.ogg",
-        "title": "Birds in Rain Sounds (Scotland).wav",
-        "creator": "BurghRecords",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/BurghRecords/sounds/521360"
-      }
-    ]
-  },
-  "church_bell": {
-    "use": "Fernhollow church on the hour (DayClock)",
-    "bed": false,
-    "music": false,
-    "files": [
-      {
-        "file": "church_bell_1.ogg",
-        "title": "Church Bell",
-        "creator": "bone666138",
-        "license": "by",
-        "license_version": "4.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/bone666138/sounds/198843"
-      }
-    ]
-  },
-  "finish_crowd": {
-    "use": "event finish: spectators cheer; louder on a win (RunCue finish)",
-    "bed": true,
-    "music": false,
-    "files": [
-      {
-        "file": "finish_crowd_1.ogg",
-        "title": "cheering-16.flac",
-        "creator": "Halleck",
-        "license": "by",
-        "license_version": "4.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Halleck/sounds/18665"
-      },
-      {
-        "file": "finish_crowd_2.ogg",
-        "title": "Crowd Cheering",
-        "creator": "SoundsExciting",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/SoundsExciting/sounds/365132"
-      },
-      {
-        "file": "finish_crowd_3.ogg",
-        "title": "Applause 2.WAV",
-        "creator": "Sandermotions",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Sandermotions/sounds/277021"
-      }
-    ]
-  },
-  "guardrail_scrape": {
-    "use": "car scraping a steel guard rail (roadside rails as walls)",
-    "bed": false,
-    "music": false,
-    "files": [
-      {
-        "file": "guardrail_scrape_1.ogg",
-        "title": "Metal Scrape 3.wav",
-        "creator": "Benboncan",
-        "license": "by",
-        "license_version": "4.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Benboncan/sounds/78488"
-      },
-      {
-        "file": "guardrail_scrape_2.ogg",
-        "title": "Metal Scrape 1.wav",
-        "creator": "Benboncan",
-        "license": "by",
-        "license_version": "4.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Benboncan/sounds/78486"
-      },
-      {
-        "file": "guardrail_scrape_3.ogg",
-        "title": "Metal Scrape",
-        "creator": "JustInvoke",
-        "license": "by",
-        "license_version": "4.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/JustInvoke/sounds/446113"
-      }
-    ]
-  },
-  "loading_music": {
-    "use": "loading screen: calmer track, fades out into the stage/world ambience",
-    "bed": false,
-    "music": true,
-    "files": [
-      {
-        "file": "loading_music_1.ogg",
-        "title": "Drops",
-        "creator": "Andrewkn",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Andrewkn/sounds/404460"
-      },
-      {
-        "file": "loading_music_2.ogg",
-        "title": "Andrew kn- At The Edge Of Space (II)",
-        "creator": "Andrewkn",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Andrewkn/sounds/482919"
-      },
-      {
-        "file": "loading_music_3.ogg",
-        "title": "Lofi Fusion Background Music",
-        "creator": "Seth_Makes_Sounds",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Seth_Makes_Sounds/sounds/655516"
-      }
-    ]
-  },
-  "menu_music": {
-    "use": "Service Park hub and the car screens: a playlist, crossfaded, ducked under UI sounds",
-    "bed": false,
-    "music": true,
-    "files": [
-      {
-        "file": "menu_music_1.ogg",
-        "title": "Circuit Synthwave",
-        "creator": "Doctor_Dreamchip",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Doctor_Dreamchip/sounds/460357"
-      },
-      {
-        "file": "menu_music_2.ogg",
-        "title": "Free (rock instrumental)",
-        "creator": "Starfish Stories :: The Band",
+        "file": "car_horn_1.ogg",
+        "title": "2 Car Horns",
+        "creator": "alukahn",
         "license": "by",
         "license_version": "3.0",
-        "source": "jamendo",
-        "landing_page": "https://www.jamendo.com/track/810513"
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/alukahn/sounds/144137"
       },
       {
-        "file": "menu_music_3.ogg",
-        "title": "Drive Clip.wav",
-        "creator": "BaDoink",
+        "file": "car_horn_2.ogg",
+        "title": "Car Horn Beeps.mp3",
+        "creator": "hsaunier10",
         "license": "cc0",
         "license_version": "1.0",
         "source": "freesound",
-        "landing_page": "https://freesound.org/people/BaDoink/sounds/531865"
+        "landing_page": "https://freesound.org/people/hsaunier10/sounds/254678"
+      },
+      {
+        "file": "car_horn_3.ogg",
+        "title": "My Car Horn - Beep Beep.wav",
+        "creator": "fogma",
+        "license": "by",
+        "license_version": "3.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/fogma/sounds/26185"
       }
     ]
   },
-  "money": {
-    "use": "Notes earned (MoneyEarned) and a purchase in the Dealership",
+  "dog_bark": {
+    "use": "farms and outskirts, now and then as you pass",
     "bed": false,
     "music": false,
     "files": [
       {
-        "file": "money_1.ogg",
-        "title": "japanesesodamachinereturn.mp3",
-        "creator": "morgantj",
+        "file": "dog_bark_1.ogg",
+        "title": "A dog barking (close recording)",
+        "creator": "felix.blume",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/felix.blume/sounds/199261"
+      },
+      {
+        "file": "dog_bark_2.ogg",
+        "title": "Small Dog Bark 01",
+        "creator": "noctaro",
         "license": "by",
         "license_version": "4.0",
         "source": "freesound",
-        "landing_page": "https://freesound.org/people/morgantj/sounds/59628"
+        "landing_page": "https://freesound.org/people/noctaro/sounds/242414"
       }
     ]
   },
-  "night_insects": {
-    "use": "night ambience in the valley",
-    "bed": true,
-    "music": false,
-    "files": [
-      {
-        "file": "night_insects_1.ogg",
-        "title": "Crickets Night 2",
-        "creator": "PhilllChabbb",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/PhilllChabbb/sounds/245834"
-      },
-      {
-        "file": "night_insects_2.ogg",
-        "title": "crickets night light +air tone, distant band playing traditional music just outside Pasto Narino, Colombia1.flac",
-        "creator": "kyles",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/kyles/sounds/450559"
-      }
-    ]
-  },
-  "radar_shutter": {
-    "use": "Radar Post flash (RadarFlash), under the synthesised chime",
+  "gravel_hit": {
+    "use": "stones hitting the underbody on loose gravel and washouts",
     "bed": false,
     "music": false,
     "files": [
       {
-        "file": "radar_shutter_1.ogg",
-        "title": "Camera Shutter Click",
-        "creator": "Kodack",
+        "file": "gravel_hit_1.ogg",
+        "title": "Gravel Impacts and Falls.wav",
+        "creator": "lolamadeus",
         "license": "cc0",
         "license_version": "1.0",
         "source": "freesound",
-        "landing_page": "https://freesound.org/people/Kodack/sounds/271010"
+        "landing_page": "https://freesound.org/people/lolamadeus/sounds/179341"
       },
       {
-        "file": "radar_shutter_2.ogg",
-        "title": "Vintage Camera Flash Powder and Shutter",
-        "creator": "Werra",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Werra/sounds/232130"
-      },
-      {
-        "file": "radar_shutter_3.ogg",
-        "title": "iOS Camera flash",
-        "creator": "Rvgerxini",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/Rvgerxini/sounds/455511"
-      }
-    ]
-  },
-  "start_crowd": {
-    "use": "event start line and race grid, before GO",
-    "bed": true,
-    "music": false,
-    "files": [
-      {
-        "file": "start_crowd_1.ogg",
-        "title": "Small Crowd Clapping 2",
-        "creator": "snakebarney",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/snakebarney/sounds/138114"
-      },
-      {
-        "file": "start_crowd_2.ogg",
-        "title": "smallcrowd.wav",
-        "creator": "sagetyrtle",
-        "license": "cc0",
-        "license_version": "1.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/sagetyrtle/sounds/32260"
-      }
-    ]
-  },
-  "town_ambience": {
-    "use": "Fernhollow core ambience loop (with traffic)",
-    "bed": true,
-    "music": false,
-    "files": [
-      {
-        "file": "town_ambience_1.ogg",
-        "title": "snowstorm city 01 171211_1249.wav",
-        "creator": "klankbeeld",
+        "file": "gravel_hit_2.ogg",
+        "title": "Gravel impact 3",
+        "creator": "jorickhoofd",
         "license": "by",
         "license_version": "4.0",
         "source": "freesound",
-        "landing_page": "https://freesound.org/people/klankbeeld/sounds/413518"
-      },
-      {
-        "file": "town_ambience_2.ogg",
-        "title": "city ambience 150906_0765.wav",
-        "creator": "klankbeeld",
-        "license": "by",
-        "license_version": "4.0",
-        "source": "freesound",
-        "landing_page": "https://freesound.org/people/klankbeeld/sounds/376833"
+        "landing_page": "https://freesound.org/people/jorickhoofd/sounds/169551"
       }
     ]
   },
-  "wind_pines": {
-    "use": "plateau and mountain pass ambience",
+  "service_park": {
+    "use": "Service Park menu bed and the service park in the world",
     "bed": true,
     "music": false,
     "files": [
       {
-        "file": "wind_pines_1.ogg",
-        "title": "Wind through Pine Trees by a lake",
-        "creator": "Moonlight Dancer",
-        "license": "cc0",
-        "license_version": "1.0",
+        "file": "service_park_1.ogg",
+        "title": "Auto Repair Shop with Pneumatic Drill Sounds",
+        "creator": "ericreinert",
+        "license": "by",
+        "license_version": "3.0",
         "source": "freesound",
-        "landing_page": "https://freesound.org/people/Moonlight%20Dancer/sounds/264083"
+        "landing_page": "https://freesound.org/people/ericreinert/sounds/120227"
       },
       {
-        "file": "wind_pines_2.ogg",
-        "title": "130914 Wind in pine trees, slow light, forest, pink noise Sarah's cottage ON",
-        "creator": "TRP",
+        "file": "service_park_2.ogg",
+        "title": "Car/Auto Mechanic Shop",
+        "creator": "producerdan",
         "license": "cc0",
         "license_version": "1.0",
         "source": "freesound",
-        "landing_page": "https://freesound.org/people/TRP/sounds/715696"
+        "landing_page": "https://freesound.org/people/producerdan/sounds/266626"
       }
     ]
   }

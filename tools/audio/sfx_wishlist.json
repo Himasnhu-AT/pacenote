@@ -41,7 +41,11 @@
       "query": "workshop ambience tools mechanic",
       "n": 2,
       "length": "medium",
-      "use": "Service Park menu bed and the service park in the world"
+      "use": "Service Park menu bed and the service park in the world",
+      "ids": [
+        "562bf3af-7259-4b21-a806-e8eeba834e68",
+        "93b4133b-11ef-4aef-8f93-bcea1d01d00a"
+      ]
     },
     {
       "pack": "town_ambience",
@@ -62,7 +66,11 @@
       "query": "dog barking distant",
       "n": 2,
       "max_s": 8,
-      "use": "farms and outskirts, now and then as you pass"
+      "use": "farms and outskirts, now and then as you pass",
+      "ids": [
+        "f3344937-8ed4-4bfc-ad1a-1499ea986f02",
+        "d5dcb31d-112e-4ffa-970b-7b5928d6917a"
+      ]
     },
     {
       "pack": "birds_morning",
@@ -90,14 +98,23 @@
       "query": "car horn honk",
       "n": 3,
       "max_s": 3,
-      "use": "traffic honks after a near miss or when blocked"
+      "use": "traffic honks after a near miss or when blocked",
+      "ids": [
+        "273272fd-42fd-4dec-9b90-b124f05d0bac",
+        "eab7cb51-3aca-4b53-8c6c-79a43aa674bf",
+        "9680f167-e9cf-4897-8c34-78d8cc4d8c02"
+      ]
     },
     {
       "pack": "gravel_hit",
       "query": "gravel stones hit metal",
-      "n": 3,
+      "n": 2,
       "max_s": 3,
-      "use": "stones hitting the underbody on loose gravel and washouts"
+      "use": "stones hitting the underbody on loose gravel and washouts",
+      "ids": [
+        "3bb6fd08-7432-4cc3-b0e4-48409e8d1844",
+        "acb293ba-4882-4d1c-9d8d-414ad93a9430"
+      ]
     },
     {
       "pack": "guardrail_scrape",

@@ -403,6 +403,10 @@ dog bark, car horn, gravel hits (search with other words, or synthesise).
 | `money_1` | `MoneyEarned`, and a purchase (the wallet's `spent` grew) | hud −14 |
 | `church_bell_1` | on the hour, 07:00-21:00, 3D from the town square (heard to ~1.4 km) | sfx −2 |
 | `guardrail_scrape_1/2` | the car's side touching one of B's rails above 2 m/s, 3D at the contact | sfx −8 |
+| `car_horn_1-3` | traffic: at the car just shaved past (60 % of Close Shaves), or behind you when you sit blocking it for 2 s | sfx −6, 3D |
+| `dog_bark_1/2` | now and then (≈ 1 in 25 s) at a farm or outskirts house within 120 m | sfx −10, 3D |
+| `gravel_hit_1/2` | stones on the underbody on gravel / washouts above 30 km/h, more the faster | sfx −18 |
+| `service_park_1` | the Service Park hub (main menu, under the music), and in the world within ~120-300 m of home | ambience −16 / −8 |
 | beds | looping on `ambience`, weights crossfaded (τ 1.5 s): `town_ambience_2` in and around the Fernhollow core, `birds_morning_1` 05:00-11:00, `night_insects_1` by night, `wind_pines_1` above ~250 m (the pass, the plateau) | ambience −5 to −9 |
 
 The beds and driving one-shots load (AssetServer, decoded off-thread) on entering the game and are
