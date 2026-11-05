@@ -29,6 +29,9 @@ const XFADE_IN: f32 = 2.0;
 const XFADE_OUT: f32 = 2.5;
 /// Start the next menu song this long before the current one ends (s).
 const LEAD_OUT: f32 = 4.0;
+/// Track level (dB): the songs are mastered at -18 LUFS; under the menus they are a bed, so the
+/// UI cues (`audio::ui`) sit about 6 dB over them (measured: select/back +6, hover +1).
+pub const MUSIC_DB: f32 = -6.0;
 /// Fade out when a drive starts (s); the songs are dropped after this.
 const QUIET_FADE: f32 = 2.5;
 
@@ -175,7 +178,7 @@ fn drive(
     let Some((h, for_want)) = player.pending.clone() else { return };
     if let Some(clip) = clips.get(&h) {
         let slot = if player.holding { 1 - player.slot } else { player.slot };
-        music.add_track(MusicTrack::new(SLOTS[slot], 120.0).stem(MusicStem::always(h)));
+        music.add_track(MusicTrack::new(SLOTS[slot], 120.0).volume(MUSIC_DB).stem(MusicStem::always(h)));
         music.play(SLOTS[slot], MusicTransition { fade_out: XFADE_OUT, fade_in: XFADE_IN, quantize: Quantize::Immediate });
         player.slot = slot;
         player.holding = true;

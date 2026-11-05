@@ -857,7 +857,7 @@ fn build_dealer(world: &mut World, root: Entity) {
                     h.spawn(text(d.name.to_uppercase(), display(40.0), t.text));
                     class_plate(h, &t, Class::of(pi), pi);
                 });
-                c.spawn(text(format!("{:.0} kg \u{b7} {}", spec.mass, if spec.front_split > 0.2 && spec.front_split < 0.8 { "four-wheel drive" } else if spec.front_split <= 0.2 { "rear-wheel drive" } else { "front-wheel drive" }), body(SIZE_BODY - 2.0), t.text_muted));
+                c.spawn(text(format!("{} kg \u{b7} {}", thousands(spec.mass.round() as u32), if spec.front_split > 0.2 && spec.front_split < 0.8 { "four-wheel drive" } else if spec.front_split <= 0.2 { "rear-wheel drive" } else { "front-wheel drive" }), body(SIZE_BODY - 2.0), t.text_muted));
                 c.spawn(rule(t.line));
                 stat_bars(c, &t, mine, Some(garage::stat_bars(&spec)));
                 c.spawn(text(format!("Bars: the {} you drive, and the change with this car.", car_name(g.active_car())), body(18.0), t.text_dim));

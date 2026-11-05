@@ -409,13 +409,15 @@ struct HubData {
     balance: u32,
     parked: bool,
     challenges: usize,
+    stars: u32,
 }
 
 fn gather(world: &World) -> HubData {
     let p = world.resource::<Profile>();
     let b = &world.resource::<Boards>().0;
     let me = board::team_key(&p.driver_name, "");
-    let done: Vec<bool> = p.events.iter().map(|e| b.records.iter().any(|r| r.stage == e.id && r.team() == me)).collect();
+    let races = world.get_resource::<crate::career::save::CareerProgress>().map(|c| c.races.clone()).unwrap_or_default();
+    let done: Vec<bool> = p.events.iter().map(|e| b.records.iter().any(|r| r.stage == e.id && r.team() == me) || races.get(&e.id).is_some_and(|r| r.rookie + r.pro + r.ace + r.legend > 0)).collect();
     let g = world.resource::<Garage>();
     let w = world.resource::<Wallet>();
     let car = g.active_car();
@@ -451,6 +453,7 @@ fn gather(world: &World) -> HubData {
         balance: w.balance,
         parked: p.last_pose.is_some(),
         challenges: super::screens::challenge_count(world),
+        stars: world.get_resource::<crate::career::save::CareerProgress>().map_or(0, |c| c.challenges.values().map(|p| p.stars as u32).sum()),
     }
 }
 
@@ -465,11 +468,13 @@ fn meta_line(label: &str, d: &HubData) -> String {
             }
         }
         "Events" if d.events > 0 => format!("{} / {} finished", d.events_done, d.events),
+        "Challenges" if d.challenges > 0 && d.stars > 0 => format!("{} / {} stars", d.stars, d.challenges * 3),
         "Challenges" if d.challenges > 0 => format!("{} by the road", d.challenges),
         "Play together" => "Driver + guide".into(),
         "Garage" => format!("{} #{}", d.car.name, d.car.number),
         "Upgrades" if d.affordable_parts > 0 => format!("{} part{} affordable", d.affordable_parts, if d.affordable_parts == 1 { "" } else { "s" }),
         "Upgrades" if d.cheapest_part.is_none() => "Fully built".into(),
+        "Upgrades" => d.cheapest_part.map(|(_, _, p)| format!("Next from {}", notes(p))).unwrap_or_default(),
         "Dealership" if d.affordable_cars > 0 => format!("{} car{} in reach", d.affordable_cars, if d.affordable_cars == 1 { "" } else { "s" }),
         "Dealership" => format!("{} car{}", garage::CARS.len(), if garage::CARS.len() == 1 { "" } else { "s" }),
         "Logbook" if d.times > 0 => format!("{} time{} set", d.times, if d.times == 1 { "" } else { "s" }),
