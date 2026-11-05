@@ -185,7 +185,14 @@ pub struct CarRig {
     driver: Option<Entity>,
     chassis: Option<Entity>,
     parts: Vec<(&'static str, Entity)>,
+    /// Parts only the cockpit sees (gauges, needles, LEDs, shifter, handbrake): hidden in this
+    /// car's chase view, where they cost ~17 draws for nothing (PERF_REPORT.md).
+    cockpit_only: Vec<Entity>,
 }
+
+/// Materials and meshes drawn only for the cockpit view.
+const COCKPIT_ONLY_MATS: [&str; 8] = ["Needle", "Gauge", "LedG", "LedA", "LedR", "Dial", "Tick", "Lcd"];
+const COCKPIT_ONLY_MESHES: [&str; 4] = ["ShifterMesh", "HandbrakeMesh", "TachoNeedle", "SpeedoNeedle"];
 
 impl CarRig {
     /// The sprung body's node (`Chassis`), if the model has one.
@@ -374,6 +381,11 @@ fn rig(
         let doors = ["MirrorL", "MirrorR"].map(|n| detached.iter().find(|(p, _)| *p == n).map(|(_, e)| *e));
         super::mirror::dress(&mut commands, &mut mats, &mut mesh_assets, rear_mirror, doors, mirror.as_deref());
         commands.entity(m).insert(wear);
+        let cockpit_only: Vec<Entity> = parts
+            .iter()
+            .copied()
+            .filter(|&e| mat_names.get(e).is_ok_and(|n| COCKPIT_ONLY_MATS.contains(&n.0.as_str())) || mesh_names.get(e).is_ok_and(|n| COCKPIT_ONLY_MESHES.contains(&n.0.as_str())))
+            .collect();
         for e in parts {
             commands.entity(e).insert(Actor);
             if let Ok(n) = mesh_names.get(e)
@@ -402,7 +414,7 @@ fn rig(
                 }
             }
         }
-        commands.entity(m).insert(CarRig { hub, knuckle, spin, rest, dials, pod, driver, chassis, parts: detached });
+        commands.entity(m).insert(CarRig { hub, knuckle, spin, rest, dials, pod, driver, chassis, parts: detached, cockpit_only });
     }
 }
 
@@ -522,6 +534,17 @@ fn cockpit(
         // The lamp pod would block the road from the bonnet and cockpit; the driver's own body
         // would fill the cockpit camera (it's inside the helmet). The co-driver (no
         // `DrivenCar` here) and the chase camera see both.
+        // The driver's own chase view never sees the gauges, needles, shifter or handbrake (the
+        // guide in the passenger seat does).
+        let chase = driven.is_some() && view.as_deref().is_some_and(|v| *v == CameraView::Chase);
+        for &e in &rig.cockpit_only {
+            if let Ok(mut v) = vis.get_mut(e) {
+                let want = if chase { Visibility::Hidden } else { Visibility::Inherited };
+                if *v != want {
+                    *v = want;
+                }
+            }
+        }
         let hide = [(rig.pod, inside), (rig.driver, driven.is_some() && view.as_deref().is_none_or(|v| *v == CameraView::Cockpit))];
         for (e, hidden) in hide {
             if let Some(e) = e
