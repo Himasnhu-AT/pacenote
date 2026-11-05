@@ -127,7 +127,7 @@ Code: `src/daytime.rs` (clock, settings), `src/art/look.rs` (keyframes → `Look
 
 - **Clock.** `DayClock` runs at 5× real time on `Time<Virtual>` (pause freezes it). Free roam
   starts at World › Start time (Dawn 06:00, Morning 09:00 default, Noon 12:30, Afternoon 16:00,
-  Sunset 19:30, Night 23:00, Real clock, Last) and runs while World › Time passes is on. Night
+  Sunset 19:30, Night 23:00, Now (wall clock), Last) and runs while World › Time passes is on. Night
   is offered only when `art::headlights::Headlights` exists; until then a night start is
   Sunset. Classic stages freeze at their `TimeOfDay` (07:45 / 13:00 / 16:30 / 19:45).
 - **Sun.** Solar formula (46° N, declination 19°, solar noon 13:00): sunrise ≈ 05:37, sunset ≈
@@ -161,8 +161,14 @@ machine so ±0.2 ms noise): Low ≈ 0 (within noise), Medium +0.34 ms, High +0.1
 0.05 / 0.5 / 0.7). +1 draw. CPU: one material uniform update per frame, one `Look` write per
 second.
 
-Known gaps: clouds are not in the env map / reflections (engine request) and cast no shadows on
-the ground (needs `terrain.wesl`, stream A's); the cabin fill (`car.rs`, D) follows
+Cloud shadows: the terrain shader (`terrain.wesl`, stream A's, ~20 lines) samples the same
+weather map at the layer's mid-height along the sun and takes up to 75 % of the direct sun off
+sun-facing ground; `sky.rs` updates the terrain material's two uniforms ≈ 10 Hz. Terrain only
+(not trees, roads, buildings). Cover through the day: 0.25 at dawn, 0.42 at 09:00, 0.55 midday
+and afternoon, 0.45 at 19:00; cells build taller towards 15:00 (`cloud_growth`). Night grading
+adds a magenta tint (0.07) against the teal cast.
+
+Known gaps: clouds are not in the env map / reflections (engine request); the cabin fill (`car.rs`, D) follows
 `DayClock::daylight`, which this clock now drives.
 
 ## Measurements

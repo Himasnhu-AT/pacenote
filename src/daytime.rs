@@ -31,7 +31,7 @@ pub const START_PRESETS: [(&str, Option<f32>); 8] = [
     ("Afternoon", Some(16.0)),
     ("Sunset", Some(19.5)),
     ("Night", Some(23.0)),
-    ("Real clock", None),
+    ("Now", None),
     ("Last", None),
 ];
 /// Index of "Night" in [`START_PRESETS`]: offered only when [`night_available`].
@@ -226,7 +226,7 @@ fn register(app: &mut App) {
         key: "day_start",
         tab: "World",
         label: "Start time",
-        hint: "Time of day when free roam starts. Real clock follows your computer's clock; Last carries on from your last drive.",
+        hint: "Time of day when free roam starts. Now follows your computer's clock; Last carries on from your last drive.",
         kind: FieldKind::Choice { options },
         get: |w| shown_index(day(w).start, night_available(w)) as f32,
         set: |w, v| {

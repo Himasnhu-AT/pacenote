@@ -19,6 +19,10 @@ pub struct PnTerrainParams {
     pub layer: [Vec4; 4],
     pub extent: Vec4,
     pub misc: Vec4,
+    /// Cloud shadows (`art::sky`, stream C): xy wind offset (m), z coverage, w strength (0 = off).
+    pub cloud: Vec4,
+    /// xyz towards the sun, w cloud mid-height (m).
+    pub cloud_sun: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
@@ -58,6 +62,10 @@ pub struct PnTerrainExt {
     #[texture(116)]
     #[sampler(117)]
     pub canopy: Option<Handle<Image>>,
+    /// The cloud layer's weather map (`art::sky`), for cloud shadows.
+    #[texture(118)]
+    #[sampler(119)]
+    pub clouds: Option<Handle<Image>>,
 }
 
 /// How dense the forest is over the terrain, as a small texture the terrain shader darkens the
@@ -161,6 +169,7 @@ fn build(
     mut mats: ResMut<Assets<PnTerrain>>,
     mut images: ResMut<Assets<Image>>,
     server: Res<AssetServer>,
+    clouds: Option<Res<super::sky::CloudWeather>>,
 ) {
     let (Some(plan), None, Some(look)) = (plan, have, look) else { return };
     let TerrainLook::Splat(h) = &*look else { return };
@@ -180,7 +189,7 @@ fn build(
             })
             .load(p)
     };
-    let mut ext = PnTerrainExt { splat: src.extension.splat.clone(), ..default() };
+    let mut ext = PnTerrainExt { splat: src.extension.splat.clone(), clouds: clouds.map(|c| c.0.clone()), ..default() };
     ext.params.extent = src.extension.params.extent;
     // Macro variation: patchy fields and slopes rather than one flat colour.
     ext.params.misc = Vec4::new(0.26, 0.011, 1.0, 0.0);
