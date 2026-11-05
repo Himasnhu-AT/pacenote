@@ -142,3 +142,15 @@ Phases from the game log (three runs, Low, busy machine):
 - `src/camera.rs`: dev command `perf.draws` (the breakdowns above).
 - `src/art/car.rs`: the driver's chase view hides the cockpit-only parts (−17 draws, every
   scenario); cockpit view and the guide's seat unchanged (checked in a screenshot).
+
+## After merge, 5 Nov (main, Low, `tools/perf/budget.py`; machine busy, load avg 10-21)
+
+| | tour | town | mountain | pass | event | budget |
+|---|---|---|---|---|---|---|
+| draws p95 | 410 | 452 | 370 | 613 | 552 | 800 |
+| GPU p95 ms | 7.0 | 8.8 | 10.3 | 9.2 | 9.6 | 10 |
+| memory MB | 1412 | 1491 | 1587 | 1642 | 1619 | 1500 |
+
+Draws now pass everywhere (256 m terrain chunks). Mountain GPU p95 is 0.3 ms over (the bigger
+chunks; tune `lod_distance` down or pixel error up at Low). Memory is ~150 MB over (actions 2-4).
+Frame p95 (21-51 ms) and load (52.7 s) are not valid on this loaded machine: re-measure idle.
