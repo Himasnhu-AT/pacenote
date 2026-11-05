@@ -122,6 +122,8 @@ pub struct Racer {
     /// Roster car (`garage::CarDef::id`) and its paint.
     pub model: &'static str,
     pub paint: Paint,
+    /// Race number (roof and doors).
+    pub number: u8,
     /// Metres along the route (best so far), the step it is released on, how it ended.
     pub progress: f32,
     pub release: u32,
@@ -463,6 +465,7 @@ impl RaceSim {
                 name: names[k],
                 model: d.id,
                 paint: Paint { colour, metallic: k % 2 == 1 },
+                number: 2 + ((pilot::unit(seed, 700 + k as u64) * 17.0) as u8) * 5 + k as u8,
                 progress: s,
                 release,
                 finish: None,
