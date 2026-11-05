@@ -436,12 +436,17 @@ Vec<StyleEvent>)` is pure; all eleven skills use the §2.2 numbers. How the rule
 - `Payout{Rhythm}` on every bank that pays; grade xp comes from `Bank.points` (F2).
 - Dev: `style.state`, `style.inject {skill, points}` (also `bank` / `lose`).
 
-**Challenges** (`src/open/challenges.rs`, tests in `challenges_tests.rs`). The 13 anchors are in
+**Challenges** (`src/open/challenges.rs`, tests in `challenges_tests.rs`). The 13 are in
 `assets/levels/open/challenges.ron`: road index + stations, with the world x,z of the first and
-last gate as a check. Radar 2 sits at s 720 (not the anchor's 612) to keep 500 m from Radar 4.
-Thresholds are the §3 placeholders until the star bake (C4). After A's re-bake run
-`PACENOTE_CHALLENGES=reanchor cargo test --features wt_style --lib write_challenges -- --ignored`;
-`the_13_challenges_sit_on_their_roads` fails while a gate is more than 3 m off its x,z.
+last gate as a check. A's re-bake moved every road, so the WORLD_PASS §5 anchors were re-picked
+on the new roads with the §3 rules (tested: ≥ 500 m between same-kind challenges, gates ≥ 120 m
+from junctions and ≥ 50 m from event markers, section lengths). Radars sit at the ends of
+≥ 250 m straights (road 0 ×2, 7, 2), sections on the long stretches and hairpin runs (Pace:
+roads 6, 3, 7; Slide: 1 tarmac, 2, 4), and the Yump Boards on A's three kickers
+(`RoadNet::yumps`). Thresholds are the §3 placeholders until the star bake (C4). After another
+re-bake: `PACENOTE_CHALLENGES=reanchor cargo test --features wt_style --lib write_challenges --
+--ignored` moves them by their x,z; `the_13_challenges_sit_on_their_roads` fails while a gate is
+more than 3 m off.
 - Sections run towards increasing stations. A Pace Section has 4 hidden mid-gates (within
   15 m of the centreline), spread evenly. A run voids on a missed gate, a recover, 1 s
   reversing, 3 s off its road, or averaging < 15 km/h. Re-crossing the start restarts it.
@@ -450,8 +455,8 @@ Thresholds are the §3 placeholders until the star bake (C4). After A's re-bake 
 - Yump Board: take-off within ±8 m of the crest on the road, ≥ 0.15 s in the air, measured
   take-off → first touchdown; a bad landing voids it.
 - Each star tier pays once (400 / 600 / 1,000, summed in one `Payout{ChallengeStar}`); a new
-  best with no new star pays 50 (`ChallengeBest`). Bests are in `<DataDir>/challenges.json`
-  (to move into `career.json` once F2's save lands).
+  best with no new star pays 50 (`ChallengeBest`). Bests are kept in the career save
+  (`CareerProgress::challenges` in `career.json`).
 - Markers: gate stripes on the road surface, flag posts, a kind-coloured board, and a radar
   camera whose lamp flashes once (0.25 s) on `RadarFlash`.
 - Dev: `challenges.list`, `challenges.state`, `challenges.goto {id, lead, kmh}`.
