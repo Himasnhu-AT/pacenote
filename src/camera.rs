@@ -66,6 +66,8 @@ impl Plugin for CameraFeelPlugin {
         add_settings_section::<CameraFeel>(app, "camera_feel");
         app.settings_defaults::<CameraFeel>().init_resource::<SpeedFeel>().init_resource::<CameraCut>();
         register(app);
+        #[cfg(feature = "dev")]
+        probe::register(app);
         app.add_systems(Update, (blur_switch.in_set(QualitySet::Look).before(engine::look::apply::apply_look), blur_amount.after(QualitySet::Look)));
     }
 }
@@ -623,6 +625,106 @@ pub fn chase_dir(flat: Vec3, vel: Vec3) -> Vec3 {
         return flat;
     }
     flat.lerp(v / speed, w).normalize_or(flat)
+}
+
+/// Dev diagnostic `perf.draws`: what the main camera draws, grouped the way the engine's
+/// `render.stats` counts draws (one per visible (mesh, material) bin; materials other than
+/// `StandardMaterial` one per entity), labelled by the nearest named entity, plus the sun's
+/// shadow cascades. For the perf report (`docs/festival/PERF_REPORT.md`).
+#[cfg(feature = "dev")]
+mod probe {
+    use std::collections::HashMap;
+
+    use bevy::camera::visibility::{CascadesVisibleEntities, VisibleEntities};
+    use bevy::prelude::*;
+    use engine::devtools::{AddControlCommand, params};
+    use engine::gfx::MainCamera;
+    use serde_json::{Value, json};
+
+    pub fn register(app: &mut App) {
+        app.add_control_command("perf.draws", "Dev: main-camera draws (and sun shadow cascades) grouped by what draws them", params(&[]), draws);
+    }
+
+    /// A group name: the entity's or its nearest ancestor's `Name`, digits folded to `#`.
+    fn label(w: &World, e: Entity) -> String {
+        let mut cur = Some(e);
+        for _ in 0..8 {
+            let Some(c) = cur else { break };
+            if let Some(n) = w.get::<Name>(c) {
+                let s: String = n.as_str().chars().map(|ch| if ch.is_ascii_digit() { '#' } else { ch }).collect();
+                let mut out = String::new();
+                for ch in s.chars() {
+                    if !(ch == '#' && out.ends_with('#')) {
+                        out.push(ch);
+                    }
+                }
+                return out;
+            }
+            cur = w.get::<ChildOf>(c).map(|p| p.parent());
+        }
+        "(unnamed)".into()
+    }
+
+    /// The material's key (as the engine bins it) and its type.
+    fn material(w: &World, e: Entity) -> (u64, String) {
+        if let Some(m) = w.get::<MeshMaterial3d<StandardMaterial>>(e) {
+            return (std::hash::BuildHasher::hash_one(&bevy::platform::hash::FixedHasher, m.0.id()) & !(1 << 63), "StandardMaterial".into());
+        }
+        let ty = w
+            .inspect_entity(e)
+            .ok()
+            .and_then(|mut it| it.find(|c| c.1.name().to_string().contains("MeshMaterial3d<")).map(|c| c.1.name().to_string()))
+            .map(|n| n.rsplit("::").next().unwrap_or(&n).trim_end_matches('>').to_string())
+            .unwrap_or_else(|| "none".into());
+        (e.to_bits() | 1 << 63, ty)
+    }
+
+    /// Bins of a list of entities: totals and the top groups.
+    fn group(w: &World, list: &[Entity], top: usize) -> Value {
+        let mut bins: HashMap<(AssetId<Mesh>, u64), (String, String)> = HashMap::new();
+        let mut ents: HashMap<String, u32> = HashMap::new();
+        for &e in list {
+            let Some(mesh) = w.get::<Mesh3d>(e) else { continue };
+            let (key, ty) = material(w, e);
+            let l = label(w, e);
+            *ents.entry(l.clone()).or_default() += 1;
+            bins.entry((mesh.0.id(), key)).or_insert((l, ty));
+        }
+        let mut by_label: HashMap<&str, u32> = HashMap::new();
+        let mut by_type: HashMap<&str, u32> = HashMap::new();
+        for (l, t) in bins.values() {
+            *by_label.entry(l).or_default() += 1;
+            *by_type.entry(t).or_default() += 1;
+        }
+        let mut labels: Vec<_> = by_label.into_iter().collect();
+        labels.sort_by_key(|a| std::cmp::Reverse(a.1));
+        let mut types: Vec<_> = by_type.into_iter().collect();
+        types.sort_by_key(|a| std::cmp::Reverse(a.1));
+        json!({
+            "entities": list.len(),
+            "draws": bins.len(),
+            "by_label": labels.iter().take(top).map(|(l, n)| json!([l, n, ents.get(*l).copied().unwrap_or(0)])).collect::<Vec<_>>(),
+            "by_material": types.iter().map(|(t, n)| json!([t, n])).collect::<Vec<_>>(),
+        })
+    }
+
+    fn draws(w: &mut World, _: Value) -> Result<Value, String> {
+        let mut q = w.query_filtered::<(Entity, &VisibleEntities), With<MainCamera>>();
+        let (cam, vis) = q.iter(w).next().ok_or("no main camera")?;
+        let list: Vec<Entity> = vis.get(std::any::TypeId::of::<Mesh3d>()).to_vec();
+        let main = group(w, &list, 40);
+        let mut cascades = Vec::new();
+        let mut lq = w.query::<&CascadesVisibleEntities>();
+        for c in lq.iter(w) {
+            if let Some(per) = c.entities.get(&cam) {
+                for v in per {
+                    cascades.push(v.entities.clone());
+                }
+            }
+        }
+        let cascades: Vec<Value> = cascades.iter().map(|l| group(w, l, 12)).collect();
+        Ok(json!({"main": main, "cascades": cascades}))
+    }
 }
 
 #[cfg(test)]
