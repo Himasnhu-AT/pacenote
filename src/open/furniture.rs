@@ -41,8 +41,16 @@ use crate::stage::{self, Road, STEP, Surface};
 use crate::vehicle::Wall;
 
 /// Furniture revision: bump when the generated furniture changes how the car drives.
-/// 1: rails, street-light stubs, potholes, wet, mud, washouts, ice.
-pub const REV: u32 = 1;
+/// 1: rails, street-light stubs, potholes, wet, mud, washouts, ice. 2: posts and signs snap off
+/// (`world::generate_open` makes them breakable props).
+pub const REV: u32 = 2;
+
+/// Is this sign or post one the car knocks down (a breakable prop in the sim, drawn by
+/// `art::props`), rather than fixed furniture? Reflector and km posts, warning and speed signs,
+/// chevron boards; town boards and street lights stand.
+pub fn breakable(kind: SignKind) -> bool {
+    matches!(kind, SignKind::Reflector | SignKind::KmPost(_) | SignKind::Warning(_) | SignKind::Speed(_) | SignKind::Chevron(_))
+}
 
 /// Guard-rail material.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,7 +100,7 @@ pub mod warn {
 }
 
 /// What a sign or post is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SignKind {
     /// Warning triangle ([`warn`] pictogram).
     Warning(u8),
@@ -1150,8 +1158,8 @@ fn signs(net: &RoadNet, heights: &Heightfield, infos: &[RoadInfo], rails: &[Rail
             }
             let twins = placed.iter().filter(|&&(r, d, j, reg)| r == w.road && d == w.dir && j == i && reg).count();
             if twins > 0 {
-                // Further along the verge, away from the cars coming.
-                let on = road.dir[i] * w.dir as f32 * 1.4 * twins as f32;
+                // 10 m further on, so the board doesn't hide it.
+                let on = road.dir[i] * w.dir as f32 * 10.0 * twins as f32;
                 s.pos += Vec3::new(on.x, 0.0, on.y);
                 s.pos.y = ground(xz(s.pos));
             }
@@ -1448,6 +1456,50 @@ pub(crate) mod tests {
                 assert!(!on_road(xz(*p)), "rail on a road at {p}");
             }
         }
+    }
+
+    /// The open world's posts and signs are breakable props: a car into a reflector post at
+    /// 50 km/h snaps it (`Car::broken`) and drives on.
+    #[test]
+    fn a_car_snaps_a_reflector_post() {
+        use crate::vehicle::{Car, Ground, Input, Spec, step};
+        let w = crate::world::generate(&crate::open::def());
+        let n = |k: crate::world::PropKind| w.props.iter().filter(|p| p.kind == k).count();
+        let f = &w.open.as_ref().unwrap().furniture;
+        assert_eq!(w.props.len(), f.signs.iter().filter(|s| breakable(s.kind)).count());
+        assert!(n(crate::world::PropKind::Reflector) > 100 && n(crate::world::PropKind::RoadSign) > 100 && n(crate::world::PropKind::KmStone) > 3);
+        let open = w.open.as_ref().unwrap();
+        // One on a gravel road (no traffic there, for the in-game check too).
+        let post = w
+            .props
+            .iter()
+            .find(|p| p.kind == crate::world::PropKind::Reflector && open.net.nearest(Vec2::new(p.pos.x, p.pos.z), 10.0).is_some_and(|n| open.net.roads[n.road].kind == RoadKind::Gravel))
+            .unwrap();
+        let np = open.net.nearest(Vec2::new(post.pos.x, post.pos.z), 10.0).unwrap();
+        let road = &open.net.roads[np.road].road;
+        // From the road, 20° into the post.
+        let target = Vec2::new(post.pos.x, post.pos.z);
+        let i = np.at.i;
+        let side = np.at.lateral.signum();
+        let v = (road.dir[i] * libm::cosf(0.35) + left(road, i) * side * libm::sinf(0.35)).normalize();
+        let start = target - v * 12.0;
+        let spec = Spec::default();
+        eprintln!("post at {} ; car from x {} z {} heading {}°", post.pos, start.x, start.y, libm::atan2f(v.x, v.y).to_degrees());
+        let mut car = Car::new(Vec3::new(start.x, w.height(start.x, start.y) + 0.6, start.y), libm::atan2f(v.x, v.y));
+        for _ in 0..90 {
+            step(&mut car, &spec, Input { handbrake: true, ..Default::default() }, &w, 1.0 / 60.0);
+        }
+        let v0 = 50.0 / 3.6;
+        car.vel = car.forward() * v0;
+        for wh in &mut car.wheels {
+            wh.spin = v0 / spec.wheel_radius;
+        }
+        for _ in 0..90 {
+            step(&mut car, &spec, Input::default(), &w, 1.0 / 60.0);
+        }
+        eprintln!("broken {:?}, {:.0} km/h after", car.broken, car.vel.length() * 3.6);
+        assert!(car.broken.contains(&post.id), "the post stands: {:?}", car.broken);
+        assert!(car.vel.length() > 0.6 * v0, "the car stopped at a post");
     }
 
     #[test]

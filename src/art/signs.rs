@@ -19,7 +19,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use engine::render_budget::Scenery;
 
 use crate::open::OpenWorld;
-use crate::open::furniture::{Furniture, RAIL_TOP, RailKind, RailRun, SignKind, warn};
+use crate::open::furniture::{self, Furniture, RAIL_TOP, RailKind, RailRun, SignKind, warn};
 
 pub struct SignsPlugin;
 
@@ -36,7 +36,7 @@ mod dev {
     use engine::devtools::{AddControlCommand, params};
     use serde_json::{Value, json};
 
-    use super::FurnitureArt;
+    use super::{FurnitureArt, FurnitureProp};
 
     pub fn register(app: &mut App) {
         app.add_control_command(
@@ -49,7 +49,7 @@ mod dev {
 
     fn toggle(world: &mut World, p: Value) -> Result<Value, String> {
         let on = p.get("on").and_then(Value::as_bool);
-        let mut q = world.query_filtered::<&mut Visibility, With<FurnitureArt>>();
+        let mut q = world.query_filtered::<&mut Visibility, Or<(With<FurnitureArt>, With<FurnitureProp>)>>();
         let mut n = 0;
         for mut v in q.iter_mut(world) {
             n += 1;
@@ -64,6 +64,10 @@ mod dev {
 /// Furniture meshes, for despawning when the roads are rebuilt.
 #[derive(Component)]
 pub struct FurnitureArt;
+
+/// A post or sign the car knocks down, drawn by `art::props` (the dev toggle hides these too).
+#[derive(Component)]
+pub struct FurnitureProp;
 
 /// Merged per tile this size (m).
 pub const TILE: f32 = 512.0;
@@ -674,6 +678,11 @@ impl Mesher {
             hi = hi.max(*p);
         }
         let c = (lo + hi) * 0.5;
+        (c, self.finish_at(c))
+    }
+
+    /// The mesh, positions relative to `c`.
+    fn finish_at(self, c: Vec3) -> Mesh {
         let pos: Vec<[f32; 3]> = self.pos.iter().map(|p| (*p - c).to_array()).collect();
         let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
@@ -681,7 +690,7 @@ impl Mesher {
         m.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uv);
         m.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.col);
         m.insert_indices(Indices::U32(self.idx));
-        (c, m)
+        m
     }
 }
 
@@ -863,6 +872,24 @@ fn rail_mesh(m: &mut Mesher, r: &RailRun, to_road: &dyn Fn(usize) -> Vec3) {
     }
 }
 
+/// One post or sign as its own mesh (origin at its foot, facing +Z) with the furniture
+/// material, for `art::props` (the ones the car knocks down). Made once per kind.
+pub fn prop_part(world: &mut World, kind: SignKind) -> (Handle<Mesh>, Handle<StandardMaterial>) {
+    let mat = material(world);
+    if let Some(h) = world.get_resource::<PropParts>().and_then(|p| p.0.get(&kind).cloned()) {
+        return (h, mat);
+    }
+    let mut m = Mesher::default();
+    sign_mesh(&mut m, kind, Vec3::ZERO, 0.0);
+    let h = world.resource_mut::<Assets<Mesh>>().add(m.finish_at(Vec3::ZERO));
+    world.get_resource_or_insert_with(PropParts::default).0.insert(kind, h.clone());
+    (h, mat)
+}
+
+/// [`prop_part`]'s meshes.
+#[derive(Resource, Default)]
+struct PropParts(std::collections::HashMap<SignKind, Handle<Mesh>>);
+
 /// Spawns one merged mesh per tile with the furniture material.
 pub(super) fn spawn_tiles(world: &mut World, tiles: BTreeMap<(i32, i32), Mesher>, mat: Handle<StandardMaterial>, name: &'static str, extra: impl Fn(&mut EntityWorldMut) + Copy) -> (usize, usize) {
     let (mut meshes, mut tris) = (0, 0);
@@ -928,7 +955,10 @@ pub fn spawn(world: &mut World, open: &OpenWorld) {
         tiles.entry(tile_of(p)).or_default().cuboid(p + Vec3::Y * (h.y - 0.15), rot, h, [sw4(Swatch::Stone); 6], WHITE);
     }
     for s in &f.signs {
-        sign_mesh(tiles.entry(tile_of(s.pos)).or_default(), s.kind, s.pos, s.yaw);
+        // (The ones the car knocks down are props: `art::props` draws them one by one.)
+        if !furniture::breakable(s.kind) {
+            sign_mesh(tiles.entry(tile_of(s.pos)).or_default(), s.kind, s.pos, s.yaw);
+        }
     }
     let (meshes, tris) = spawn_tiles(world, tiles, mat, "roadside furniture", |_| {});
     info!(

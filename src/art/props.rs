@@ -73,6 +73,8 @@ struct Kit {
 #[derive(Resource)]
 pub struct StageProps {
     list: Arc<Vec<Prop>>,
+    /// The open world's furniture (its posts and signs are props here: `seed` indexes its signs).
+    furniture: Option<Arc<crate::open::furniture::Furniture>>,
     /// Collision footprint per prop (radius, height, the closing speed that snaps it; 0 for
     /// shrubs) at the prop's scale.
     give: Vec<(f32, f32, f32)>,
@@ -107,7 +109,8 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
             (r * p.scale, h * p.scale, speed)
         })
         .collect();
-    let mut props = StageProps { list: s.props.clone(), give, entities: vec![None; s.props.len()], knocked: Vec::new(), kit };
+    let furniture = s.open.as_ref().map(|o| o.furniture.clone());
+    let mut props = StageProps { list: s.props.clone(), furniture, give, entities: vec![None; s.props.len()], knocked: Vec::new(), kit };
     for i in 0..props.list.len() {
         props.entities[i] = spawn_one(world, &props, i);
     }
@@ -204,6 +207,10 @@ fn spawn_one(world: &mut World, props: &StageProps, i: usize) -> Option<Entity> 
             let parts = super::trees::near_parts(tk, p.seed);
             (parts, height / kit.tree_height, Tag::Breaks(Breakable { height, radius, fallen: Fallen::Stay }))
         }
+        PropKind::Reflector | PropKind::KmStone | PropKind::RoadSign => {
+            let sign = props.furniture.as_ref()?.signs.get(p.seed as usize)?.kind;
+            (vec![super::signs::prop_part(world, sign)], 1.0, Tag::Breaks(Breakable { height, radius, fallen: Fallen::Stay }))
+        }
         PropKind::Shrub => {
             let (m, mat, unit) = kit.shrubs.get((p.seed % kit.shrubs.len().max(1) as u64) as usize)?.clone();
             (vec![(m, mat)], radius * unit, Tag::Bends(Sway::new(radius, height)))
@@ -216,6 +223,11 @@ fn spawn_one(world: &mut World, props: &StageProps, i: usize) -> Option<Entity> 
         Tag::Breaks(b) => e.insert(b),
         Tag::Bends(s) => e.insert(s),
     };
+    // Roadside furniture casts no shadow (budget: TECH_PASS §4 row B).
+    let furniture = matches!(p.kind, PropKind::Reflector | PropKind::KmStone | PropKind::RoadSign);
+    if furniture {
+        e.insert((bevy::light::NotShadowCaster, super::signs::FurnitureProp));
+    }
     let id = e.id();
     for (m, mat) in rest {
         world.spawn((Mesh3d(m.clone()), MeshMaterial3d(mat.clone()), Transform::IDENTITY, range.clone(), ChildOf(id)));
@@ -350,8 +362,8 @@ fn on_toppled(mut commands: Commands, mut events: MessageReader<Toppled>, ids: Q
         let p = props.list[id.0 as usize];
         let at = Transform::from_translation(t.base);
         let chips = match p.kind {
-            PropKind::Post => &props.kit.chips[0],
-            PropKind::Sign => &props.kit.chips[1],
+            PropKind::Post | PropKind::Reflector | PropKind::KmStone => &props.kit.chips[0],
+            PropKind::Sign | PropKind::RoadSign => &props.kit.chips[1],
             _ => &props.kit.chips[2],
         };
         spawn_debris(&mut commands, chips, t.base + Vec3::Y * 0.4, t.velocity * 0.5, p.seed);
@@ -403,7 +415,7 @@ mod dev {
         let broken = world.query::<&DrivenCar>().iter(world).next().map_or(0, |c| c.car.broken.len());
         let p = world.get_resource::<StageProps>().ok_or("no props")?;
         let n = |k: PropKind| p.list.iter().filter(|x| x.kind == k).count();
-        Ok(json!({"posts": n(PropKind::Post), "signs": n(PropKind::Sign), "saplings": n(PropKind::Sapling), "shrubs": n(PropKind::Shrub), "knocked": p.knocked.len(), "broken": broken}))
+        Ok(json!({"posts": n(PropKind::Post), "signs": n(PropKind::Sign), "saplings": n(PropKind::Sapling), "shrubs": n(PropKind::Shrub), "furniture": n(PropKind::Reflector) + n(PropKind::KmStone) + n(PropKind::RoadSign), "knocked": p.knocked.len(), "broken": broken}))
     }
 
     fn charge(world: &mut World, v: Value) -> Result<Value, String> {
