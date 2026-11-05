@@ -2,7 +2,7 @@
 //! scrub), a curlew-like call on the moor, crickets at dusk, rain hiss and drops (and on the
 //! roof from inside the car). Quiet by design: it sits under the car on its own bus.
 
-use super::dsp::{Biquad, Decay, Noise, OnePole, Osc, RATE, Smooth, Wander, pan, sin01, smoothstep};
+use super::dsp::{Biquad, Decay, Noise, OnePole, Osc, RATE, Ring, Smooth, Wander, pan, sin01, smoothstep};
 use crate::stage::{Biome, TimeOfDay, Weather};
 
 /// What the ambience needs (per stage, plus the camera).
@@ -15,11 +15,15 @@ pub struct AmbParams {
     pub time: TimeOfDay,
     /// 0 = outside .. 1 = inside the car.
     pub interior: f32,
+    /// Nearness of running water (a river: 1 on the bank, 0 from ~120 m).
+    pub water: f32,
+    /// Nearness of a village (0 in the country .. 1 among the houses).
+    pub town: f32,
 }
 
 impl Default for AmbParams {
     fn default() -> Self {
-        AmbParams { active: false, biome: Biome::PineForest, weather: Weather::Clear, time: TimeOfDay::Noon, interior: 0.0 }
+        AmbParams { active: false, biome: Biome::PineForest, weather: Weather::Clear, time: TimeOfDay::Noon, interior: 0.0, water: 0.0, town: 0.0 }
     }
 }
 
@@ -36,6 +40,11 @@ pub struct Recipe {
     pub curlew: f32,
     pub crickets: f32,
     pub rain: f32,
+    /// River babble level.
+    pub river: f32,
+    /// Village: a low hum of the place, dogs barking now and then (per second).
+    pub hum: f32,
+    pub dogs: f32,
 }
 
 impl Recipe {
@@ -54,6 +63,14 @@ impl Recipe {
             TimeOfDay::Dusk => (0.4, 0.2),
         };
         r.birds *= bird_t;
+        // Places: a river babbles; a village has fewer forest birds, a hum, dogs.
+        let water = p.water.clamp(0.0, 1.0);
+        let town = p.town.clamp(0.0, 1.0);
+        r.river = 0.028 * water * water;
+        r.hum = 0.01 * town;
+        r.dogs = 0.05 * town;
+        r.birds *= 1.0 - 0.55 * town;
+        r.leaves *= 1.0 - 0.5 * town;
         r.cicadas *= insect_t;
         r.crickets *= if p.time == TimeOfDay::Dusk { 3.0 } else { 0.3 };
         match p.weather {
@@ -76,6 +93,7 @@ impl Recipe {
                 r.curlew *= 0.3;
                 r.wind *= 1.3;
                 r.rain = 1.0;
+                r.dogs *= 0.2;
             }
         }
         r
@@ -124,7 +142,28 @@ pub struct AmbienceSynth {
     next_drop: usize,
     roof: Biquad,
     cabin: OnePole,
+    /// River: two band-passed noise streams with a fast, uneven swell, and bubbles.
+    river_bp: [Biquad; 2],
+    river_swell: [Wander; 2],
+    bubbles: [(Ring, f32); 4],
+    next_bubble: usize,
+    /// Village hum and a barking dog (formant-filtered noise and a tone, a few barks).
+    hum: Biquad,
+    bark: Bark,
     coef_timer: u32,
+}
+
+/// A dog far off: a few barks.
+#[derive(Clone, Copy, Debug, Default)]
+struct Bark {
+    left: u8,
+    t: f32,
+    pitch: f32,
+    pan: f32,
+    amp: f32,
+    osc: Osc,
+    formant: Biquad,
+    distance: OnePole,
 }
 
 impl AmbienceSynth {
@@ -153,6 +192,12 @@ impl AmbienceSynth {
             next_drop: 0,
             roof: Biquad::bandpass(900.0, 1.5),
             cabin: OnePole::new(20_000.0),
+            river_bp: [Biquad::bandpass(850.0, 0.7), Biquad::bandpass(1250.0, 0.9)],
+            river_swell: [Wander::new(5.0), Wander::new(7.5)],
+            bubbles: [(Ring::default(), 0.0); 4],
+            next_bubble: 0,
+            hum: Biquad::lowpass(170.0, 0.7),
+            bark: Bark { formant: Biquad::bandpass(900.0, 2.5), distance: OnePole::new(2600.0), ..Default::default() },
             coef_timer: 0,
         }
     }
@@ -171,7 +216,7 @@ impl AmbienceSynth {
     }
 
     pub fn render(&mut self, out: &mut [f32]) {
-        for fr in out.chunks_exact_mut(2) {
+        for fr in out.as_chunks_mut::<2>().0 {
             let (l, r) = self.sample();
             fr[0] += l;
             fr[1] += r;
@@ -318,6 +363,65 @@ impl AmbienceSynth {
                 }
             }
         }
+        // River: babbling water (two streams of swelling band noise, bubbles popping).
+        if r.river > 0.0 {
+            let a = (0.55 + 0.45 * self.river_swell[0].next(&mut self.n)).max(0.0);
+            let b = (0.55 + 0.45 * self.river_swell[1].next(&mut self.n)).max(0.0);
+            let wl = self.river_bp[0].run(self.n.white()) * a * a;
+            let wr = self.river_bp[1].run(self.n.white()) * b * b;
+            l += (wl * 0.8 + wr * 0.4) * r.river * 3.0;
+            rr += (wr * 0.8 + wl * 0.4) * r.river * 3.0;
+            if self.n.chance(18.0 * dt) {
+                let n = &mut self.n;
+                let bub = &mut self.bubbles[self.next_bubble];
+                self.next_bubble = (self.next_bubble + 1) % 4;
+                bub.0.trigger(n.range(500.0, 1500.0), n.range(0.02, 0.06), n.range(0.2, 1.0) * r.river);
+                bub.1 = n.range(-0.8, 0.8);
+            }
+            for bub in &mut self.bubbles {
+                if bub.0.active() {
+                    let s = bub.0.next() * 0.5;
+                    let (pa, pb) = pan(bub.1);
+                    l += s * pa;
+                    rr += s * pb;
+                }
+            }
+        }
+        // Village: the low hum of a place, and a dog somewhere.
+        if r.hum > 0.0 {
+            let h = self.hum.run(self.n.white()) * r.hum * 4.0;
+            l += h;
+            rr += h;
+        }
+        if r.dogs > 0.0 && self.bark.left == 0 && self.n.chance(r.dogs * dt) {
+            let n = &mut self.n;
+            self.bark.left = 2 + (n.unit() * 3.0) as u8;
+            self.bark.t = 0.0;
+            self.bark.pitch = n.range(380.0, 620.0);
+            self.bark.pan = n.range(-0.9, 0.9);
+            self.bark.amp = n.range(0.006, 0.014);
+            self.bark.formant.set_bandpass(self.bark.pitch * 2.1, 2.5);
+        }
+        if self.bark.left > 0 {
+            let b = &mut self.bark;
+            // One bark: 0.13 s, a sharp onset and a falling pitch; 0.22 s apart.
+            const LEN: f32 = 0.13;
+            if b.t < LEN {
+                let x = b.t / LEN;
+                let env = (x * 12.0).min(1.0) * (1.0 - x) * (1.0 - x);
+                let tone = b.osc.next(b.pitch * (1.15 - 0.3 * x));
+                let rasp = b.formant.run(self.n.white()) * 2.5;
+                let s = b.distance.lp((tone * 0.5 + rasp) * env * b.amp);
+                let (pa, pb) = pan(b.pan);
+                l += s * pa;
+                rr += s * pb;
+            }
+            b.t += dt;
+            if b.t >= LEN + 0.22 {
+                b.t = 0.0;
+                b.left -= 1;
+            }
+        }
         // Inside: the outside is muffled, rain drums on the roof.
         let lo = self.cabin.lp((l + rr) * 0.5);
         let mut out_l = l + (lo - l) * interior;
@@ -353,7 +457,7 @@ mod tests {
             for w in weathers {
                 for interior in [0.0, 1.0] {
                     let mut s = AmbienceSynth::new(1);
-                    s.set(AmbParams { active: true, biome: b, weather: w, time: TimeOfDay::Morning, interior });
+                    s.set(AmbParams { active: true, biome: b, weather: w, time: TimeOfDay::Morning, interior, ..Default::default() });
                     let out = run(&mut s, 2.0);
                     assert!(out.iter().all(|v| v.is_finite()));
                     let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
@@ -367,7 +471,7 @@ mod tests {
 
     #[test]
     fn recipes_differ_by_biome_and_weather() {
-        let p = |biome, weather| Recipe::of(&AmbParams { active: true, biome, weather, time: TimeOfDay::Noon, interior: 0.0 });
+        let p = |biome, weather| Recipe::of(&AmbParams { active: true, biome, weather, time: TimeOfDay::Noon, interior: 0.0, ..Default::default() });
         assert!(p(Biome::Moor, Weather::Clear).wind > p(Biome::PineForest, Weather::Clear).wind);
         assert!(p(Biome::BirchHills, Weather::Clear).birds > p(Biome::Moor, Weather::Clear).birds);
         assert!(p(Biome::Scrub, Weather::Clear).cicadas > 0.0);
@@ -377,10 +481,28 @@ mod tests {
     }
 
     #[test]
+    fn a_river_and_a_village_are_heard_and_stay_quiet() {
+        let level = |water: f32, town: f32| {
+            let mut s = AmbienceSynth::new(4);
+            s.set(AmbParams { active: true, water, town, ..Default::default() });
+            let out = run(&mut s, 30.0);
+            assert!(out.iter().all(|v| v.is_finite() && v.abs() < 0.5));
+            rms(&out[48_000..])
+        };
+        let plain = level(0.0, 0.0);
+        let river = level(1.0, 0.0);
+        let village = level(0.0, 1.0);
+        assert!(river > plain * 1.5 && river < 0.12, "{plain} {river}");
+        assert!(village > 1e-3 && village < 0.12, "{plain} {village}");
+        let r = Recipe::of(&AmbParams { active: true, town: 1.0, ..Default::default() });
+        assert!(r.dogs > 0.0 && r.birds < Recipe::of(&AmbParams { active: true, ..Default::default() }).birds);
+    }
+
+    #[test]
     fn rain_is_louder_than_clear_and_fades_out() {
         let level = |w| {
             let mut s = AmbienceSynth::new(2);
-            s.set(AmbParams { active: true, biome: Biome::PineForest, weather: w, time: TimeOfDay::Noon, interior: 0.0 });
+            s.set(AmbParams { active: true, biome: Biome::PineForest, weather: w, time: TimeOfDay::Noon, interior: 0.0, ..Default::default() });
             rms(&run(&mut s, 2.0)[48_000..])
         };
         assert!(level(Weather::Rain) > level(Weather::Clear) * 1.3);

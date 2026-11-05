@@ -9,13 +9,46 @@ surface, trees and dressing, the car model, sky and weather, wheel spray. One pl
 |---|---|
 | `mod.rs` | plugin, `pbr(set)` (cooked set → `StandardMaterial`), `spawn_stage`, dev commands `art.stats`, `art.place {s, lateral?}` |
 | `ground.rs` | terrain splat layers per biome (textured), road ribbon (UVs along the road, darker compacted wheel lines, loose stones in the middle and at the edges), surface patches as blended overlays that fade in over 10 m, soft verge strips each side |
-| `terrain.rs`, `terrain.wgsl` | full-PBR terrain material (colour + normal + ORM per layer, two-scale anti-tiling, AO-weighted layer blend) put on the engine's terrain chunks; same splat map and layer rules as the engine's |
-| `trees.rs` | trees built from foliage cards: pine, spruce, snowy spruce, birch, olive-like scrub tree (3 variants each), placed on the dressing graph's `trunks` points (the ones the car collides with) |
+| `terrain.rs`, `terrain.wgsl` | full-PBR terrain material (colour + normal + ORM per layer, two-scale anti-tiling, AO-weighted layer blend) put on the engine's terrain chunks; same splat map and layer rules as the engine's; forest floors darkened beyond the shadow distance from a canopy texture (`Canopy`, 16 m texels, rebuilt from the known trees once a second) |
+| `trees.rs` | trees built from foliage cards: pine, spruce, snowy spruce, birch, olive-like scrub tree (3 variants each), placed on the dressing graph's `trunks` points (the ones the car collides with); three foliage tints per species picked per tree (`TINTS`; impostors carry the same tint as vertex colour) |
 | `dressing.rs` | PCG catalog: decimated Poly Haven rocks, shrubs, ferns, grass, stump; item mixes per biome; ground cover fades out at ~95 m instead of the budget's flat far version |
-| `car.rs` | the rally car model on the simulated car: hubs follow suspension and steer, wheels spin; steering wheel, tacho and speedo follow the sim; lamp pod hidden from inside; cockpit-eye and bonnet camera positions |
-| `look.rs` | `Look` per stage: sun angle/colour/lux per time of day, atmosphere or overcast gradient sky, fog distance per weather (also where trees and scenery stop), exposure, grading |
+| `car.rs` | the rally car model on the simulated car: hubs follow suspension and steer, wheels spin; steering wheel, tacho and speedo follow the sim; lamp pod hidden from inside; cockpit-eye and bonnet camera positions; per-car paint and tail-lamp materials (`CarWear`): the paint dusts over on loose surfaces (faster when the wheels slip; tarmac stays clean), tail lamps 5× under braking; outer glass dark and glossy (single-sided, so the cockpit view is unchanged) |
+| `mirror.rs` | rear-view and door mirrors: a 384×96 camera at the mirror renders linear, pre-exposed radiance (`Tonemapping::None`, like the probes) that the mirror glass and door-mirror picture quads show unlit, so the main camera tone-maps it with the scene. It sees only render layer 1 (`mirror::seen()`: terrain, road, traffic, trees) and no sun, so it draws no shadow maps (exposed 1.3 EV brighter instead). On only in the cockpit view at High+; in-run A/B within noise (a full-scene mirror with shadows cost ~6 ms) |
+| `traffic_car.rs` | traffic cars' look (`open::traffic` calls `spawn_parts`): hatch, saloon, estate and SUV lofted from side-profile knots (arches, tumblehome, dark sills/bumpers by vertex colour), glass with pillars, 16-sided wheels with rims, grille, plates, mirrors, unlit head/tail lamps, brake lamps while slowing or stopped, hazards blinking after a hit; one material per colour, solid or metallic with clear coat; all shared (batched), six entities per car |
+| `look.rs` | `Look` per stage: sun angle/colour/lux per time of day, atmosphere or overcast gradient sky, fog distance per weather (also where trees and scenery stop), exposure, grading. Tony McMapface tone mapping (AgX greyed the clear sky to lavender); clear days get neutral haze (the default's blue fog lit the ground between far trunks as a blue band), +0.4 EV, contrast 1.08, a little warmth |
 | `spray.rs` | dust, gravel chips, mud clods, snow powder, tarmac smoke per wheel from surface, speed and slip; rain around the camera on wet stages |
 | `meshfile.rs` | reader for `assets/models/*.pnm` (small binary meshes, read synchronously at load) |
+
+## Car feel (festival stream D)
+
+- **Exhaust flames** (`exhaust.rs`): one pooled rig per car at the tail pipe (model
+  (0.46, 0.27 m above ground, 1.99), axis rearward, 11° down, 7° out): two nested additive
+  cones (24 tris, shared mesh/materials, `NotShadowCaster`, emissive not exposed so they bloom
+  alike day and night: core blue-white 8×, outer orange 3×), 40-70 ms (crackle) / 90-120 ms
+  (bang), random roll and ±15 % length from the pop's seed; a flash `PointLight` (1.3k / 3k
+  lm, a third of ART_BIBLE's: the full value washed out the tail at night); bangs add 8 vfx
+  sparks and a grey-blue puff, misfires black smoke and no flame. From the cockpit only the
+  flash shows. Driven by `audio::pops::ExhaustPop`, the same frame as the sound.
+- **Cameras** (`camera.rs`, moved from `drive.rs`): the chase camera hangs on a spring arm,
+  one closed-form damped spring per axis in the arm's yaw frame (boom ω 5 ζ 0.8 −1.0/+1.6 m,
+  lateral 4/0.9 ±1.2 m, vertical 7/1 −0.4/+0.6 m, heading 3.5/1 ≤ 25°, aim 9/1), driven only
+  by the rest pose's acceleration (speeding up stretches, braking squashes, a steady speed
+  rests); boom +0.8 m and height −0.25 m from 60 → 180 km/h; 0.35 m probe; landing kick
+  (0.06 m per m/s over 2, ≤ 0.35 m), chase shake over 110 km/h, impact jolt ≤ 1.5°, all
+  scaled by Camera shake. `SpeedFeel` (smoothstep 40 → 180 km/h) drives FOV (+7°, +5° inside),
+  blur and wind. Settings › Camera: Motion blur Off/Low/High (default Low), Chase distance,
+  Chase stiffness, Landing kick.
+- **Motion blur**: `Look.lens.motion_blur` on while the setting allows (re-asserted before
+  `apply_look` if the look is rewritten), so `MotionBlur` exists only where the tier allows
+  (High+) and is never inserted in play; `shutter_angle` written after `QualitySet::Look`:
+  0 under ~60 km/h, ≈0.35 at 160, 0.4 flat out (×0.6 Low, ×0.6 inside), 0 for 3 frames after
+  a cut.
+- **Lights** (`headlights.rs`): two low beams (12k lm, 80 m, the left one shadowed on High+,
+  fixed at spawn) and the pod (40k lm, 160 m) as children of the car at intensity 0; L /
+  D-pad right, Settings › Driving › Headlights Auto/On/Off (auto below a 2° sun, off above 4°).
+  Lens glass glows (the body's rear reversing-lamp half is split off and stays dark), tail
+  lamps ×2.2 with the lights, ×5 braking. Inserts `Headlights` (Night start gate).
+- **Wet spray** (`spray.rs`): water mist off the tyres on `Surface::Wet`, growing with speed.
 
 ## Assets and how to rebuild them
 
@@ -86,6 +119,58 @@ memgate -- blender -b --factory-startup -P tools/art/build_rallycar.py -- assets
   down) → bonnet → chase. The lamp pod is hidden in cockpit and bonnet views.
   glTF images get CPU-built mips at load, then drop their CPU copy.
 
+## Sky, clouds and time of day (festival, stream C)
+
+Code: `src/daytime.rs` (clock, settings), `src/art/look.rs` (keyframes → `Look`),
+`src/art/sky.rs` + `src/art/clouds.wesl` (cloud shell, stars, street lamps). Design:
+`docs/festival/ART_BIBLE.md` §2, `DECISIONS.md` L1-L8. Shots: `docs/festival/shots/`.
+
+- **Clock.** `DayClock` runs at 5× real time on `Time<Virtual>` (pause freezes it). Free roam
+  starts at World › Start time (Dawn 06:00, Morning 09:00 default, Noon 12:30, Afternoon 16:00,
+  Sunset 19:30, Night 23:00, Now (wall clock), Last) and runs while World › Time passes is on. Night
+  is offered only when `art::headlights::Headlights` exists; until then a night start is
+  Sunset. Classic stages freeze at their `TimeOfDay` (07:45 / 13:00 / 16:30 / 19:45).
+- **Sun.** Solar formula (46° N, declination 19°, solar noon 13:00): sunrise ≈ 05:37, sunset ≈
+  20:23. The light is the raw sun above the atmosphere (110 000 lux, near white): Bevy's
+  atmosphere reddens and dims it for the sky and for every lit surface, so keying a warm, dim
+  sun reddens it twice (that turned dawn brown). Through twilight the light is held at −2.5°
+  and dimmed a decade per 1.9° of true depression (keeps the afterglow); below −10° it becomes
+  the moon (opposite azimuth, 35° up, 0.6 lux, blue), so `SkyMode` never changes.
+- **Keyframes** (`look.rs` `KEYS`): exposure EV100, haze (fog colour matched to the horizon,
+  5-9 km by day), flat fill 450-600 cd/m² by day (was 2400), cloud cover. Auto exposure
+  (Medium+) adapts −1.5 / +1 EV around the key. Tonemapper Khronos PBR Neutral (keeps the deep
+  blue zenith; Tony and AgX washed it to grey-lavender, compared in game).
+- **Cadence.** `drive_look` rewrites `Look` only when the sun moved 0.02° (≈ 1 Hz at 5×; measured
+  31 writes in 30 s); the sky light refilters every 20 s (`LookConfig::env_refresh_hz` 0.05), or
+  within a second after a dev jump.
+- **Clouds.** A camera-centred dome (r 40 km) drawn in the transparent pass after the atmosphere,
+  depth-tested, unlit, premultiplied. It marches the 1.8-3.2 km shell of a curved earth: Low 1
+  sample of a flat layer, Medium 4 steps + 1 light tap, High+ 8 steps + 2 taps. Density = macro
+  coverage × Perlin-Worley shape (256² RGBA8) × height profile, eroded by a 32³ Worley volume
+  (both generated at startup, 0.3 MB). Beer with a multiple-scattering floor, dual HG phase,
+  sky fill, ground bounce, far clouds melt into the haze. Wind 11.5 m/s from the WSW on game
+  time; coverage follows the keys plus a slow wander. Stars (rotating about the pole) come from
+  the same shader once the sun is 6° down.
+- **Street lamps.** 24 pooled `PointLight`s (8 on Low), 1 800 lm, no shadows, moved twice a
+  second to the nearest of B's `SignKind::StreetLight` posts, lit below sun 4°.
+- **Dev commands.** `look.time {time, speed, stop}` (replaces the engine's timeline command),
+  `look.speed {x}`, `day.get`, `sky.clouds {on}` (A/B; also returns the look write count).
+
+Cost (M5 Pro, 1080p offscreen, same binary, clouds on vs off, sky ≈ 60 % of the view, shared
+machine so ±0.2 ms noise): Low ≈ 0 (within noise), Medium +0.34 ms, High +0.14 ms (budgets
+0.05 / 0.5 / 0.7). +1 draw. CPU: one material uniform update per frame, one `Look` write per
+second.
+
+Cloud shadows: the terrain shader (`terrain.wesl`, stream A's, ~20 lines) samples the same
+weather map at the layer's mid-height along the sun and takes up to 75 % of the direct sun off
+sun-facing ground; `sky.rs` updates the terrain material's two uniforms ≈ 10 Hz. Terrain only
+(not trees, roads, buildings). Cover through the day: 0.25 at dawn, 0.42 at 09:00, 0.55 midday
+and afternoon, 0.45 at 19:00; cells build taller towards 15:00 (`cloud_growth`). Night grading
+adds a magenta tint (0.07) against the teal cast.
+
+Known gaps: clouds are not in the env map / reflections (engine request); the cabin fill (`car.rs`, D) follows
+`DayClock::daylight`, which this clock now drives.
+
 ## Measurements
 
 Apple M5 Pro, dev build, offscreen 1920×1080, High quality, governor off, chase camera at the
@@ -113,4 +198,8 @@ Breakdown on stage 1 (A/B, same binary): trees +2.7 ms GPU, +240 MB; PCG rocks/p
 - Terrain layers are world-XZ projected (no triplanar): steep rock faces stretch.
 - HDRIs in `assets_src/hdri` are unused: the engine's cubemap sky needs KTX2 cubemaps and there
   is no equirect → cubemap tool yet; the atmosphere / gradient skies are used instead.
-- No tyre-track decals beyond the shaded wheel lines; no mud build-up on the car yet.
+- Stage roads run on 18 m past both ends and fade into the ground (`ground::tail`), so the
+  start line has no hard road edge behind the car.
+- No tyre-track decals beyond the shaded wheel lines. Dirt on the car is a uniform tint of the paint (no masks: sills and arches don't get it first).
+- The mirror sees terrain, road, traffic and trees but not buildings, props or the car's own cabin, and has no sun light (sky light only).
+- Beyond the impostor reach (1.2 km) the terrain has no trees, and the canopy texture only knows streamed trees: far hills read as bare ground in haze.

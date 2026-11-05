@@ -123,6 +123,7 @@ pub struct CoverMats(Vec<AssetId<StandardMaterial>>);
 /// budget's far version. The budget may classify a piece before this runs (PCG spawns late in
 /// the frame): its tier comes off and its flat far twin is despawned (on card bushes the twin
 /// is an untextured box).
+#[allow(clippy::type_complexity)] // a Bevy query
 pub fn tag_cover(
     mut commands: Commands,
     mats: Option<Res<CoverMats>>,

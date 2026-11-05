@@ -1,0 +1,111 @@
+{
+  "car_horn": {
+    "use": "traffic honks after a near miss or when blocked",
+    "bed": false,
+    "music": false,
+    "files": [
+      {
+        "file": "car_horn_1.ogg",
+        "title": "2 Car Horns",
+        "creator": "alukahn",
+        "license": "by",
+        "license_version": "3.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/alukahn/sounds/144137"
+      },
+      {
+        "file": "car_horn_2.ogg",
+        "title": "Car Horn Beeps.mp3",
+        "creator": "hsaunier10",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/hsaunier10/sounds/254678"
+      },
+      {
+        "file": "car_horn_3.ogg",
+        "title": "My Car Horn - Beep Beep.wav",
+        "creator": "fogma",
+        "license": "by",
+        "license_version": "3.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/fogma/sounds/26185"
+      }
+    ]
+  },
+  "dog_bark": {
+    "use": "farms and outskirts, now and then as you pass",
+    "bed": false,
+    "music": false,
+    "files": [
+      {
+        "file": "dog_bark_1.ogg",
+        "title": "A dog barking (close recording)",
+        "creator": "felix.blume",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/felix.blume/sounds/199261"
+      },
+      {
+        "file": "dog_bark_2.ogg",
+        "title": "Small Dog Bark 01",
+        "creator": "noctaro",
+        "license": "by",
+        "license_version": "4.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/noctaro/sounds/242414"
+      }
+    ]
+  },
+  "gravel_hit": {
+    "use": "stones hitting the underbody on loose gravel and washouts",
+    "bed": false,
+    "music": false,
+    "files": [
+      {
+        "file": "gravel_hit_1.ogg",
+        "title": "Gravel Impacts and Falls.wav",
+        "creator": "lolamadeus",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/lolamadeus/sounds/179341"
+      },
+      {
+        "file": "gravel_hit_2.ogg",
+        "title": "Gravel impact 3",
+        "creator": "jorickhoofd",
+        "license": "by",
+        "license_version": "4.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/jorickhoofd/sounds/169551"
+      }
+    ]
+  },
+  "service_park": {
+    "use": "Service Park menu bed and the service park in the world",
+    "bed": true,
+    "music": false,
+    "files": [
+      {
+        "file": "service_park_1.ogg",
+        "title": "Auto Repair Shop with Pneumatic Drill Sounds",
+        "creator": "ericreinert",
+        "license": "by",
+        "license_version": "3.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/ericreinert/sounds/120227"
+      },
+      {
+        "file": "service_park_2.ogg",
+        "title": "Car/Auto Mechanic Shop",
+        "creator": "producerdan",
+        "license": "cc0",
+        "license_version": "1.0",
+        "source": "freesound",
+        "landing_page": "https://freesound.org/people/producerdan/sounds/266626"
+      }
+    ]
+  }
+}

@@ -81,6 +81,7 @@ impl Default for WorldDoc {
             grades: Vec::new(),
             lots: Vec::new(),
             buildings: Vec::new(),
+            yumps: Vec::new(),
         };
         WorldDoc { data, terrain: String::new() }
     }
@@ -162,19 +163,45 @@ impl Building {
 #[derive(Component)]
 pub struct BuildingShape;
 
-/// Builds the mesh child of every level [`Building`] that is new or changed, and drops the
-/// loose (generated) building meshes once the level's buildings exist.
+/// Whether the level is open in the editor (buildings then draw one by one, to be picked and
+/// moved; in play the town draws in merged tiles, `buildings::BuildingTile`).
+pub fn editing(world: &World) -> bool {
+    #[cfg(feature = "dev")]
+    return world.contains_resource::<engine::editor::EditorMode>();
+    #[cfg(not(feature = "dev"))]
+    {
+        let _ = world;
+        false
+    }
+}
+
+/// In the editor: the mesh child of every level [`Building`] that is new, changed or has none,
+/// and the merged tiles hidden. In play: the tiles shown and no per-building meshes (the
+/// level's buildings are data there; collision is their facades, `buildings::walls`).
 #[allow(clippy::type_complexity)]
 fn sync_buildings(world: &mut World) {
-    let mut q = world.query_filtered::<(Entity, &Building, &Transform, Option<&Children>), (With<LevelEntity>, Or<(Changed<Building>, Changed<Transform>)>)>();
-    let todo: Vec<(Entity, Building, Transform, Vec<Entity>)> = q.iter(world).map(|(e, b, t, c)| (e, *b, *t, c.map(|c| c.iter().collect()).unwrap_or_default())).collect();
-    let any = world.query_filtered::<(), (With<Building>, With<LevelEntity>)>().iter(world).next().is_some();
-    if any {
-        let loose: Vec<Entity> = world.query_filtered::<Entity, With<buildings::LooseBuilding>>().iter(world).collect();
-        for e in loose {
-            world.entity_mut(e).despawn();
+    let editing = editing(world);
+    let want = if editing { Visibility::Hidden } else { Visibility::Inherited };
+    let mut q = world.query_filtered::<&mut Visibility, With<buildings::BuildingTile>>();
+    for mut v in q.iter_mut(world) {
+        if *v != want {
+            *v = want;
         }
     }
+    if !editing {
+        let shapes: Vec<Entity> = world.query_filtered::<Entity, With<BuildingShape>>().iter(world).collect();
+        for e in shapes {
+            world.entity_mut(e).despawn();
+        }
+        return;
+    }
+    let mut q = world.query_filtered::<(Entity, &Building, &Transform, Option<&Children>, Ref<Building>, Ref<Transform>), With<LevelEntity>>();
+    let shaped: std::collections::HashSet<Entity> = world.query_filtered::<&ChildOf, With<BuildingShape>>().iter(world).map(|c| c.parent()).collect();
+    let todo: Vec<(Entity, Building, Transform, Vec<Entity>)> = q
+        .iter(world)
+        .filter(|(e, _, _, _, b, t)| b.is_changed() || t.is_changed() || !shaped.contains(e))
+        .map(|(e, b, t, c, _, _)| (e, *b, *t, c.map(|c| c.iter().collect()).unwrap_or_default()))
+        .collect();
     if todo.is_empty() || !crate::art::visual(world) {
         return;
     }
@@ -558,7 +585,6 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
     let mut app = level_app();
     let world = app.world_mut();
     engine::level::load_level(world, path).map_err(|e| format!("{}: {e:?}", path.display()))?;
-    let data = from_level(world)?;
     let name = world.query::<&WorldDoc>().iter(world).next().map(|d| d.terrain.clone()).unwrap_or_default();
     if name.is_empty() || name.contains("..") || Path::new(&name).is_absolute() {
         return Err(format!("terrain folder {name:?}"));
@@ -572,6 +598,13 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         .map(|l| terrain_dir(&l, &name))
         .find(|d| d.join("terrain.ron").exists())
         .unwrap_or_else(|| terrain_dir(path, &name));
+    // The land under the roads, as baked (no erosion at load), if the level has it.
+    if let Some(seed) = world.query::<&WorldDoc>().iter(world).next().map(|d| d.data.seed)
+        && let Some(l) = super::land::Land::load(&dir.join(super::land::LAND_FILE), seed)
+    {
+        super::land::preload(l);
+    }
+    let data = from_level(world)?;
     let heights = TerrainData::load(&dir).and_then(|t| t.to_heightfield()).map_err(|e| format!("terrain {}: {e:?}", dir.display()))?;
     let mut overrides = |kind: Foliage| world.query::<(&Foliage, &PcgOverrides)>().iter(world).find(|(f, _)| **f == kind).map(|(_, o)| o.clone()).unwrap_or_default();
     let (trees, dressing) = (overrides(Foliage::Trees), overrides(Foliage::Dressing));
@@ -620,6 +653,7 @@ pub fn bake(path: &Path) -> Result<String, String> {
     let n = open.heights.nx();
     let dir = terrain_dir(path, name);
     TerrainData::from_heightfield(&open.heights, [n, open.heights.nz()], None).save(&dir).map_err(|e| format!("{e:?}"))?;
+    open.net.land.save(&dir.join(super::land::LAND_FILE)).map_err(|e| format!("{}: {e}", super::land::LAND_FILE))?;
     let points: usize = world.query::<&Spline>().iter(world).map(|s| s.points.len()).sum();
     Ok(format!(
         "{}: {} roads ({points} control points), {} events, {} buildings, terrain {n}² in {} ({:.1} s)",

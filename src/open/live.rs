@@ -227,7 +227,7 @@ fn follow_events(old: &RoadNet, new: &mut WorldData) {
 /// Shapes the ground again in `boxes` (grown by the road's reach): samples within reach of a
 /// road in `old` or `new` there get the generator's height for `new`; the rest stays.
 fn reshape(world: &mut World, old: &RoadNet, new: &RoadNet, boxes: &[(Vec2, Vec2)]) -> Result<(), String> {
-    let reach = crate::stage::SHAPE_REACH;
+    let reach = super::profile::REACH_MAX;
     let Some(t) = world.get_resource::<Terrain>() else { return Ok(()) };
     let hf = t.heightfield();
     let (spacing, origin, nx, nz) = (hf.spacing(), hf.origin(), hf.nx(), hf.nz());
@@ -351,9 +351,25 @@ pub mod dev {
     use serde_json::json;
 
     pub fn register(app: &mut App) {
+        app.add_control_command("open.meshes", "Distinct meshes the main camera sees this frame, by entity name (each one a draw before shadows)", params(&[]), |w, _| {
+            use std::any::TypeId;
+            use std::collections::{BTreeMap, BTreeSet};
+            let mut cams = w.query_filtered::<&bevy::camera::visibility::VisibleEntities, With<engine::gfx::MainCamera>>();
+            let visible: Vec<Entity> = cams.iter(w).flat_map(|v| v.get(TypeId::of::<Mesh3d>()).to_vec()).collect();
+            let mut q = w.query::<(&Mesh3d, Option<&Name>)>();
+            let mut by: BTreeMap<String, BTreeSet<AssetId<Mesh>>> = BTreeMap::new();
+            for e in &visible {
+                if let Ok((m, n)) = q.get(w, *e) {
+                    by.entry(n.map_or("(unnamed)".into(), |n| n.as_str().split(' ').next().unwrap_or("").to_string())).or_default().insert(m.0.id());
+                }
+            }
+            let mut rows: Vec<(String, usize)> = by.into_iter().map(|(k, v)| (k, v.len())).collect();
+            rows.sort_by_key(|r| std::cmp::Reverse(r.1));
+            Ok(json!({"distinct": rows.iter().map(|r| r.1).sum::<usize>(), "by_name": rows.into_iter().take(30).collect::<Vec<_>>()}))
+        });
         app.add_control_command(
             "open.check",
-            "Roads more than 5 cm above or below the live terrain anywhere: the worst place of each",
+            "Roads (their crowned surface at the centre) more than 5 cm above or below the live terrain anywhere: the worst place of each",
             params(&[]),
             |w, _| {
                 let s = w.get_resource::<crate::world::StageWorld>().ok_or("no stage")?;
@@ -363,8 +379,10 @@ pub mod dev {
                 let mut worst = Vec::new();
                 for (k, r) in open.net.roads.iter().enumerate() {
                     let (mut above, mut below) = ((0.0f32, Vec3::ZERO), (0.0f32, Vec3::ZERO));
-                    for p in &r.road.pts {
-                        let d = p.y - hf.height_at(p.x, p.z);
+                    for (i, p) in r.road.pts.iter().enumerate() {
+                        // The drawn surface at the centre (with its crown).
+                        let at = crate::stage::RoadPos { i: i.min(r.road.len() - 2), t: if i + 1 == r.road.len() { 1.0 } else { 0.0 }, s: i as f32 * crate::stage::STEP, lateral: 0.0 };
+                        let d = r.road.height_at(&at) - hf.height_at(p.x, p.z);
                         if d > above.0 {
                             above = (d, *p);
                         }

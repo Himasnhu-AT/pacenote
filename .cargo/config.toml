@@ -1,3 +1,4 @@
-# Share Shroud's target dir: Bevy compiles once for the engine and every game (disk is tight).
+# The engine owns the shared target dir: Bevy compiles once for the engine and every game.
+# Prune it with engine/scripts/sweep-target.sh (cargo-sweep).
 [build]
-target-dir = "/Users/himanshu/codes/game/shroud/target"
+target-dir = "/Users/himanshu/codes/game/engine/target"

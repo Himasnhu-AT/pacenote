@@ -91,17 +91,29 @@ The game has 26 loops per mic, ~16 % apart:
   throttle (30 ms up, 60 ms down). Loudness grows with rpm (idle about 10 dB under the top)
   and load (the overrun about 6 dB under full load at the same rpm).
 - Rev limiter: at the redline under throttle, ignition is cut about half of each 70 ms cycle
-  (14 Hz bounce): the level drops to 0.35, load goes to zero, rpm dips 3 %, and a pop is
-  likely at each cut.
-- Gear change: the sim's `shifting` cuts load (overrun). An upshift under power above 4200
-  rpm bangs (75 %). A downshift blips the throttle for 90 ms and opens the crackle window. A
-  dog-box clunk plays on every change (synthesised, `body.rs`).
-- Pops: three recorded anti-lag bangs, picked at random with ±12 % pitch. After a lift above
-  3200 rpm a crackle window opens (decays over ~1.4 s) and each firing may pop on the
-  overrun (2 % × overrun × crackle).
+  (14 Hz bounce): the level drops to 0.35, load goes to zero, rpm dips 3 %.
+- Gear change: the sim's `shifting` cuts load (overrun). A downshift blips the throttle for
+  90 ms. A dog-box clunk plays on every change (synthesised, `body.rs`).
+- Pops and bangs (`pops.rs`, festival AUDIO_PASS §2): decided on the **main thread** by
+  `PopScheduler` (game time, seeded), which sends `ExhaustPop` (the flame, `art::exhaust`)
+  and `CarEvent::Pop` (the synth) on the same frame. Triggers: a lift (peak throttle in the
+  last 200 ms ≥ 0.6, now ≤ 0.2, ≥ 3200 rpm; any pedal speed, so a gamepad trigger let go over
+  150 ms crackles) gives a burst of 2-6 clustered pops over 0.4-1.2 s (Rally profile +1, a
+  Bang first above ~5600 rpm); an upshift at full throttle above 0.7 × redline bangs (90 %)
+  plus 0-2 crackles; a downshift above 2800 rpm 1-3 crackles; 35 % of limiter cuts crackle;
+  engine damage > 0.3 adds a Misfire (chance dmg²). Throttle back on ends a burst after one
+  more pop; at most 10 pops a second.
+- Each pop is synthesised (`PopVoices`, 6 voices, oldest stolen): a 1-3 ms noise crack into a
+  resonant low-pass (decorrelated L/R), one of the three recorded pops (±15 %, −9/−4 dB), a
+  band-passed body, a falling sub thump and, on bangs, a pipe-ring comb, every layer drawn
+  from the pop's seed. Its own peak over its first 25 ms is measured on a copy so it lands at
+  **+8 dB (Crackle) / +13 dB (Bang) over the engine's 50 ms RMS** (± 2 dB with intensity,
+  capped at −3 dBFS). Pops are mixed **after the compressor, before the limiter**
+  (`Dynamics::run_with`), never ducked. Chase: panned from the tail pipe's bearing, plus a
+  9 ms ground slap; inside: low-passed at 1.4 kHz, −5 dB, the sub +3 dB, and a bang knocks
+  the shell.
 - Damage (`engine_damage`): misfires (up to ~28 % of firings at full damage): the level
-  drops 85 % for about a firing, and the unburnt fuel may bang on a later firing. The idle
-  hunts (rpm wobble).
+  drops 85 % for about a firing. The idle hunts (rpm wobble).
 - A stopped engine (rpm below ~300) is silent.
 
 **Tyres** (`tyres.rs`): drift only. Rolling road noise (gravel crunch, tarmac roar, snow) and
@@ -138,7 +150,7 @@ buffeting and a door-seal whistle. Both go as speed², with slow gusts.
 
 **Inside vs outside** (bonnet/cockpit vs chase camera, crossfaded over 50 ms):
 - Inside: the engine bay mic through the bulkhead (low-passed at 2.6 kHz), the exhaust
-  low-passed at 850 Hz plus a 118 Hz cabin boom; pops at half level.
+  low-passed at 850 Hz plus a 118 Hz cabin boom; pops muffled (see above).
 - Outside: mostly the exhaust mic, with the engine bay under it (0.4).
 - Inside, tyres and outside wind are low-passed at 1.7 kHz; scrapes and rattles are louder,
   and stones on the floor are twice as loud as outside.
@@ -181,6 +193,8 @@ a text-to-speech engine, so it sounds the same on macOS and Windows:
   the same while it speaks.
 - Not loaded yet, or no audio output: lines are timed by word count and show as subtitles only.
 
+**Traffic** (`traffic.rs`, open world). The four nearest traffic cars within 140 m (`traffic_heard`, from the camera and the player's velocity) each get a voice: the recorded on-load 1925 rpm exhaust loop pitched by a road-car gearbox from the car's speed (1.7-4.4k rpm), tyre roar (band-passed noise rising with speed), inverse-distance gain (1 at 3 m), air absorption (low-pass 11 kHz / (1 + d/28 m)), Doppler from the closing speed and equal-power pan by bearing; muffled and −5 dB inside. A voice stays with its car (by id) and is only handed to another once silent. A car passing at 3 m at 80 km/h peaks ~5 dB over the player's idle (`render_places`).
+
 **Ambience** (`ambience.rs`, `Recipe::of`):
 
 | Biome | Bed | Life |
@@ -190,6 +204,8 @@ a text-to-speech engine, so it sounds the same on macOS and Windows:
 | scrub | light wind | cicadas (62 Hz pulsed 5.6 kHz buzz), few birds |
 | moor | strong gusty wind | curlew-like rising calls, rare birds |
 | snow forest | quiet wind | rare birds |
+
+Open world places (`places_near`, quantised to 1/32): near the river (1 on the bank, 0 from ~120 m) a babble of two band-noise streams with an uneven swell and popping bubbles; in the village (houses within 90 m) a low hum, a dog barking now and then, and half the forest birds and leaves.
 
 Birds sing more in the morning and less at dusk. Overcast, fog and rain thin out the life;
 rain adds hiss and drops. Every combination stays quiet (RMS 0.0004–0.12 before the bus
@@ -223,6 +239,9 @@ gain; tested).
 - `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_previews -- --ignored
   --nocapture` writes rpm sweeps (full load and no load, chase; full load, cockpit) and
   co-driver lines over a driving engine (and the voice alone).
+- `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_places -- --ignored
+  --nocapture` writes traffic passing an idling car (chase and cockpit) and the river, village
+  and forest ambience (20 s each).
 - `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_scenes -- --ignored
   --nocapture` renders twelve scripted scenes through the real car sim (`scenes.rs`):
   idle, full throttle through the gears, lift-off pops, a handbrake slide on gravel, a
@@ -263,7 +282,11 @@ Apple M-series, dev profile (game crate at opt-level 1):
   - the pitch follows rpm, on and off load, at the recorded rpms and between them: firing
     harmonics (rpm/30 × 1..6) beat those of an rpm 18 % off either way;
   - load and rpm make it louder;
-  - a lift pops; an upshift under power bangs; a downshift blips;
+  - pops (`pops.rs`): 2-6 per lift at 6000 rpm for keys and a 150 ms trigger lift in ≥ 90 %
+    of 50 seeds, 2-3 at 3500, none below 3200; upshift bangs ≥ 85 %; downshift crackles;
+    cancel, rate cap, misfires; levels +6..+10 / +11..+15 dB over the engine; no two pops of a
+    burst alike; cockpit darker with more sub; a bang adds ≤ 1 dB of gain reduction
+    (`stream.rs`); a downshift blips;
   - the limiter bounces;
   - every surface rolls and sliding is louder; mud is the darkest surface;
   - a damaged engine misfires (spread of the level per two firings ×1.5);
@@ -295,6 +318,13 @@ Apple M-series, dev profile (game crate at opt-level 1):
   ≤ 1, upshifts are detected, and the pitch tracker finds rpm/30 within 8 % in at least 80 %
   of the windows under load.
 
+Festival pass (stream D, 4 Nov): `render_scenes` mean 42.5 µs per block, worst block with
+pops 192 µs; scene 03 peak −4.5 dBFS, no clipped samples; lift and upshift pops reach 15-17 dB
+peak (10 ms) over the 50 ms RMS where the engine alone sits at 9.8 (median). Wind gains a
+6 kHz "air" band at `0.4 × SpeedFeel²` and keeps growing to ~220 km/h; the seal whistle
+follows `2.2 + 1.5 × SpeedFeel` kHz (`camera::speed_feel`, the value the FOV and blur use).
+`PopStats` (`scheduled`, `played`, `bangs`, `misfires`) is on the control port.
+
 ## Known limits
 
 - **Guide machine:** the guide has no `DrivenCar` and no `StageWorld`. `net_car_sound` copies
@@ -302,9 +332,10 @@ Apple M-series, dev profile (game crate at opt-level 1):
   into `audio::RemoteCarSound`, and the synth plays that: engine, pops and wind. There
   are no tyres, thumps or impacts, because the replicated state has no surface, slip or
   impacts. Ambience comes from `GuideStage.def`.
-- The car is 2D, centred on the listener. That is fine for the chase and bonnet cameras,
-  but there is no doppler or distance for a ghost or other cars (use engine 3D cues for
-  those).
+- The car is 2D, centred on the listener. That is fine for the chase and bonnet cameras.
+  Traffic has distance, pan and Doppler but no front/back cue or occlusion; ghosts are silent.
+- The rolling road noise and gravel stones stay out (removed on 2 Nov as tiring); turbo and
+  gear whine too (no CC0 recordings).
 - Not in engine bus meters: the engine's `sound.stats` peak meters don't include the rally
   stream. `RallyAudioStats` is the place to look.
 - The rally stream doesn't go through the engine reverb (no tunnels exist yet).
@@ -336,3 +367,67 @@ A "procedural voice" in `engine::sound` would let the rally synth run inside the
 A smaller step would be `SoundCtl::set_pitch(voice, ratio)` (like `set_volume`): the
 recorded layers could then be engine voices on the `car` bus. Until then they are played by
 `samples.rs` inside the rally stream.
+
+## Recorded sound effects from Openverse (`tools/audio/`)
+
+Real-world one-shots and ambience beds (crowds, air horn, radar shutter, money, town, church bell,
+birds, crickets, wind in pines, guard-rail scrapes) come from [Openverse](https://openverse.org)
+(mostly Freesound), CC0 / CC BY only, like every other asset.
+
+1. `python3 -I tools/audio/openverse_sounds.py --wishlist` downloads what `tools/audio/sfx_wishlist.json`
+   asks for (each pack: query, count, max length, where the game uses it) into
+   `assets_src/audio/openverse/<pack>/` (gitignored) with `credits.json` / `CREDITS.md` per pack.
+   One-off searches: `openverse_sounds.py "camera shutter" --pack radar_shutter -n 5 --dry-run`.
+   Defaults to licences allowing commercial use and modification, limited to CC0 / PDM / CC BY.
+   Standard library only; it falls back to the system certificate bundle when Python has none.
+2. `python3 -I tools/audio/cook_sfx.py` makes `assets/sounds/sfx/<pack>_<n>.ogg`: mono 48 kHz Vorbis,
+   silence trimmed, one-shots cut to the pack's `max_s` and normalised to -20 LUFS, ambience beds to
+   -26 LUFS and crossfaded (2 s, equal power) into seamless 30 s loops. It writes
+   `assets/sounds/sfx/index.json` (file → author, licence, source, use), the SFX block in
+   `assets/credits.txt` (CC BY lines are required) and the `audio/openverse` section of
+   `assets_src/SOURCES.md`. Needs ffmpeg and oggenc.
+
+Notes: the Openverse front blocks some words (any query with "outdoor" gets a 403 bot check);
+Freesound results carry no `category`, so don't filter on it. Listen to every new file before
+wiring it in: search results vary in quality. Packs with nothing usable today: service park,
+dog bark, car horn, gravel hits (search with other words, or synthesise).
+
+### Where they play (`src/audio/festival_recorded.rs`)
+
+| Sound | When | Bus, level |
+|---|---|---|
+| `start_crowd` | an event's countdown reaches 3 (races: `career::race_flow`; time trials and classic stages: `trial_cues`) | sfx −14 |
+| `air_horn` | GO, and at the finish; a win or a best adds a second horn | sfx −8 / −6 |
+| `finish_crowd` | the finish: applause (`_3`, −15), or a long cheer on a win / best (`_1`, `_2`, −8) | sfx |
+| `radar_shutter_2` | a Radar Post flash, 3D at the camera, under the synthesised readout chime | sfx −4 |
+| `money_1` | `MoneyEarned`, and a purchase (the wallet's `spent` grew) | hud −14 |
+| `church_bell_1` | on the hour, 07:00-21:00, 3D from the town square (heard to ~1.4 km) | sfx −2 |
+| `guardrail_scrape_1/2` | the car's side touching one of B's rails above 2 m/s, 3D at the contact | sfx −8 |
+| `car_horn_1-3` | traffic: at the car just shaved past (60 % of Close Shaves), or behind you when you sit blocking it for 2 s | sfx −6, 3D |
+| `dog_bark_1/2` | now and then (≈ 1 in 25 s) at a farm or outskirts house within 120 m | sfx −10, 3D |
+| `gravel_hit_1/2` | stones on the underbody on gravel / washouts above 30 km/h, more the faster | sfx −18 |
+| `service_park_1` | the Service Park hub (main menu, under the music), and in the world within ~120-300 m of home | ambience −16 / −8 |
+| beds | looping on `ambience`, weights crossfaded (τ 1.5 s): `town_ambience_2` in and around the Fernhollow core, `birds_morning_1` 05:00-11:00, `night_insects_1` by night, `wind_pines_1` above ~250 m (the pass, the plateau) | ambience −5 to −9 |
+
+The beds and driving one-shots load (AssetServer, decoded off-thread) on entering the game and are
+released on leaving it; money loads at startup (the Dealership). Not used after a check of level,
+spectrogram and title: `birds_morning_2` (rain), `night_insects_2` (a band), `town_ambience_1`
+(a snowstorm), `radar_shutter_1` (beeps), `radar_shutter_3` (a phone), `guardrail_scrape_3`
+(a tick), `wind_pines_2` (a step at the loop seam). Dev: `festival.beds`, `festival.voices`.
+
+## Music (menus and loading screen, `src/audio/music.rs`)
+
+Recorded music, picked by ear from Openverse and pinned by id in `tools/audio/sfx_wishlist.json`
+(`menu_music`: "Circuit Synthwave" by Doctor_Dreamchip CC0, "Free (rock instrumental)" by Starfish
+Stories CC BY 3.0, "Drive Clip" by BaDoink CC0; `loading_music`: "Drops" and "At The Edge Of Space (II)"
+by Andrewkn CC0, "Lofi Fusion Background Music" by Seth_Makes_Sounds CC0). `cook_sfx.py` cooks
+`"music": true` packs stereo and full length (-18 LUFS, 1 s fade in, 3 s fade out) into
+`assets/sounds/music/`.
+
+- Menus: a shuffled playlist, crossfading (2.5 s out / 2 s in) into the next song 4 s before the end.
+- Loading screen: a calmer song crossfades in. Driving: the music fades out over 2.5 s; the car and
+  the world's ambience take over. There's no music while driving, on purpose.
+- Played by the engine's `Music` on the `music` bus: Settings › Audio › Music (was hidden), ducked
+  by the pause snapshot. Only the playing song and the one fading in are decoded (~75-100 MB each,
+  stereo f32), and both are released after the fade-out into a drive.
+- `sound.stats` (dev control) shows the playing track and its position.

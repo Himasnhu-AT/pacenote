@@ -111,6 +111,9 @@ pub fn render(scene: &Scene, seed: u32) -> Rendered {
     let mut frac = 0.0f64;
     let (mut ns_sum, mut ns_max, mut blocks_n) = (0f64, 0f64, 0usize);
     let mut counts = [0u32; 3];
+    // Exhaust pops: the main-thread scheduler, as in the game (chase: a little right).
+    let mut sched = super::pops::PopScheduler::new(seed, crate::career::garage::PopProfile::Rally);
+    let mut pops = Vec::new();
     for i in 0..frames {
         let t = i as f32 * dt;
         let input = (scene.script)(t);
@@ -120,6 +123,12 @@ pub fn render(scene: &Scene, seed: u32) -> Rendered {
         let c = tr.detect(&car, &spec, dt, &mut frame);
         for k in 0..3 {
             counts[k] += c[k];
+        }
+        pops.clear();
+        let pin = super::pops::PopInput { active: true, throttle: input.throttle, rpm: car.rpm, redline: spec.redline, gear: car.gear, engine_damage: car.damage.engine };
+        sched.update(dt, &pin, &mut pops);
+        for p in &pops {
+            frame.push(super::car::CarEvent::Pop { intensity: p.intensity, kind: p.kind, seed: p.seed, pan: if scene.interior { 0.15 } else { 0.25 } });
         }
         synth.apply(&frame);
         frac += dt as f64 * 48_000.0;
@@ -413,4 +422,50 @@ fn render_previews() {
         s.render_into(((bank.duration(&u) + 0.5) * 48_000.0) as usize, &mut audio);
     }
     write_wav(&format!("{dir}/codriver_voice_only.wav"), &audio);
+}
+
+/// `PACENOTE_AUDIO_OUT=<dir> cargo test --lib audio::scenes::render_places -- --ignored
+/// --nocapture`: the player's car idling at a roadside (chase) while traffic passes both ways,
+/// then the same in the cockpit; and the ambience by a river and in a village.
+#[test]
+#[ignore]
+fn render_places() {
+    use super::ambience::AmbParams;
+    use super::car::CarParams;
+    use super::traffic::{OtherCar, TrafficParams};
+    let dir = std::env::var("PACENOTE_AUDIO_OUT").unwrap_or_else(|_| "/tmp".into());
+    std::fs::create_dir_all(&dir).unwrap();
+    let idle = |interior: f32| CarParams { active: true, rpm: 950.0, idle_rpm: 950.0, redline: 7600.0, gear: 1, interior, ..CarParams::default() };
+    for (name, interior) in [("traffic_chase", 0.0), ("traffic_cockpit", 1.0)] {
+        let mut s = RallySynth::new(5);
+        let mut audio = Vec::new();
+        // 16 s: one car passes left to right at 22 m/s 3 m away, then one the other way at
+        // 14 m/s 6 m away, overlapping.
+        for i in 0..16 * 60 {
+            let t = i as f32 / 60.0;
+            let mut cars = [OtherCar::default(); super::traffic::VOICES];
+            for (k, (t0, v, side, id)) in [(0.0f32, 22.0f32, 3.0f32, 1u32), (5.0, -14.0, 6.0, 2)].into_iter().enumerate() {
+                let x = (t - t0 - 5.0) * v; // passes at t0 + 5 s
+                let d = (x * x + side * side).sqrt();
+                if d < super::traffic::RANGE {
+                    let closing = -x / d.max(0.1) * v;
+                    cars[k] = OtherCar { active: true, id, dist: d, pan: (x / d.max(0.1)).clamp(-1.0, 1.0), speed: v.abs(), closing };
+                }
+            }
+            s.apply(&Frame { car: idle(interior), traffic: TrafficParams { cars, interior }, ..Frame::default() });
+            s.render_into(800, &mut audio);
+        }
+        write_wav(&format!("{dir}/{name}.wav"), &audio);
+        println!("{name}: {:.1} s", audio.len() as f32 / 96_000.0);
+    }
+    for (name, water, town) in [("amb_river", 1.0, 0.0), ("amb_village", 0.0, 1.0), ("amb_forest", 0.0, 0.0)] {
+        let mut s = RallySynth::new(9);
+        let mut audio = Vec::new();
+        for _ in 0..20 * 60 {
+            s.apply(&Frame { amb: AmbParams { active: true, water, town, ..AmbParams::default() }, ..Frame::default() });
+            s.render_into(800, &mut audio);
+        }
+        write_wav(&format!("{dir}/{name}.wav"), &audio);
+        println!("{name}: {:.1} s", audio.len() as f32 / 96_000.0);
+    }
 }

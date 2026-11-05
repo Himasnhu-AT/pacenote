@@ -223,7 +223,26 @@ pub enum Give {
     /// Brush (shrubs): the car drives through, slowed by `drag` (1/s: deceleration per m/s of
     /// speed with the shrub fully under the car).
     Brush { drag: f32 },
+    /// Another car (a rival or traffic), moving at (`vx`, `vz`) m/s in world xz. Solid, but the
+    /// hit is worked out from the speed between the two cars, so rubbing doors at 120 km/h is
+    /// a nudge, not a tree.
+    Car { vx: f32, vz: f32 },
 }
+
+impl Give {
+    /// Solid to drive into (a trunk, boulder or car): the AI steers round it, the camera stops
+    /// short of it.
+    pub fn is_solid(self) -> bool {
+        matches!(self, Give::Solid | Give::Car { .. })
+    }
+}
+
+/// Car-to-car contact: friction between the bodies (painted panels slide), bounce, and how
+/// much of the hit turns the car. A side touch pushes the car over more than it turns it, so
+/// a nudge doesn't spin the player (an arcade choice: the full lever arm spun cars on a touch).
+const CAR_MU: f32 = 0.12;
+const CAR_BOUNCE: f32 = 0.05;
+const CAR_YAW: f32 = 0.35;
 
 /// Flat ground of one surface (tests, the garage).
 pub struct Flat(pub f32, pub Surface);
@@ -303,7 +322,18 @@ pub struct Spec {
     pub abs: bool,
     /// What hits do (Settings > Driving > Damage).
     pub damage: DamageMode,
+    /// Tyre grip multiplier on every surface's μ (roster cars and the Tyres upgrade; 1.0 is
+    /// today's tyre). `meta::ghost::sim_hash` hashes it only when it isn't 1.0.
+    pub grip: f32,
+    /// Seconds an upshift cuts the drive ([`SHIFT_TIME`] today; the Gearbox upgrade shortens
+    /// it). A downshift takes 5/6 of it. Hashed only when it isn't the default.
+    pub shift_time: f32,
 }
+
+/// Today's upshift time (s): `Spec::shift_time`'s default.
+pub const SHIFT_TIME: f32 = 0.12;
+/// Today's downshift time (s), used as is while `shift_time` is the default (bit-exact).
+const DOWNSHIFT_TIME: f32 = 0.1;
 
 /// What hits do to the car (Settings > Driving > Damage). Part of the spec, so a ghost
 /// replays with the mode it was driven in.
@@ -391,6 +421,8 @@ impl Default for Spec {
             lsd: 60.0,
             abs: true,
             damage: DamageMode::Simulation,
+            grip: 1.0,
+            shift_time: SHIFT_TIME,
         }
     }
 }
@@ -778,6 +810,9 @@ pub fn tyre(s: Surface) -> Tyre {
         Surface::Ditch => t(0.5, 13.0, 0.18, 0.84, 1.0),
         // Tarmac with gravel on it: 82 % of tarmac's grip.
         Surface::Dusty => t(0.94, 8.0, 0.11, 0.8, 0.15),
+        // Wet tarmac: ~74 % of dry tarmac's grip, and it falls away harder past the peak
+        // (docs/festival/DECISIONS.md W6).
+        Surface::Wet => t(0.85, 7.5, 0.10, 0.72, 0.1),
     }
 }
 
@@ -858,11 +893,11 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         let pulling = input.throttle > 0.3 || road_rpm(car.gear) > spec.redline;
         if (road_rpm(car.gear) > spec.redline - 400.0 && pulling || limiter) && car.gear < 5 {
             car.gear += 1;
-            car.shifting = 0.12;
+            car.shifting = spec.shift_time;
             car.in_gear = 0.0;
         } else if car.gear > 1 && road_rpm(car.gear) < 3200.0 && road_rpm(car.gear - 1) < spec.redline - 1500.0 {
             car.gear -= 1;
-            car.shifting = 0.1;
+            car.shifting = if spec.shift_time == SHIFT_TIME { DOWNSHIFT_TIME } else { spec.shift_time * (5.0 / 6.0) };
             car.in_gear = 0.0;
         }
     }
@@ -983,7 +1018,7 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
         let ty = tyre(surf);
         let loose = ty.loose;
         // Bent suspension: the tyres don't sit square, less grip.
-        let mu = ty.mu * (1.0 - 0.25 * dmg.suspension);
+        let mu = ty.mu * spec.grip * (1.0 - 0.25 * dmg.suspension);
         // Load sensitivity: grip per newton drops with load (~8 % per extra static load).
         let fz = fs.min(14_000.0);
         let nominal = spec.mass * 9.81 * 0.25;
@@ -1159,7 +1194,8 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
             at(p, -vh * (spec.mass * drag * cover), &mut force, &mut torque, car.pos);
             continue;
         }
-        hits.push(Hit { p, n, depth, give: o.give, mu: 0.5, bounce: 0.2 });
+        let (mu, bounce) = if matches!(o.give, Give::Car { .. }) { (CAR_MU, CAR_BOUNCE) } else { (0.5, 0.2) };
+        hits.push(Hit { p, n, depth, give: o.give, mu, bounce });
     }
     // Walls: the footprint against the segment, in the body's frame like the cylinders.
     let cy = car.pos.y + (car.rot * spec.body_centre).y;
@@ -1221,7 +1257,12 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
     hits.sort_by(|a, b| b.depth.total_cmp(&a.depth));
     for Hit { p, n, depth, give, mu, bounce } in hits.into_iter().take(3) {
         let r = p - car.pos;
-        let vp = car.vel + car.ang.cross(r);
+        // Against another car: the speed between the two (its own motion taken off).
+        let (other, yaw) = match give {
+            Give::Car { vx, vz } => (Vec3::new(vx, 0.0, vz), CAR_YAW),
+            _ => (Vec3::ZERO, 1.0),
+        };
+        let vp = car.vel + car.ang.cross(r) - other;
         let vn = vp.dot(n);
         let rn = r.cross(n);
         let k = 1.0 / spec.mass + rn.dot(iw_inv * rn);
@@ -1250,7 +1291,7 @@ fn substep(car: &mut Car, spec: &Spec, input: Input, ground: &impl Ground, obsta
             let jt = (vt.length() / k).min(j * mu);
             let imp = n * j - vt.normalize_or_zero() * jt;
             car.vel += imp / spec.mass;
-            car.ang += iw_inv * r.cross(imp);
+            car.ang += iw_inv * r.cross(imp) * yaw;
         }
         car.pos += n * depth * 0.8;
     }

@@ -7,6 +7,11 @@
 //! An event's route is a chain of road pieces across junctions (`EventData::then`), so a stage
 //! can start on village tarmac, cross the valley on gravel and climb a forest track. Kinds:
 //! rallies (long, point to point), sprints (short), laps (once round a closed road).
+//!
+//! Rally and Sprint events run as a **Race** (5 rivals, a difficulty, a purse) or a **Time
+//! Trial** (solo, ghost, records); laps are Time Trials only (DECISIONS R1). In the marker:
+//! 1-4 pick the difficulty (Rookie .. Legend), Enter starts a Race, T a Time Trial, and
+//! holding still starts the mode used last ([`Choice`]).
 
 use std::sync::Arc;
 
@@ -14,6 +19,7 @@ use bevy::prelude::*;
 use engine::flow::AppState;
 
 use super::roads::{RoadKind, RoadNet};
+use crate::career::racers::{Difficulty, EventMode};
 use crate::drive::DrivenCar;
 use crate::stage::{self, Road, STEP};
 use crate::world::StageWorld;
@@ -359,6 +365,11 @@ pub struct Events(pub Vec<EventDef>);
 #[derive(Component)]
 struct Marker;
 
+/// The see-through start cylinder of a marker (hidden while an event runs: a race's grid
+/// stands in it).
+#[derive(Component)]
+struct StartCylinder;
+
 /// Free-roam state near markers: which one the car is in, and for how long it's been still
 /// (`meta::coach` shows the "stop here to start" prompt from it).
 #[derive(Resource, Default)]
@@ -367,11 +378,44 @@ pub struct Approach {
     pub still: f32,
 }
 
+/// How the next event starts: Race (at a difficulty) or Time Trial. Starts as the mode used
+/// last (kept in the career save); 1-4 / Enter / T in a marker change it. E's marker pill
+/// shows it.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Choice {
+    pub race: bool,
+    pub difficulty: Difficulty,
+}
+
+impl Default for Choice {
+    fn default() -> Self {
+        Choice { race: true, difficulty: Difficulty::Pro }
+    }
+}
+
+impl Choice {
+    /// The mode for an event of `kind` (laps are always Time Trials).
+    pub fn mode_for(&self, kind: EventKind) -> EventMode {
+        if self.race && kind != EventKind::Lap { EventMode::Race(self.difficulty) } else { EventMode::TimeTrial }
+    }
+}
+
+/// The mode the running event was started in (`TimeTrial` in free roam).
+pub fn running_mode(world: &World) -> EventMode {
+    match world.get_resource::<crate::career::racers::RaceField>() {
+        Some(f) => EventMode::Race(f.difficulty),
+        None => EventMode::TimeTrial,
+    }
+}
+
 pub struct EventsPlugin;
 
 impl Plugin for EventsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Approach>().add_systems(Update, (setup, approach).chain().run_if(resource_exists::<StageWorld>));
+        app.init_resource::<Approach>()
+            .init_resource::<Choice>()
+            .add_systems(Update, (setup, approach, hide_markers_in_events).chain().run_if(resource_exists::<StageWorld>))
+            .add_systems(Update, choice_from_save.run_if(resource_changed::<crate::career::save::CareerProgress>));
         #[cfg(feature = "dev")]
         dev::register(app);
     }
@@ -388,11 +432,20 @@ mod dev {
             let ev = w.get_resource::<super::Events>().ok_or("no open world loaded")?;
             Ok(json!(ev.0.iter().map(|e| json!({"id": e.id, "name": e.name, "kind": e.kind.label(), "km": e.route.length() / 1000.0, "start": [e.route.pts[0].x, e.route.pts[0].z]})).collect::<Vec<_>>()))
         })
-        .add_control_command("events.start", "Start an open-world event now (as if stopped in its marker)", params(&[("id", "integer", "event id (events.list)")]), |w, p: Value| {
-            let id = p.get("id").and_then(Value::as_u64).ok_or("`id` is required")? as u32;
-            super::start(w, id);
-            Ok(json!({"started": id}))
-        })
+        .add_control_command(
+            "events.start",
+            "Start an open-world event now (as if stopped in its marker): a Time Trial, or a Race with `race`",
+            params(&[("id", "integer", "event id (events.list)"), ("race", "string", "rookie | pro | ace | legend (omit: Time Trial)")]),
+            |w, p: Value| {
+                let id = p.get("id").and_then(Value::as_u64).ok_or("`id` is required")? as u32;
+                let mode = match p.get("race").and_then(Value::as_str) {
+                    None => super::EventMode::TimeTrial,
+                    Some(d) => super::EventMode::Race(super::Difficulty::ALL.into_iter().find(|x| x.label().eq_ignore_ascii_case(d)).ok_or("race: rookie | pro | ace | legend")?),
+                };
+                let ok = super::start_as(w, id, mode);
+                Ok(json!({"started": ok.then_some(id), "mode": format!("{mode:?}")}))
+            },
+        )
         .add_control_command("open.tour", "Measuring drive: town street, east country road, 1 km of ring as the road (pair with autopilot.set {on: true})", params(&[]), |w, _| {
             let len = super::super::tour::start(w)?;
             Ok(json!({"tour_m": len}))
@@ -506,6 +559,7 @@ fn setup(world: &mut World) {
             world.spawn((
                 Name::new(format!("event marker: {}", e.name)),
                 Marker,
+                StartCylinder,
                 engine::level::GeneratedBy("pacenote::events"),
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat),
@@ -545,29 +599,102 @@ fn approach(world: &mut World) {
                 return;
             }
             a.still = if speed < 1.5 { a.still + dt } else { 0.0 };
-            if a.still > 0.6 {
-                a.still = f32::MIN;
-                start(world, id);
+            let still = a.still;
+            // 1-4: difficulty; Enter: Race now; T: Time Trial now (when stopped).
+            let keys = world.get_resource::<ButtonInput<KeyCode>>().map(|k| {
+                let d = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4].iter().position(|c| k.just_pressed(*c));
+                (d, k.just_pressed(KeyCode::Enter) || k.just_pressed(KeyCode::NumpadEnter), k.just_pressed(KeyCode::KeyT))
+            });
+            let mut go = still > 0.6;
+            if let Some((d, race, trial)) = keys {
+                let mut c = *world.resource::<Choice>();
+                if let Some(d) = d {
+                    c = Choice { race: true, difficulty: Difficulty::from_index(d as u8) };
+                }
+                if race || trial {
+                    c.race = race;
+                    go |= speed < 1.5;
+                }
+                if c != *world.resource::<Choice>() {
+                    world.insert_resource(c);
+                }
+            }
+            if go {
+                world.resource_mut::<Approach>().still = f32::MIN;
+                let kind = world.resource::<Events>().0.iter().find(|e| e.id == id).map_or(EventKind::Lap, |e| e.kind);
+                let mode = world.resource::<Choice>().mode_for(kind);
+                start_as(world, id, mode);
             }
         }
     }
 }
 
-/// Starts event `id`: its route becomes the stage's road, the car goes to its start line with
-/// a countdown; `meta` picks up the new route (records, ghost) next frame.
+fn hide_markers_in_events(stage: Res<StageWorld>, mut q: Query<&mut Visibility, With<StartCylinder>>) {
+    let want = if stage.event.is_some() { Visibility::Hidden } else { Visibility::Inherited };
+    for mut v in &mut q {
+        v.set_if_neq(want);
+    }
+}
+
+/// The marker's default mode comes back from the career save.
+fn choice_from_save(p: Res<crate::career::save::CareerProgress>, mut c: ResMut<Choice>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    *done = true;
+    let want = Choice { race: p.last_mode != "trial", difficulty: Difficulty::from_index(p.last_difficulty) };
+    if *c != want {
+        *c = want;
+    }
+}
+
+/// Makes `e`'s route the stage's road (corners with the level's grades, crests) and marks the
+/// event as running. Pure (tests drive events headless with it).
+pub fn on_route(s: &mut StageWorld, e: &EventDef) {
+    let open = s.open.clone();
+    let mut corners = stage::corners(&e.route);
+    if let Some(o) = &open {
+        o.data.apply_grades(e, &o.net, &mut corners);
+    }
+    s.corners = Arc::new(corners);
+    s.crests = Arc::new(stage::crests(&e.route));
+    s.road = e.route.clone();
+    s.event = Some(EventRef { id: e.id, name: e.name.clone() });
+}
+
+/// Starts event `id` as a Time Trial (see [`start_as`]).
 pub fn start(world: &mut World, id: u32) {
-    let Some(e) = world.get_resource::<Events>().and_then(|ev| ev.0.iter().find(|e| e.id == id).cloned()) else { return };
+    start_as(world, id, EventMode::TimeTrial);
+}
+
+/// Starts event `id` in `mode`: its route becomes the stage's road, the car goes to its start
+/// line (a Race: its grid slot) with a countdown; `meta` picks up the new route (records,
+/// ghost) next frame. A Race whose entry fee the wallet can't cover is refused (false).
+pub fn start_as(world: &mut World, id: u32, mode: EventMode) -> bool {
+    let Some(e) = world.get_resource::<Events>().and_then(|ev| ev.0.iter().find(|e| e.id == id).cloned()) else { return false };
+    let mode = if e.kind == EventKind::Lap { EventMode::TimeTrial } else { mode };
+    if let EventMode::Race(d) = mode {
+        let fee = crate::career::economy::entry_fee(crate::career::economy::purse(e.route.length() / 1000.0), d);
+        let have = world.get_resource::<crate::career::wallet::Wallet>().map_or(0, |w| w.balance);
+        if have < fee {
+            world.write_message(engine::ui::prelude::Toast::new("Not enough Notes").body(format!("The {} entry fee is {} N", d.label(), crate::career::notes(fee))));
+            return false;
+        }
+    }
+    crate::career::race_flow::end(world);
+    if let Some(mut p) = world.get_resource_mut::<crate::career::save::CareerProgress>() {
+        let (m, d) = match mode {
+            EventMode::Race(d) => ("race", d.index()),
+            EventMode::TimeTrial => ("trial", p.last_difficulty),
+        };
+        if e.kind != EventKind::Lap && (p.last_mode != m || p.last_difficulty != d) {
+            p.last_mode = m.into();
+            p.last_difficulty = d;
+        }
+    }
     {
         let mut s = world.resource_mut::<StageWorld>();
-        let open = s.open.clone();
-        let mut corners = stage::corners(&e.route);
-        if let Some(o) = &open {
-            o.data.apply_grades(&e, &o.net, &mut corners);
-        }
-        s.corners = Arc::new(corners);
-        s.crests = Arc::new(stage::crests(&e.route));
-        s.road = e.route.clone();
-        s.event = Some(EventRef { id: e.id, name: e.name.clone() });
+        on_route(&mut s, &e);
     }
     // Events run without traffic (clean racing; ghosts replay exactly).
     world.remove_resource::<super::traffic::Traffic>();
@@ -576,10 +703,14 @@ pub fn start(world: &mut World, id: u32) {
     {
         v.clear();
     }
-    info!("event {} \"{}\": {:.1} km", e.id, e.name, e.route.length() / 1000.0);
+    info!("event {} \"{}\": {:.1} km, {mode:?}", e.id, e.name, e.route.length() / 1000.0);
     tape(world, &e);
+    if let EventMode::Race(d) = mode {
+        crate::career::race_flow::begin(world, d);
+    }
     world.remove_resource::<crate::meta::StageNow>();
     crate::meta::restart_stage(world);
+    true
 }
 
 /// Red and white tape across a junction's branches the route doesn't take.
@@ -667,6 +798,7 @@ fn tape(world: &mut World, e: &EventDef) {
 
 /// Back to free roam where the car is (after the results, or abandoning the event).
 pub fn leave(world: &mut World) {
+    crate::career::race_flow::end(world);
     let Some(mut s) = world.get_resource_mut::<StageWorld>() else { return };
     if s.event.is_none() {
         return;

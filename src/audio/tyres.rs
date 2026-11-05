@@ -89,10 +89,7 @@ impl Tyres {
 
     #[inline]
     pub fn sample(&mut self, p: &CarParams, speed: f32, bank: Option<&Bank>) -> TyreOut {
-        let mut slide = [0.0f32; SURFACES];
-        for i in 0..SURFACES {
-            slide[i] = self.slide[i].next(p.surfaces[i].slide);
-        }
+        let slide: [f32; SURFACES] = std::array::from_fn(|i| self.slide[i].next(p.surfaces[i].slide));
         // A car crawling sideways barely makes a sound.
         let moving = smoothstep(1.0, 6.0, speed);
         let (mut l, mut r) = (0.0, 0.0);

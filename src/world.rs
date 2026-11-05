@@ -37,6 +37,12 @@ pub enum PropKind {
     Sapling,
     /// A bush the car drives through.
     Shrub,
+    /// Open-world roadside furniture (`open::furniture`, drawn by `art::signs`): a reflector
+    /// post, a km stone, a chevron board on its pole. `seed` is the index in
+    /// `Furniture::signs`.
+    Reflector,
+    KmStone,
+    RoadSign,
 }
 
 impl PropKind {
@@ -47,13 +53,16 @@ impl PropKind {
             PropKind::Sign => (0.09, 2.0),
             PropKind::Sapling => (0.3, 11.0),
             PropKind::Shrub => (0.85, 1.1),
+            PropKind::Reflector => (0.07, 1.0),
+            PropKind::KmStone => (0.14, 0.8),
+            PropKind::RoadSign => (0.05, 2.7),
         }
     }
 
     /// Least distance (m) from the road's edge to its centre.
     pub fn clearance(self) -> f32 {
         match self {
-            PropKind::Post | PropKind::Sign => 0.8,
+            PropKind::Post | PropKind::Sign | PropKind::Reflector | PropKind::KmStone | PropKind::RoadSign => 0.8,
             PropKind::Sapling => 2.0,
             PropKind::Shrub => 0.6,
         }
@@ -68,6 +77,9 @@ impl PropKind {
             // ~50–110 kg of green wood.
             PropKind::Sapling => Give::Breaks { id, mass: 250.0 * scale, speed: 3.0 },
             PropKind::Shrub => Give::Brush { drag: 0.15 * scale },
+            PropKind::Reflector => Give::Breaks { id, mass: 6.0, speed: 1.0 },
+            PropKind::KmStone => Give::Breaks { id, mass: 40.0, speed: 2.5 },
+            PropKind::RoadSign => Give::Breaks { id, mass: 20.0, speed: 2.0 },
         }
     }
 }
@@ -92,6 +104,9 @@ pub struct StageWorld {
     pub event: Option<crate::open::events::EventRef>,
     /// The open world's trunks and boulders, everywhere (built by tile, `open::forest`).
     pub forest: Option<Arc<crate::open::forest::ForestSolids>>,
+    /// The rivals' cars in a Race run (`career::racers`, stream F): solid for the player.
+    /// `None` outside races.
+    pub racers: Option<Arc<crate::career::racers::RacerSolids>>,
 }
 
 const OBS_CELL: f32 = 8.0;
@@ -154,7 +169,7 @@ impl Ground for StageWorld {
     }
     fn surface(&self, x: f32, z: f32) -> Surface {
         match &self.open {
-            Some(o) => crate::open::roads::surface(&o.net, x, z),
+            Some(o) => o.surface_at(x, z),
             None => stage::surface_at(x, z, &self.road),
         }
     }
@@ -177,6 +192,10 @@ impl Ground for StageWorld {
             if self.event.is_none() && o.traffic_solid.load(std::sync::atomic::Ordering::Relaxed) {
                 o.traffic.obstacles(p, r, out);
             }
+        }
+        // Rivals, in Race runs only (never in Time Trials, so ghosts replay exactly).
+        if let Some(racers) = &self.racers {
+            racers.obstacles(p, r, out);
         }
     }
     fn walls(&self, p: Vec2, r: f32, out: &mut Vec<Wall>) {
@@ -210,6 +229,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
         open: None,
         event: None,
         forest: None,
+        racers: None,
     };
     // Collision for the car: the same points the dressing spawns, evaluated in a band along
     // the road (the trees far away can't be reached).
@@ -285,27 +305,39 @@ fn generate_open(def: &StageDef) -> StageWorld {
         open: Some(Arc::new(open)),
         event: None,
         forest: None,
+        racers: None,
     };
     let (graph, inputs) = dressing(&world);
-    let net = world.open.as_ref().unwrap().net.clone();
-    // Every trunk and boulder is solid (the car can leave the roads). The tiles a road passes
-    // through (and their neighbours) are built now, on all cores; the rest around the car as
-    // it drives (`open::forest`).
+    // Every trunk and boulder is solid (the car can leave the roads). Only the tiles around
+    // the spawn are built now; the rest as the car (or a racer, a check) gets near them
+    // (`open::forest`: prefetch around the car, built on demand otherwise). Building every
+    // tile along every road here took 5-10 s of the load and ~300 MB at its peak
+    // (docs/festival/PERF_REPORT.md).
     let o = world.open.as_ref().unwrap();
     let forest = crate::open::forest::ForestSolids::with_overrides(graph, inputs, &o.trees, &o.dressing);
-    let mut tiles: Vec<(i32, i32)> = net
-        .roads
-        .iter()
-        .flat_map(|r| r.road.pts.iter().step_by(16))
-        .flat_map(|p| {
-            let (tx, tz) = crate::open::forest::ForestSolids::tile_of(Vec2::new(p.x, p.z));
-            (-1..=1).flat_map(move |dz| (-1..=1).map(move |dx| (tx + dx, tz + dz)))
-        })
-        .collect();
-    tiles.sort_unstable();
-    tiles.dedup();
+    let (sx, sz) = crate::open::forest::ForestSolids::tile_of(Vec2::new(start.x, start.z));
+    let tiles: Vec<(i32, i32)> = (-3..=3).flat_map(|dz| (-3..=3).map(move |dx| (sx + dx, sz + dz))).filter(|&t| crate::open::forest::ForestSolids::in_world(t)).collect();
     forest.fill(&tiles);
     world.forest = Some(Arc::new(forest));
+    // Posts and chevrons the car knocks down (`open::furniture::breakable`): props, in the furniture's own (fixed) order, so ids are the same everywhere.
+    let mut grid: HashMap<(i32, i32), Vec<Obstacle>> = HashMap::new();
+    let mut props = Vec::new();
+    for (k, s) in o.furniture.signs.iter().enumerate() {
+        use crate::open::furniture::SignKind;
+        let kind = match s.kind {
+            SignKind::Reflector => PropKind::Reflector,
+            SignKind::KmPost(_) => PropKind::KmStone,
+            k if crate::open::furniture::breakable(k) => PropKind::RoadSign,
+            _ => continue,
+        };
+        let id = props.len() as u32;
+        let (r, h) = kind.size();
+        let c = Vec2::new(s.pos.x, s.pos.z);
+        grid.entry(((c.x / OBS_CELL).floor() as i32, (c.y / OBS_CELL).floor() as i32)).or_default().push(Obstacle { pos: c, radius: r, top: s.pos.y + h, give: kind.give(id, 1.0) });
+        props.push(Prop { id, kind, pos: s.pos, yaw: s.yaw, scale: 1.0, seed: k as u64 });
+    }
+    world.obstacles = Arc::new(grid);
+    world.props = Arc::new(props);
     world
 }
 
@@ -361,15 +393,38 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
             rects.push(Rect { center: Vec2::new(mid.x, mid.z), half: Vec2::new(road.width[i] * 0.5, d.length() * 0.5 + 1.0), yaw: libm::atan2f(d.x, d.y), y: mid.y, tag: "road".into() });
         }
     }
-    // The open world's village and service park: no forest, rocks or bushes (gardens go there);
-    // none through any building either.
+    // Fernhollow: nothing grows on its sidewalks, the square or the car park, nor against a
+    // building (the back yards keep a few garden trees: the valley's scattered field trees);
+    // the service park stays clear; houses out in the country keep a garden.
     if let Some(o) = &w.open {
-        let pl = o.net.places();
-        for c in [pl.village, pl.park] {
-            rects.push(Rect { center: c, half: Vec2::splat(crate::open::buildings::VILLAGE_R * 0.7), yaw: 0.0, y: o.net.town_y, tag: "road".into() });
+        use crate::open::buildings::{LotKind, SIDEWALK, Use};
+        let road = |center: Vec2, half: Vec2, yaw: f32| Rect { center, half, yaw, y: o.net.town_y, tag: "road".into() };
+        for blk in o.buildings.blocks.iter().filter(|b| b.cell.is_some()) {
+            let (lo, hi) = (blk.min - Vec2::splat(SIDEWALK + 0.5), blk.max + Vec2::splat(SIDEWALK + 0.5));
+            if matches!(blk.kind, LotKind::Plaza | LotKind::Parking) {
+                rects.push(road((lo + hi) * 0.5, (hi - lo) * 0.5, 0.0));
+                continue;
+            }
+            // The sidewalk and the row of buildings behind it (22 m: the deepest unit and its
+            // setback), round the block; the yard in the middle keeps a few trees. (One rect per
+            // edge, not one per building: the tree graph checks every rect.)
+            let strip = SIDEWALK + 0.5 + 22.0;
+            let c = (lo + hi) * 0.5;
+            let h = (hi - lo) * 0.5;
+            rects.push(road(Vec2::new(c.x, lo.y + strip * 0.5), Vec2::new(h.x, strip * 0.5), 0.0));
+            rects.push(road(Vec2::new(c.x, hi.y - strip * 0.5), Vec2::new(h.x, strip * 0.5), 0.0));
+            rects.push(road(Vec2::new(lo.x + strip * 0.5, c.y), Vec2::new(strip * 0.5, h.y), 0.0));
+            rects.push(road(Vec2::new(hi.x - strip * 0.5, c.y), Vec2::new(strip * 0.5, h.y), 0.0));
         }
-        for b in &o.buildings.buildings {
-            rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(4.0), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
+        rects.push(road(o.net.places().park, Vec2::splat(150.0), 0.0));
+        // Nothing grows in the river (`art::water` lays the water in its bed).
+        let hf = &w.heights;
+        for (c, h, yaw) in crate::art::water::channel(&o.net.land.river, |x, z| hf.height_at(x, z)) {
+            rects.push(Rect { center: c, half: h, yaw, y: hf.height_at(c.x, c.y), tag: "road".into() });
+        }
+        for b in o.buildings.buildings.iter().filter(|b| !crate::open::town::in_core(b.centre) || b.use_ == Use::Civic) {
+            let garden = if b.use_ == Use::House { 7.0 } else { 3.0 };
+            rects.push(Rect { center: b.centre, half: b.half + Vec2::splat(garden), yaw: libm::atan2f(b.axis.y, b.axis.x), y: 0.0, tag: "road".into() });
         }
     }
     // The open world's ecology (`open::ecology`): above the treeline, valley fields, clear-cuts.
@@ -377,9 +432,45 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         Some(o) => crate::open::ecology::masks(&o.net),
         None => (Vec::new(), Vec::new(), Vec::new()),
     };
+    // Fernhollow's back yards (each block's middle, behind its rows) get garden trees, and the
+    // market square a row of trees along each long side.
+    let (mut gardens, mut planted) = (Vec::new(), pcg_core::PointSet::default());
+    if let Some(o) = &w.open {
+        use crate::open::buildings::LotKind;
+        for blk in o.buildings.blocks.iter().filter(|b| b.cell.is_some()) {
+            match blk.kind {
+                LotKind::Rows(_) => {
+                    let (lo, hi) = (blk.min + Vec2::splat(22.0), blk.max - Vec2::splat(22.0));
+                    if hi.x - lo.x > 4.0 && hi.y - lo.y > 4.0 {
+                        gardens.push(Rect::new((lo + hi) * 0.5, (hi - lo) * 0.5));
+                    }
+                }
+                LotKind::Plaza => {
+                    let mut plant = |p: Vec2| planted.push(pcg_core::Point { pos: Vec3::new(p.x, w.heights.height_at(p.x, p.y), p.y), seed: pcg_core::mix64(w.def.seed ^ (p.x.to_bits() as u64) << 32 ^ p.y.to_bits() as u64), ..Default::default() });
+                    // Rows round the edge, 10 m apart, 3 m in.
+                    let (lo, hi) = (blk.min + Vec2::splat(3.0), blk.max - Vec2::splat(3.0));
+                    let mut z = lo.y;
+                    while z <= hi.y + 0.1 {
+                        plant(Vec2::new(lo.x, z));
+                        plant(Vec2::new(hi.x, z));
+                        z += 10.0;
+                    }
+                    let mut x = lo.x + 10.0;
+                    while x < hi.x - 5.0 {
+                        plant(Vec2::new(x, lo.y));
+                        plant(Vec2::new(x, hi.y));
+                        x += 10.0;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     let hf = &w.heights;
     let inputs = Inputs::default()
         .rects("area", vec![Rect::new(Vec2::ZERO, Vec2::splat(half - 4.0))])
+        .rects("gardens", gardens)
+        .points("planted", planted)
         .rects("road", rects)
         .rects("alpine", alpine)
         .rects("fields", fields)
@@ -420,7 +511,8 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .node("clearcut", Op::Input { name: "clearcut".into() }, &[])
         .node("trees_low", Op::Difference { against: "alpine".into(), pad: 0.0 }, &["trees_clear"])
         .node("trees_wood", Op::Difference { against: "fields".into(), pad: 0.0 }, &["trees_low"])
-        .node("trees_kept", Op::Difference { against: "clearcut".into(), pad: 0.0 }, &["trees_wood"])
+        .node("trees_cut", Op::Difference { against: "clearcut".into(), pad: 0.0 }, &["trees_wood"])
+        .node("trees_kept", Op::Difference { against: "gardens".into(), pad: 0.0 }, &["trees_cut"])
         .node("trees_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.75, 1.35), jitter: 0.0 }, &["trees_kept"])
         // Stunted trees, few, above the treeline; single trees out on the fields.
         .node("alp_pts", Op::PoissonSample { radius: 24.0 }, &["area"])
@@ -433,7 +525,15 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         .node("field_keep", Op::Keep { fraction: 0.4 }, &["field_in"])
         .node("field_clear", Op::Difference { against: "road".into(), pad: 6.0 }, &["field_keep"])
         .node("field_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.8, 1.25), jitter: 0.0 }, &["field_clear"])
-        .node("trees_all", Op::Union, &["trees_tf", "alp_tf", "field_tf"])
+        // Garden trees (smaller, a few to each yard), and the square's planted rows.
+        .node("gardens", Op::Input { name: "gardens".into() }, &[])
+        .node("garden_pts", Op::PoissonSample { radius: 9.0 }, &["gardens"])
+        .node("garden_keep", Op::Keep { fraction: 0.75 }, &["garden_pts"])
+        .node("garden_clear", Op::Difference { against: "road".into(), pad: 2.0 }, &["garden_keep"])
+        .node("garden_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.55, 0.9), jitter: 0.0 }, &["garden_clear"])
+        .node("planted", Op::Input { name: "planted".into() }, &[])
+        .node("planted_tf", Op::Transform { offset: Vec3::ZERO, yaw: (0.0, 360.0), scale: (0.7, 0.8), jitter: 0.0 }, &["planted"])
+        .node("trees_all", Op::Union, &["trees_tf", "alp_tf", "field_tf", "garden_tf", "planted_tf"])
         .node("trees_on", Op::Project { offset: -0.1, align: false }, &["trees_all"])
         .node("trunks", Op::Emit { port: "trunks".into() }, &["trees_on"])
         // Boulders and rocks.
@@ -498,7 +598,7 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
 pub fn tree_graph(w: &StageWorld) -> (Graph, Inputs) {
     let (full, inputs) = dressing(w);
     let keep = [
-        "area", "road", "tree_pts", "forest", "trees_in", "trees_clear", "alpine", "fields", "clearcut", "trees_low", "trees_wood", "trees_kept", "trees_tf", "alp_pts", "alp_in", "alp_keep", "alp_clear", "alp_tf", "field_pts", "field_in", "field_keep", "field_clear", "field_tf", "trees_all", "trees_on", "trunks",
+        "area", "road", "tree_pts", "forest", "trees_in", "trees_clear", "alpine", "fields", "clearcut", "trees_low", "trees_wood", "trees_cut", "gardens", "trees_kept", "trees_tf", "garden_pts", "garden_keep", "garden_clear", "garden_tf", "planted", "planted_tf", "alp_pts", "alp_in", "alp_keep", "alp_clear", "alp_tf", "field_pts", "field_in", "field_keep", "field_clear", "field_tf", "trees_all", "trees_on", "trunks",
     ];
     let mut g = full;
     g.nodes.retain(|n| keep.contains(&n.id.as_str()));
@@ -513,7 +613,9 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
         terrain: engine::world::desc::TerrainDesc {
             size: [2.0 * half, 2.0 * half],
             spacing: stage::SPACING,
-            chunk_quads: 64,
+            // The open world's horizon is ~4 km away: 256 m chunks (128 quads) keep its draws
+            // under the Low budget (docs/festival/PERF_REPORT.md action 1); stages keep 128 m.
+            chunk_quads: if s.open.is_some() { 128 } else { 64 },
             origin: Some([-half, -half]),
             layers: crate::art::ground::layers(s.def.biome, crate::art::wet(&s.def)),
             ..default()
@@ -527,8 +629,20 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     if let Err(e) = engine::world::desc::spawn_world_with(world, desc, Some((*s.heights).clone())) {
         error!("terrain: {e}");
     }
+    if s.open.is_some() {
+        // Big chunks: allow LOD from 128 m (not the 256 m chunk size), so GPU cost stays flat.
+        // Low: LOD from 64 m and a 4 px error (the mountain view was over 10 ms GPU p95).
+        let low = world.get_resource::<engine::settings::CoreSettings>().is_some_and(|c| c.quality.index() == 0);
+        if let Some(mut ws) = world.get_resource_mut::<engine::world::WorldSettings>() {
+            ws.terrain.lod_distance = if low { 64.0 } else { 128.0 };
+            if low {
+                ws.terrain.pixel_error = 4.0;
+            }
+        }
+    }
     crate::art::spawn_stage(world, s);
     if let Some(o) = &s.open {
+        crate::art::terrain::spawn_horizon(world, &o.heights, crate::open::roads::HALF, o.net.seed);
         crate::art::roadside::spawn(world, o);
         let hf = o.heights.clone();
         for e in crate::open::buildings::spawn(world, &o.buildings, &move |x, z| hf.height_at(x, z)) {
@@ -536,6 +650,7 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
                 e.insert(crate::open::live::LiveBuilding);
             }
         }
+        spawn_parked(world, o);
         // Traffic shares its solids with the car's ground (the same Arc).
         world.insert_resource(o.traffic.clone());
         if crate::art::visual(world) {
@@ -543,6 +658,39 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
         }
     }
     world.insert_resource(s.clone());
+}
+
+/// Fernhollow's parked cars (`open::town::parked`; solid as walls in `OpenWorld`): traffic car
+/// bodies standing still, in four looks only (two shapes, two paints) so their parts batch
+/// into ~10 draws. Nothing in headless runs.
+fn spawn_parked(world: &mut World, o: &crate::open::OpenWorld) {
+    use crate::art::traffic_car::{TrafficArt, shape_of, spawn_parts};
+    if !crate::art::visual(world) {
+        return;
+    }
+    if !world.contains_resource::<TrafficArt>() {
+        let art = world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| TrafficArt::new(&mut meshes, &mut world.resource_mut::<Assets<StandardMaterial>>()));
+        world.insert_resource(art);
+    }
+    // A car id per look: shapes 0 and 1, the solid paint (id bit 3 clear).
+    let id_for = |shape: usize| (1u32..10_000).find(|&id| shape_of(id) == shape && (id >> 3) & 1 == 0).unwrap_or(1);
+    let looks = [(id_for(0), 1u8), (id_for(0), 4), (id_for(1), 1), (id_for(1), 4)];
+    let parking: Vec<(Vec2, Vec2)> = o.buildings.blocks.iter().filter(|b| b.kind == crate::open::buildings::LotKind::Parking && b.cell.is_some()).map(|b| (b.min, b.max)).collect();
+    let cars = crate::open::town::parked(&o.net, &o.buildings);
+    world.resource_scope(|world, art: Mut<TrafficArt>| {
+        let mut commands = world.commands();
+        for c in &cars {
+            let in_lot = parking.iter().any(|(lo, hi)| c.pos.cmpge(*lo).all() && c.pos.cmple(*hi).all());
+            // On the car park's paving, or up on the sidewalk.
+            let y = o.heights.height_at(c.pos.x, c.pos.y) + if in_lot { 0.04 } else { crate::open::junctions::SIDEWALK_TOP };
+            let (id, paint) = looks[c.look as usize % 4];
+            let at = Transform::from_translation(Vec3::new(c.pos.x, y, c.pos.y)).looking_to(Vec3::new(c.dir.x, 0.0, c.dir.y), Vec3::Y);
+            commands
+                .spawn((Name::new("parked car"), at, Visibility::default(), engine::render_budget::Scenery, crate::open::live::LiveBuilding, engine::level::GeneratedBy("pacenote::town (parked cars)")))
+                .with_children(|p| spawn_parts(p, &art, id, paint));
+        }
+    });
+    world.flush();
 }
 
 #[cfg(test)]

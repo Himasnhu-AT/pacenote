@@ -60,7 +60,7 @@ What the level holds (`src/open/level.rs`):
 | `road N (kind)` | `Spline`, `RoadSpline { kind, speed_kmh }` (kinds `Street`, `BRoad`, `Gravel`, `Forest`) | a road. Control points where needed (every station within 10 cm sideways, 3 cm in height of the curve); `tags` = surface + kind (`data::tags`), `bank` = roll in radians. Loading samples it every 2 m. Roads are numbered in stable-id order (events and grades use the number). |
 | `open world` | `WorldDoc { data, terrain }` | seed, town height, time of day, events (road, start/finish station), town lots; the terrain folder |
 | `home`, `event start: …`, grade notes | `HomePoint`, `EventStart`, `GradeNote` | the placeables (`placeable.rs`): moved in the editor, snapped to the road on load |
-| `house 12`, `shop 40`, … | `Building` | one building each (110): kind, size, floors, storey height, roof, colours; its Transform places it. The game builds its mesh as a child |
+| `house 12`, `terrace 40`, … | `Building` | one building each (654): kind, size, floors, storey height, roof, colours; its Transform places it. In play the town draws as merged tiles (`buildings::BuildingTile`); in the editor the game builds each one's mesh as a child |
 | `Trees`, `Dressing` | `Foliage`, `PcgOverrides`, `PcgFollowTerrain` | hand edits of the trees and of the rocks / bushes; the game puts the `PcgVolume` on them |
 
 Edit it with the game's own binary: `cargo run -- --editor --level assets/levels/open.level.ron`
@@ -91,6 +91,37 @@ map: eroded land with a river valley, escarpment, basin and plateau, roads plann
 an anisotropic A* (switchbacks, 8-10 m hairpins, rally widths), a valley village and service
 park, traffic on the tarmac only. See `docs/RALLY_MAP.md` (plan, checklist) and section 4 of
 `docs/GAME_OVERVIEW.md` (the map as it is).
+
+## Roadside furniture and road conditions (festival, stream B)
+
+`open::furniture` places them at load from whatever roads and heights the level has (pure,
+seeded, tested; `furniture::REV` goes into each event's board hash). The car feels them through
+three hooks in `OpenWorld`: `dip` (potholes, washout corrugation) in `ground_height`,
+`surface_override` (wet tarmac, mud, washouts as loose gravel, shaded ice as snow) in
+`surface_at`, and `walls` (guard rails, stone blocks, street-light stubs) in the wall grid.
+
+- **Guard rails** where the ground 8 m past the edge is over 3.5 m below it: on the outside of
+  tarmac corners up to grade 4 (any grade above 250 m), at gravel and forest hairpins, and
+  anywhere it drops over 9 m (WORLD_PASS said 3 m / 6 m / 20 m; measured on the re-baked level
+  that gave 2.2 km of rail, this gives 1.4 km against its 1.2-1.6 km). Extended 15 m, gaps
+  under 30 m merged, at least 24 m, never across a junction mouth or a bridge. Steel W-beam on
+  tarmac, timber on gravel and forest. Walls every 4 m, r 0.12, top ground + 0.75: the car
+  scrapes along them.
+- **Stone blocks** instead of rail on the outside of other dropping gravel and forest corners.
+- **Signs** on the right verge, 120 m (tarmac) / 70 m (gravel) before the hazard, one per 50 m
+  each way: junction > hairpin > crest / jump > double bend > steep, falling rocks, narrow
+  bridge > slippery, loose, deer > bend. **Chevrons** round every hairpin (two boards a post,
+  one for each way). **Speed signs** where `traffic::posted_limit` changes (50 through
+  Fernhollow) and at town street mouths; town boards where roads enter `town::in_core`. **Km posts** on roads 0 and 1,
+  **reflector posts** every 50 m on rural tarmac (25 m in bends), 100 m on fast gravel;
+  **street lights** every 30 m on town streets.
+- **Conditions**: potholes on old stretches of roads 0 and 1 (a dip, grip unchanged), wet
+  tarmac in damp dips, mud on wet gravel, washouts on steep wet gravel, ice on the shaded inside
+  of high forest hairpins.
+- **Look**: `art::signs` (one procedural atlas of original pictograms and lettering, one
+  material, one merged mesh per 512 m tile, range 250 m, no shadows) and `art::conditions`
+  (soft-edged mesh patches over the road, one material, per tile). `art::roadside::spawn` draws
+  both.
 
 ## Phases
 

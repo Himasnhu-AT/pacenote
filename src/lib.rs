@@ -4,19 +4,26 @@ pub mod art;
 pub mod audio;
 #[cfg(feature = "dev")]
 pub mod autopilot;
+pub mod camera;
 #[cfg(feature = "dev")]
 pub mod capture;
+pub mod career;
 pub mod codriver;
+pub mod daytime;
 pub mod demo;
 pub mod drive;
 pub mod guide;
 pub mod hardware;
 pub mod hud;
+pub mod hud_challenge;
+pub mod hud_race;
+pub mod hud_style;
 pub mod open;
 pub mod loading;
 pub mod map;
 pub mod meta;
 pub mod net_session;
+pub mod pilot;
 pub mod prefs;
 pub mod stage;
 pub mod telemetry;
@@ -70,6 +77,9 @@ impl Plugin for Pacenote {
             .add_plugins(open::traffic::TrafficPlugin)
             .add_plugins(open::forest::ForestPlugin)
             .add_plugins((open::placeable::PlaceablePlugin, open::level::LevelTypesPlugin, open::live::LivePlugin))
+            // Festival streams (wave 0 stubs; docs/festival/DECISIONS.md "Stream briefs").
+            .add_plugins((career::CareerPlugin, daytime::DayPlugin, camera::CameraFeelPlugin, open::challenges::ChallengesPlugin))
+            .add_plugins((hud_style::StyleHudPlugin, hud_challenge::ChallengeHudPlugin, hud_race::RaceHudPlugin))
             .add_systems(OnEnter(engine::flow::AppState::InGame), load_stage);
         fullscreen_on_first_run(app);
         app.add_plugins(hardware::HardwarePlugin);

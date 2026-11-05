@@ -10,16 +10,19 @@
 //!   past that many metres.
 //! - `autopilot.state`: current settings and what it's doing.
 //!
-//! The driving is the path follower from the handling tests: pure pursuit on the centreline
-//! with yaw-rate feedback, speed from the tightest corner within braking distance.
+//! The driving is `pilot::Pilot` (the rivals' driver, compiled in every build): pure pursuit
+//! on the centreline with yaw-rate feedback, speed from the tightest corner within braking
+//! distance. This file is only the dev shell: settings, control port, `AutoInput`.
 
 use bevy::prelude::*;
 use engine::devtools::{AddControlCommand, params};
 use serde_json::{Value, json};
 
 use crate::drive::{AutoInput, CarSpec, DrivenCar, SimulateSet, StageRun};
-use crate::stage::{self, Surface, Turn};
-use crate::vehicle::{self, Car, Input, Spec};
+use crate::pilot::{Pilot, PilotParams};
+#[cfg(test)]
+use crate::stage::{self, Surface};
+use crate::vehicle::{Car, Input, Spec};
 use crate::world::StageWorld;
 
 pub struct AutopilotPlugin;
@@ -27,7 +30,7 @@ pub struct AutopilotPlugin;
 impl Plugin for AutopilotPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Autopilot>()
-            .add_systems(FixedUpdate, drive.before(SimulateSet).run_if(resource_exists::<StageWorld>))
+            .add_systems(FixedUpdate, drive.in_set(AutopilotSet).before(SimulateSet).run_if(resource_exists::<StageWorld>))
             .add_control_command(
                 "autopilot.set",
                 "Dev autopilot: the car drives itself",
@@ -36,12 +39,17 @@ impl Plugin for AutopilotPlugin {
                     ("pace", "number", "share of grip in corners, 0..1.2 (default 0.6)"),
                     ("style", "string", "clean | drift"),
                     ("crash_at_m", "number", "leave the road into the scenery past this many metres (negative: off)"),
+                    ("max_kmh", "number", "top speed on straights, km/h (default 108; speed captures)"),
                 ]),
                 set,
             )
             .add_control_command("autopilot.state", "Dev autopilot state", params(&[]), |w, _| Ok(state(w)));
     }
 }
+
+/// The autopilot's fixed-step system (the race's start / recover hold runs after it).
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AutopilotSet;
 
 /// How the autopilot drives.
 #[derive(Resource, Clone, Debug, PartialEq)]
@@ -50,9 +58,10 @@ pub struct Autopilot {
     pub pace: f32,
     pub drift: bool,
     pub crash_at_m: Option<f32>,
-    /// Seconds of handbrake left in a drift entry, and the corner (start m) it was for.
-    handbrake: f32,
-    last_hairpin: f32,
+    /// The driver (its state between steps).
+    pilot: Pilot,
+    /// The rivals' positions last step (their speeds, for keeping a gap in a race).
+    rivals_before: Vec<Vec3>,
     /// What it's doing, for `autopilot.state`.
     doing: &'static str,
     /// Drift tuning: shortest handbrake pull (s), the slide angle that ends it (°), and the
@@ -62,11 +71,14 @@ pub struct Autopilot {
     pub power_beta: f32,
     /// Steering into the corner during the pull (share of full input).
     pub hb_steer: f32,
+    /// Top speed (m/s, `max_kmh`).
+    pub top_speed: f32,
 }
 
 impl Default for Autopilot {
     fn default() -> Self {
-        Autopilot { on: false, pace: 0.6, drift: false, crash_at_m: None, handbrake: 0.0, last_hairpin: -1.0, doing: "off", hb_min: 0.15, hb_release: 20.0, power_beta: 15.0, hb_steer: 0.5 }
+        let p = PilotParams::default();
+        Autopilot { on: false, pace: p.pace, drift: p.drift, crash_at_m: None, pilot: Pilot::new(p), rivals_before: Vec::new(), doing: "off", hb_min: p.hb_min, hb_release: p.hb_release, power_beta: p.power_beta, hb_steer: p.hb_steer, top_speed: p.top_speed }
     }
 }
 
@@ -84,6 +96,9 @@ fn set(w: &mut World, v: Value) -> Result<Value, String> {
             "clean" => false,
             _ => return Err(format!("style: clean | drift, not {s}")),
         };
+    }
+    if let Some(k) = v.get("max_kmh").and_then(Value::as_f64) {
+        ap.top_speed = (k as f32 / 3.6).clamp(5.0, 90.0);
     }
     if let Some(c) = v.get("crash_at_m") {
         ap.crash_at_m = c.as_f64().filter(|m| *m >= 0.0).map(|m| m as f32);
@@ -116,124 +131,78 @@ fn drive(time: Res<Time<Fixed>>, mut ap: ResMut<Autopilot>, mut out: ResMut<Auto
 }
 
 impl Autopilot {
-    /// The input for one fixed step.
+    /// The input for one fixed step (the settings above, driven by `pilot::Pilot`).
     pub fn input(&mut self, car: &Car, spec: &Spec, w: &StageWorld, progress: f32, dt: f32) -> Input {
-        let road = &w.road;
-        let pos = Vec2::new(car.pos.x, car.pos.z);
-        let rp = road.nearest(pos, 40.0);
-        let s_here = rp.map_or(progress, |r| r.s);
-        let off_road = rp.is_none_or(|r| r.lateral.abs() > road.half_width(&r) + 0.3);
-        let v = car.speed().max(0.0);
-        let look = (v * 0.7).clamp(6.0, 30.0);
-
-        // Crash on request: aim at a point well off the road ahead, flat out.
-        if let Some(m) = self.crash_at_m
-            && s_here >= m
-        {
-            self.doing = "crashing";
-            let i = road.station(s_here + 25.0);
-            let d = road.dir[i];
-            let left = Vec2::new(d.y, -d.x);
-            let p = road.pts[i];
-            let target = Vec3::new(p.x + left.x * 14.0, p.y, p.z + left.y * 14.0);
-            return Input { steer: pursuit(car, spec, target), throttle: 1.0, ..Input::default() };
-        }
-
-        let target = road.pts[road.station(s_here + look)];
-        let mut steer = pursuit(car, spec, target);
-
-        // Speed: the slowest corner within braking distance, at `pace` of the surface's grip.
-        let i0 = road.station(s_here);
-        let mut vt = 30.0f32;
-        let horizon = (v * v / 6.0 + 30.0) / stage::STEP;
-        for k in 0..horizon as usize {
-            let i = (i0 + k).min(road.len() - 1);
-            let (mu, _) = road.surface[i].grip();
-            let a_lat = self.pace * mu * 9.81;
-            let a_brk = 0.55 * mu * 9.81;
-            let curv = road.curv[i].abs().max(1e-4);
-            let vc = (a_lat / curv).sqrt();
-            vt = vt.min((vc * vc + 2.0 * a_brk * k as f32 * stage::STEP).sqrt());
-        }
-        if off_road {
-            vt = vt.min(12.0);
-        }
-        let err = vt - car.speed();
-        let mut throttle = (err * 0.6).clamp(0.0, 1.0);
-        let brake = (-err * 0.4).clamp(0.0, 1.0);
-        // Ease off in a big slide, as a driver would (less so when drifting on purpose).
-        let beta = car.vel.dot(left_of(car)).atan2(car.speed().abs().max(1.0)).abs().to_degrees();
-        throttle *= (1.0 - (beta - if self.drift { 25.0 } else { 12.0 }) / 20.0).clamp(0.2, 1.0);
-        self.doing = if off_road { "off the road" } else { "driving" };
-
-        // Drift style: brake to a drift entry speed, a handbrake flick at the turn-in of a hairpin
-        // on loose ground, hold it until the car has rotated, then power through the corner.
-        let mut handbrake = false;
-        let mut brake = brake;
-        if self.drift {
-            let loose = |c: &stage::Corner| road.surface[road.station(c.start)] != Surface::Tarmac;
-            // Entry speed for a grade 1 / 2 hairpin (≈45 / 55 km/h at pace 0.6).
-            let entry = |c: &stage::Corner| (if c.grade <= 1 { 12.5 } else { 15.0 }) * (self.pace / 0.6).sqrt();
-            if let Some(c) = w.corners.iter().find(|c| c.grade <= 2 && c.start > s_here && c.start - s_here < 60.0 && c.start != self.last_hairpin && loose(c)) {
-                let d = c.start - s_here;
-                // Braking towards the entry speed (the planner alone carried ~95 km/h into one).
-                let (mu, _) = road.surface[road.station(c.start)].grip();
-                let cap = (entry(c) * entry(c) + 2.0 * 0.6 * mu * 9.81 * (d - 8.0).max(0.0)).sqrt();
-                if v > cap {
-                    throttle = 0.0;
-                    brake = brake.max(((v - cap) * 0.5).clamp(0.3, 1.0));
-                    self.doing = "braking for a hairpin";
-                }
-                // The flick: just before the turn-in, at about the entry speed.
-                if self.handbrake <= 0.0 && d < (v * 0.35).clamp(5.0, 12.0) && v > 8.0 && v < entry(c) * 1.25 {
-                    self.handbrake = 0.7;
-                    self.last_hairpin = c.start;
-                }
-            }
-            if self.handbrake > 0.0 {
-                self.handbrake -= dt;
-                // Hold at least `hb_min`, then let go once it has started to rotate (it carries on).
-                if self.handbrake < 0.7 - self.hb_min && beta > self.hb_release {
-                    self.handbrake = 0.0;
-                }
-            }
-            let corner = w.corners.iter().find(|c| c.start == self.last_hairpin);
-            if self.handbrake > 0.0 {
-                handbrake = true;
-                self.doing = "drifting";
-                let into = corner.map_or(steer.signum(), |c| if c.turn == Turn::Left { 1.0 } else { -1.0 });
-                // Not full lock: at hairpin speeds that plus the handbrake spins the car.
-                steer = self.hb_steer * into;
-                throttle = 0.4;
-            } else if let Some(c) = corner
-                && s_here >= c.start - 2.0
-                && s_here < c.end
-                && beta > 8.0
-            {
-                // In the hairpin on the power: the slide carries through (easing off if it grows
-                // past ~35°, or it spins).
-                throttle = (1.0 - (beta - self.power_beta) / 15.0).clamp(0.2, 1.0);
-                brake = 0.0;
-                self.doing = "drifting";
-            }
-        }
-        Input { steer, throttle, brake: if handbrake { 0.0 } else { brake }, handbrake }
+        let p = &mut self.pilot.params;
+        p.pace = self.pace;
+        p.drift = self.drift;
+        p.hb_min = self.hb_min;
+        p.hb_release = self.hb_release;
+        p.power_beta = self.power_beta;
+        p.hb_steer = self.hb_steer;
+        p.top_speed = self.top_speed;
+        self.pilot.crash_at_m = self.crash_at_m;
+        self.pilot.speed_cap = self.gap_cap(car, w, progress, dt);
+        // Steers round trees and rocks, not the race's cars (it would dodge off the road).
+        let input = self.pilot.input(car, spec, &w.road, &w.corners, &NoRacers(w), progress, dt);
+        self.doing = self.pilot.doing;
+        input
     }
 }
 
-fn left_of(car: &Car) -> Vec3 {
-    car.up().cross(car.forward())
+impl Autopilot {
+    /// In a race: a speed cap that keeps a 0.6 s gap behind the rival ahead in its lane (so the
+    /// autopilot doesn't run into their backs). `None` with no rival close ahead.
+    fn gap_cap(&mut self, car: &Car, w: &StageWorld, progress: f32, dt: f32) -> Option<f32> {
+        let poses: Vec<Vec3> = w.racers.as_ref().and_then(|r| r.0.read().ok().map(|v| v.iter().map(|p| p.0).collect())).unwrap_or_default();
+        let before = std::mem::replace(&mut self.rivals_before, poses.clone());
+        let me = w.road.nearest(Vec2::new(car.pos.x, car.pos.z), 40.0)?;
+        let v = car.speed().max(0.0);
+        let mut cap: Option<f32> = None;
+        for (k, p) in poses.iter().enumerate() {
+            let Some(rp) = w.road.nearest(Vec2::new(p.x, p.z), 40.0) else { continue };
+            let gap = rp.s - me.s.max(progress.min(me.s + 1.0)) - 4.5;
+            if !(-2.0..60.0).contains(&gap) || (rp.lateral - me.lateral).abs() > 2.0 {
+                continue;
+            }
+            let v_ahead = before.get(k).map_or(v, |b| Vec2::new(p.x - b.x, p.z - b.z).length() / dt.max(1e-3));
+            let room = gap - (2.0 + 0.6 * v);
+            let c = if room >= 0.0 { (v_ahead * v_ahead + 2.0 * 4.0 * room).sqrt() } else { (v_ahead + room * 0.5).max(0.0) };
+            cap = Some(cap.map_or(c, |x: f32| x.min(c)));
+        }
+        cap
+    }
 }
 
-/// Pure pursuit towards `target` with yaw-rate feedback, through the car's own steering map.
-fn pursuit(car: &Car, spec: &Spec, target: Vec3) -> f32 {
-    let local = car.rot.inverse() * (target - car.pos);
-    let d2 = (local.x * local.x + local.z * local.z).max(1.0);
-    let kappa = 2.0 * -local.x / d2;
-    let wheelbase = spec.mounts[2].z - spec.mounts[0].z;
-    let yaw = car.ang.dot(car.up());
-    let delta = (kappa * wheelbase).atan() + 0.12 * (car.speed().max(0.0) * kappa - yaw);
-    vehicle::steer_input_for(car, spec, delta)
+/// The stage's ground without the rivals' solids (they come last in `obstacles`).
+struct NoRacers<'a>(&'a StageWorld);
+
+impl crate::vehicle::Ground for NoRacers<'_> {
+    fn height(&self, x: f32, z: f32) -> f32 {
+        self.0.height(x, z)
+    }
+    fn normal(&self, x: f32, z: f32) -> Vec3 {
+        self.0.normal(x, z)
+    }
+    fn surface(&self, x: f32, z: f32) -> crate::stage::Surface {
+        self.0.surface(x, z)
+    }
+    fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<crate::vehicle::Obstacle>) {
+        self.0.obstacles(p, r, out);
+        if let Some(racers) = &self.0.racers {
+            let mut extra = Vec::new();
+            racers.obstacles(p, r, &mut extra);
+            out.truncate(out.len().saturating_sub(extra.len()));
+        }
+    }
+    fn walls(&self, p: Vec2, r: f32, out: &mut Vec<crate::vehicle::Wall>) {
+        self.0.walls(p, r, out);
+    }
+}
+
+#[cfg(test)]
+fn left_of(car: &Car) -> Vec3 {
+    crate::pilot::left_of(car)
 }
 
 #[cfg(test)]

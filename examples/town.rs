@@ -70,7 +70,7 @@ fn main() {
             Ok(serde_json::json!({"pose": name}))
         });
         app.add_control_command("town.stats", "Town meshes: entities, triangles, vertices", params(&[]), |w, _| {
-            let mut q = w.query_filtered::<&Mesh3d, With<buildings::BuildingMesh>>();
+            let mut q = w.query_filtered::<&Mesh3d, With<buildings::BuildingTile>>();
             let handles: Vec<_> = q.iter(w).map(|m| m.0.clone()).collect();
             Ok(serde_json::json!({"entities": handles.len()}))
         });

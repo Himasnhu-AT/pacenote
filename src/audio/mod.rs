@@ -18,12 +18,17 @@ pub mod ambience;
 pub mod body;
 pub mod car;
 pub mod dsp;
+pub mod festival;
+pub mod music;
+pub mod pops;
 pub mod powertrain;
 pub mod samples;
 #[cfg(test)]
 mod scenes;
 pub mod stream;
+pub mod traffic;
 pub mod tyres;
+pub mod ui;
 pub mod voice;
 
 use std::sync::Arc;
@@ -55,6 +60,8 @@ impl Plugin for RallyAudioPlugin {
             .init_resource::<RemoteCarSound>()
             .register_type::<RallyAudioStats>()
             .insert_resource(Link { shared: Arc::new(Shared::default()), started: false, frame: Frame::default() })
+            // Festival streams (wave 0 stubs): D pops, F gameplay sounds, E menu sounds.
+            .add_plugins((pops::PopsPlugin, festival::FestivalAudioPlugin, ui::UiSoundPlugin, music::MusicPlugin))
             .add_systems(Startup, add_buses)
             .add_systems(PostUpdate, (start_output, net_car_sound, gather, capture).chain().after(SoundSet::Mix));
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
@@ -191,7 +198,7 @@ fn start_output(
 fn surface_class(s: Surface) -> usize {
     match s {
         Surface::Gravel | Surface::Loose => car::GRAVEL,
-        Surface::Tarmac | Surface::Dusty => car::TARMAC,
+        Surface::Tarmac | Surface::Dusty | Surface::Wet => car::TARMAC,
         Surface::Mud | Surface::Ditch => car::MUD,
         Surface::Snow => car::SNOW,
         Surface::Verge | Surface::Rough => car::OFFROAD,
@@ -354,6 +361,49 @@ impl Tracker {
     }
 }
 
+/// How near running water and a village are at `at` in the open world (see
+/// [`ambience::AmbParams`]), quantised so the ambience recipe isn't rebuilt every frame.
+pub fn places_near(o: &crate::open::OpenWorld, at: Vec3) -> (f32, f32) {
+    let p = Vec2::new(at.x, at.z);
+    let land = crate::open::land::land(crate::open::SEED);
+    let water = (1.0 - (land.river_distance(p) - 12.0) / 110.0).clamp(0.0, 1.0);
+    // Houses within 90 m, nearer ones counting more; ~8 near houses is "in the village".
+    let near: f32 = o.buildings.buildings.iter().map(|b| (1.0 - b.centre.distance(p) / 90.0).max(0.0)).sum();
+    let town = (near / 5.0).clamp(0.0, 1.0);
+    let q = |v: f32| (v * 32.0).round() / 32.0;
+    (q(water), q(town))
+}
+
+/// The nearest traffic cars as the listener (the camera, moving with the player's car) hears
+/// them.
+pub fn traffic_heard(t: &crate::open::traffic::Traffic, ear: &GlobalTransform, ear_vel: Vec3, interior: f32) -> traffic::TrafficParams {
+    let at = ear.translation();
+    let right = ear.right().as_vec3();
+    let mut near: Vec<(f32, traffic::OtherCar)> = t
+        .cars()
+        .filter_map(|c| {
+            let d = c.pos + Vec3::Y * 0.5 - at;
+            let dist = d.length();
+            if dist > traffic::RANGE {
+                return None;
+            }
+            let dir = d / dist.max(0.01);
+            // Closing speed: how fast the gap shrinks.
+            let closing = (ear_vel - c.fwd * c.speed).dot(dir);
+            Some((dist, traffic::OtherCar { active: true, id: c.id, dist, pan: dir.dot(right).clamp(-1.0, 1.0), speed: c.speed, closing }))
+        })
+        .collect();
+    near.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut p = traffic::TrafficParams { interior, ..Default::default() };
+    for (slot, (_, c)) in p.cars.iter_mut().zip(near) {
+        *slot = c;
+    }
+    p
+}
+
+/// Exhaust pops decided this frame and their counters.
+type PopsOut<'w> = (ResMut<'w, pops::PopFeed>, ResMut<'w, pops::PopStats>);
+
 #[allow(clippy::too_many_arguments)]
 fn gather(
     time: Res<Time>,
@@ -368,6 +418,7 @@ fn gather(
     remote: Res<RemoteCarSound>,
     mixer: Res<Mixer>,
     codriver: Option<Res<crate::codriver::CoDriver>>,
+    (traffic, listener, mut pops): (Option<Res<crate::open::traffic::Traffic>>, Query<&GlobalTransform, With<engine::gfx::MainCamera>>, PopsOut),
     mut link: ResMut<Link>,
     mut tr: Local<Tracker>,
     mut stats: ResMut<RallyAudioStats>,
@@ -380,7 +431,13 @@ fn gather(
     // (The guide has no `StageWorld`, only the `GuideStage` it generated from the stage id.)
     let def = stage.as_deref().map(|s| &s.def).or(guide_stage.as_deref().map(|g| &g.def));
     f.amb = match def {
-        Some(d) => AmbParams { active: true, biome: d.biome, weather: d.weather, time: d.time, interior },
+        Some(d) => {
+            let (water, town) = match (stage.as_deref().and_then(|s| s.open.as_deref()), listener.iter().next()) {
+                (Some(o), Some(ear)) => places_near(o, ear.translation()),
+                _ => (0.0, 0.0),
+            };
+            AmbParams { active: true, biome: d.biome, weather: d.weather, time: d.time, interior, water, town }
+        }
         None => AmbParams { active: false, ..f.amb },
     };
     let spec = spec.map(|s| s.0.clone()).unwrap_or_default();
@@ -415,6 +472,12 @@ fn gather(
             }
         }
     }
+    let ear = listener.iter().next().copied();
+    let ear_vel = car_state.map_or(Vec3::ZERO, |c| c.car.vel);
+    f.traffic = match (traffic.as_deref(), ear) {
+        (Some(t), Some(ear)) => traffic_heard(t, &ear, ear_vel, interior),
+        _ => traffic::TrafficParams::default(),
+    };
     let car_bus = mixer.bus(CAR_BUS).unwrap_or(BusId::SFX);
     f.mix = Mix {
         car: mixer.effective_gain(car_bus),
@@ -430,6 +493,11 @@ fn gather(
         stats.roll[i] = f.car.surfaces[i].roll;
         stats.slide[i] = f.car.surfaces[i].slide;
     }
+    // Exhaust pops decided this frame (`pops::PopScheduler`).
+    for e in pops.0.events.drain(..) {
+        f.push(e);
+    }
+    pops.1.played = link.shared.pops_played.load(Ordering::Relaxed) as u32;
     link.shared.publish(&link.frame);
     // CPU share of the audio thread, every ~0.5 s.
     tr.stats_t += time.delta_secs();
@@ -455,6 +523,7 @@ fn capture(time: Res<Time>, link: Res<Link>, cap: Option<ResMut<Capture>>, mut s
     let t0 = std::time::Instant::now();
     let c = &mut *cap;
     c.synth.apply(&link.frame);
+    link.shared.pops_played.store(c.synth.car.pops.played as u64, Ordering::Relaxed);
     c.frac += time.delta_secs_f64() * dsp::RATE as f64;
     let blocks = (c.frac / stream::BLOCK as f64).floor() as usize;
     c.frac -= (blocks * stream::BLOCK) as f64;

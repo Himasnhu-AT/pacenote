@@ -190,7 +190,26 @@ pub struct Node {
 pub struct LaneGraph {
     pub lanes: Vec<Lane>,
     pub nodes: Vec<Node>,
+    /// How often cars start on each lane, relative (town streets 0.3, the B-road 1).
+    pub weight: Vec<f32>,
 }
+
+/// Fernhollow's speed limit on the B-road through the town (m/s): 50 km/h.
+pub const TOWN_LIMIT: f32 = 50.0 / 3.6;
+/// The posted speed limit (m/s) at station `i` of road `road`: the data's limit if set, else
+/// by kind, and 50 km/h on the B-road through Fernhollow's core (`town::in_core`). What the
+/// traffic lanes use; signs should show the same.
+pub fn posted_limit(net: &RoadNet, road: usize, i: usize) -> f32 {
+    let nr = &net.roads[road];
+    if let Some(l) = nr.limit {
+        return l;
+    }
+    let p = nr.road.pts[i.min(nr.road.len() - 1)];
+    if nr.kind == RoadKind::BRoad && super::town::in_core(Vec2::new(p.x, p.z)) { TOWN_LIMIT } else { limit(nr.kind) }
+}
+
+/// Relative chance a car starts on a town street rather than the B-road.
+pub const STREET_WEIGHT: f32 = 0.3;
 
 /// One end of a road segment at a node: the lane leaving the node and the one arriving.
 #[derive(Clone, Copy)]
@@ -323,7 +342,6 @@ impl LaneGraph {
                 segs.push((a.0, b.0 + n, a.1, b.1));
             }
             let off = lane_offset(nr.kind);
-            let lim = nr.limit.unwrap_or_else(|| limit(nr.kind));
             for (a, b, na, nb) in segs {
                 let ta = (trim[na] / STEP).ceil() as usize;
                 let tb = (trim[nb] / STEP).ceil() as usize;
@@ -345,6 +363,8 @@ impl LaneGraph {
                         let y = road.pts[i].y + road.bank[i] * lat;
                         pts.push(Vec3::new(p.x, y, p.y));
                         let k = road.curv[i].abs().max(1e-5);
+                        // 50 through Fernhollow (unless the data sets a limit).
+                        let lim = posted_limit(net, r, i);
                         limits.push(lim.min((A_LAT / k).sqrt()).max(V_MIN));
                     }
                     if !forward {
@@ -458,7 +478,14 @@ impl LaneGraph {
             let (lim, cum) = (&lanes[i].limit, &lanes[i].cum);
             lanes[i].advisory = advisory(lim, cum, end.min(*lim.last().unwrap()));
         }
-        LaneGraph { lanes, nodes: out_nodes }
+        let weight = lanes
+            .iter()
+            .map(|l| match l.kind {
+                LaneKind::Road { road, .. } if net.roads[road].kind == RoadKind::Street => STREET_WEIGHT,
+                _ => 1.0,
+            })
+            .collect();
+        LaneGraph { lanes, nodes: out_nodes, weight }
     }
 
     /// Point and unit direction (3D, along the lane) at `s` on `lane`, reading on into `next`
@@ -569,6 +596,12 @@ struct Agent {
     behind_player: bool,
 }
 
+impl Agent {
+    fn solid(&self) -> SolidPose {
+        (self.pose.0, self.pose.1, self.pose.1 * self.v)
+    }
+}
+
 /// What's drawn of a car: its pose now and before the last step (for interpolation).
 #[derive(Clone, Copy, Debug)]
 pub struct CarView {
@@ -629,11 +662,13 @@ impl Traffic {
                 continue;
             }
             let len = l.length();
-            // Not near the ends: room to brake for the stop line, and for a car turning in.
+            // Not near the ends: room to brake for the stop line, and for a car turning in. Fewer
+            // spots where fewer cars start.
+            let step = SPOT_STEP / graph.weight.get(i).copied().unwrap_or(1.0).max(0.05);
             let mut s = 25.0;
             while s < len - 40.0 {
                 spots.push(Spot { lane: i as u32, s, pos: xz(l.point(s)) });
-                s += SPOT_STEP;
+                s += step;
             }
         }
         let cells_n = (2.0 * super::roads::HALF / CELL).ceil() as i32 + 1;
@@ -688,7 +723,7 @@ impl Traffic {
     /// them with the world's).
     pub fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
         for a in &self.agents {
-            push_solids(a.pose, p, r, out);
+            push_solids(a.solid(), p, r, out);
         }
     }
 
@@ -1196,14 +1231,20 @@ fn idm(v: f32, v0: f32, lead: Option<(f32, f32)>) -> f32 {
     (free - inter).clamp(-B_MAX, A_MAX)
 }
 
-fn push_solids(pose: (Vec3, Vec3), p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
+/// A car as a solid: (centre on the ground, forward, velocity m/s).
+pub type SolidPose = (Vec3, Vec3, Vec3);
+
+/// Collision cylinders of one car at `pose` (position, forward, velocity) within `r` of `p`:
+/// three circles along it, moving with the car. Shared with the rivals
+/// (`career::racers::RacerSolids`).
+pub fn push_solids(pose: SolidPose, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
     let c = xz(pose.0);
     if c.distance_squared(p) > (r + 3.0) * (r + 3.0) {
         return;
     }
     let f = xz(pose.1).normalize_or_zero();
     for k in SOLID_AT {
-        out.push(Obstacle { pos: c + f * k, radius: SOLID_R, top: pose.0.y + SOLID_TOP, give: Give::Solid });
+        out.push(Obstacle { pos: c + f * k, radius: SOLID_R, top: pose.0.y + SOLID_TOP, give: Give::Car { vx: pose.2.x, vz: pose.2.z } });
     }
 }
 
@@ -1270,7 +1311,7 @@ pub struct TrafficPlugin;
 /// The cars' collision cylinders after the last step, shareable with a `Ground` (clone the
 /// `Arc` into it and read with [`TrafficSolids::obstacles`]).
 #[derive(Resource, Clone, Default)]
-pub struct TrafficSolids(pub Arc<RwLock<Vec<(Vec3, Vec3)>>>);
+pub struct TrafficSolids(pub Arc<RwLock<Vec<SolidPose>>>);
 
 impl TrafficSolids {
     /// Cylinders for cars within `r` of `p`, appended to `out`.
@@ -1301,7 +1342,7 @@ fn step(time: Res<Time<Fixed>>, mut traffic: ResMut<Traffic>, cars: Query<&crate
     traffic.step(time.delta_secs(), player);
     if let Ok(mut s) = solids.0.write() {
         s.clear();
-        s.extend(traffic.agents.iter().map(|a| a.pose));
+        s.extend(traffic.agents.iter().map(|a| a.solid()));
     }
 }
 
@@ -1312,16 +1353,7 @@ pub struct TrafficCar {
     shadows: bool,
 }
 
-/// Shared meshes and materials for every traffic car.
-#[derive(Resource)]
-struct TrafficArt {
-    body: Handle<Mesh>,
-    glass: Handle<Mesh>,
-    wheels: Handle<Mesh>,
-    paint: Vec<Handle<StandardMaterial>>,
-    glass_mat: Handle<StandardMaterial>,
-    tyre_mat: Handle<StandardMaterial>,
-}
+use crate::art::traffic_car::TrafficArt;
 
 /// Cars beyond this from the camera don't cast shadows (m).
 pub const SHADOW_RANGE: f32 = 70.0;
@@ -1339,7 +1371,7 @@ fn draw(
 ) {
     let (Some(mut meshes), Some(mut materials)) = (meshes, materials) else { return };
     let Some(art) = art else {
-        commands.insert_resource(make_art(&mut meshes, &mut materials));
+        commands.insert_resource(TrafficArt::new(&mut meshes, &mut materials));
         return;
     };
     let a = fixed.overstep_fraction();
@@ -1376,103 +1408,15 @@ fn draw(
         if seen[k] {
             continue;
         }
-        let paint = art.paint[c.color as usize % art.paint.len()].clone();
         commands
             .spawn((Name::new("traffic car"), engine::level::GeneratedBy("pacenote::traffic"), TrafficCar { id: c.id, shadows: false }, pose(c), Visibility::default(), engine::render_budget::Actor, DespawnOnExit(engine::flow::AppState::InGame)))
-            .with_children(|p| {
-                p.spawn((Mesh3d(art.body.clone()), MeshMaterial3d(paint), bevy::light::NotShadowCaster));
-                p.spawn((Mesh3d(art.glass.clone()), MeshMaterial3d(art.glass_mat.clone()), bevy::light::NotShadowCaster));
-                p.spawn((Mesh3d(art.wheels.clone()), MeshMaterial3d(art.tyre_mat.clone()), bevy::light::NotShadowCaster));
-            });
+            .with_children(|p| crate::art::traffic_car::spawn_parts(p, &art, c.id, c.color));
     }
 }
 
 fn clear(mut commands: Commands, shown: Query<Entity, With<TrafficCar>>) {
     for e in &shown {
         commands.entity(e).despawn();
-    }
-}
-
-fn make_art(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> TrafficArt {
-    const PAINT: [[f32; 3]; COLORS as usize] = [[0.85, 0.85, 0.83], [0.55, 0.57, 0.6], [0.04, 0.04, 0.05], [0.55, 0.06, 0.05], [0.08, 0.2, 0.5], [0.08, 0.25, 0.14], [0.8, 0.6, 0.12]];
-    let paint = PAINT
-        .iter()
-        .map(|c| materials.add(StandardMaterial { base_color: Color::srgb(c[0], c[1], c[2]), metallic: 0.3, perceptual_roughness: 0.35, ..default() }))
-        .collect();
-    let glass_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.05, 0.06, 0.08), metallic: 0.0, perceptual_roughness: 0.08, reflectance: 0.6, ..default() });
-    let tyre_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.03, 0.03, 0.03), perceptual_roughness: 0.9, ..default() });
-    let (body, glass, wheels) = car_meshes();
-    TrafficArt { body: meshes.add(body), glass: meshes.add(glass), wheels: meshes.add(wheels), paint, glass_mat, tyre_mat }
-}
-
-/// A low-poly car (local −Z forward, origin on the ground at the centre): body, cabin glass
-/// and the four wheels, each one mesh.
-fn car_meshes() -> (Mesh, Mesh, Mesh) {
-    let mut body = MeshBuild::default();
-    // Side profiles (z back, y up), extruded across x. Convex each.
-    let lower = [Vec2::new(2.2, 0.3), Vec2::new(2.22, 0.92), Vec2::new(-1.55, 0.86), Vec2::new(-2.2, 0.62), Vec2::new(-2.15, 0.3)];
-    body.prism(&lower, -0.9, 0.9);
-    let roof = [Vec2::new(1.05, 1.36), Vec2::new(1.0, 1.42), Vec2::new(-0.45, 1.42), Vec2::new(-0.5, 1.36)];
-    body.prism(&roof, -0.74, 0.74);
-    let mut glass = MeshBuild::default();
-    let cabin = [Vec2::new(1.55, 0.9), Vec2::new(1.05, 1.37), Vec2::new(-0.5, 1.37), Vec2::new(-1.35, 0.88)];
-    glass.prism(&cabin, -0.8, 0.8);
-    let mut wheels = MeshBuild::default();
-    let circle: Vec<Vec2> = (0..10).map(|i| {
-        let a = i as f32 / 10.0 * core::f32::consts::TAU;
-        Vec2::new(libm::cosf(a), libm::sinf(a)) * 0.33
-    }).collect();
-    for (x, z) in [(-0.8, -1.35), (0.8, -1.35), (-0.8, 1.35), (0.8, 1.35)] {
-        let prof: Vec<Vec2> = circle.iter().map(|p| *p + Vec2::new(z, 0.33)).collect();
-        wheels.prism(&prof, x - 0.13, x + 0.13);
-    }
-    (body.mesh(), glass.mesh(), wheels.mesh())
-}
-
-/// Flat-shaded triangles.
-#[derive(Default)]
-struct MeshBuild {
-    pos: Vec<[f32; 3]>,
-    nrm: Vec<[f32; 3]>,
-}
-
-impl MeshBuild {
-    /// A triangle facing `out` (wound to face it).
-    fn tri(&mut self, a: Vec3, b: Vec3, c: Vec3, out: Vec3) {
-        let n = (b - a).cross(c - a);
-        let (b, c) = if n.dot(out) < 0.0 { (c, b) } else { (b, c) };
-        let n = (b - a).cross(c - a).normalize_or_zero();
-        for p in [a, b, c] {
-            self.pos.push(p.to_array());
-            self.nrm.push(n.to_array());
-        }
-    }
-
-    /// A convex side profile (`(z, y)` points) extruded from `x0` to `x1`.
-    fn prism(&mut self, prof: &[Vec2], x0: f32, x1: f32) {
-        let c: Vec2 = prof.iter().copied().sum::<Vec2>() / prof.len() as f32;
-        let at = |p: Vec2, x: f32| Vec3::new(x, p.y, p.x);
-        for i in 1..prof.len() - 1 {
-            self.tri(at(prof[0], x0), at(prof[i], x0), at(prof[i + 1], x0), -Vec3::X);
-            self.tri(at(prof[0], x1), at(prof[i], x1), at(prof[i + 1], x1), Vec3::X);
-        }
-        for i in 0..prof.len() {
-            let (p, q) = (prof[i], prof[(i + 1) % prof.len()]);
-            let mid = (p + q) * 0.5 - c;
-            let out = Vec3::new(0.0, mid.y, mid.x);
-            self.tri(at(p, x0), at(q, x0), at(q, x1), out);
-            self.tri(at(p, x0), at(q, x1), at(p, x1), out);
-        }
-    }
-
-    fn mesh(self) -> Mesh {
-        use bevy::asset::RenderAssetUsages;
-        use bevy::mesh::{Indices, PrimitiveTopology};
-        let n = self.pos.len() as u32;
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.pos)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.nrm)
-            .with_inserted_indices(Indices::U32((0..n).collect()))
     }
 }
 
@@ -1615,7 +1559,9 @@ mod tests {
                     .iter()
                     .filter_map(|r| r.road.nearest(p, 30.0).map(|at| at.lateral.abs() - r.road.half_width(&at)))
                     .fold(f32::MAX, f32::min);
-                assert!(out < 0.0, "car {} off the road at {p} ({:?}): {out} m out", a.id, lane.kind);
+                // (A tight right turn in town crosses the corner of the two ribbons: that's the
+                // junction's tarmac, its kerb rounded at 7 m.)
+                assert!(out < 0.0 || lane.is_turn() && out < 0.3, "car {} off the road at {p} ({:?}): {out} m out", a.id, lane.kind);
                 // Near the player.
                 assert!(p.distance(xz(p_pos(&walker, &g))) < t.config.despawn + 5.0);
             }
@@ -1767,14 +1713,6 @@ mod tests {
         let mut out = Vec::new();
         t.obstacles(xz(t.agents[0].pose.0), 5.0, &mut out);
         assert_eq!(out.len(), 3);
-    }
-
-    #[test]
-    fn car_mesh_faces_outward() {
-        let (body, glass, wheels) = car_meshes();
-        for m in [body, glass, wheels] {
-            assert!(m.count_vertices() > 0);
-        }
     }
 }
 

@@ -8,17 +8,25 @@
 //! `tools/art/render_cards.py`. Credits: `assets/credits.txt`.
 
 pub mod car;
+pub mod conditions;
 pub mod dressing;
+pub mod exhaust;
 pub mod ground;
 pub mod hands;
+pub mod headlights;
 pub mod junctions;
 pub mod look;
 pub mod meshfile;
+pub mod mirror;
 pub mod props;
 pub mod roadside;
+pub mod signs;
+pub mod sky;
 pub mod spray;
 pub mod terrain;
+pub mod traffic_car;
 pub mod trees;
+pub mod water;
 
 use std::sync::Arc;
 
@@ -51,7 +59,30 @@ impl Plugin for ArtPlugin {
         trees::register(app);
         app.add_systems(Update, (trees::ingest, trees::stream).chain())
             .add_systems(Update, dressing::tag_cover)
-            .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin));
+            .add_systems(PostUpdate, gpu_only_textures)
+            .add_systems(Update, traffic_car::lamps_update.run_if(resource_exists::<crate::open::traffic::Traffic>))
+            .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin))
+            // Festival streams (wave 0 stubs): C sky, D exhaust + headlights, B signs + conditions.
+            .add_plugins((sky::SkyPlugin, exhaust::ExhaustPlugin, headlights::HeadlightsPlugin, signs::SignsPlugin, conditions::ConditionsPlugin));
+    }
+}
+
+/// Cooked texture sets (`.ktx2` from disk) are only ever sampled on the GPU: once loaded, drop
+/// their CPU copy (it was ~100 MB at Low; docs/festival/PERF_REPORT.md). Generated images (the
+/// map, the canopy, boards) and glTF textures (the car builds their mips on the CPU) keep theirs.
+fn gpu_only_textures(mut events: MessageReader<AssetEvent<Image>>, server: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
+    use bevy::asset::RenderAssetUsages;
+    for ev in events.read() {
+        let AssetEvent::LoadedWithDependencies { id } = ev else { continue };
+        if !server.get_path(*id).is_some_and(|p| p.path().extension().is_some_and(|e| e == "ktx2")) {
+            continue;
+        }
+        if let Some(img) = images.get(*id)
+            && img.asset_usage != RenderAssetUsages::RENDER_WORLD
+            && let Some(mut img) = images.get_mut(*id)
+        {
+            img.asset_usage = RenderAssetUsages::RENDER_WORLD;
+        }
     }
 }
 
@@ -108,6 +139,7 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     world.insert_resource(cat);
     trees::setup(world, s, view, q);
     props::spawn(world, s);
+    water::spawn(world, s);
     let half = stage::half_size(&s.def);
     let area = Area::new(Vec2::splat(-half), Vec2::splat(half));
     // Rocks, bushes, ground cover: evaluated and kept only near the camera (the engine drops far
@@ -349,7 +381,8 @@ mod dev {
         let mut q = world.query::<(&Mesh3d, Option<&Name>)>();
         let meshes = world.resource::<Assets<Mesh>>();
         // name -> (entities, unique meshes, sized bytes, render-only meshes)
-        let mut by: HashMap<String, (usize, HashSet<AssetId<Mesh>>, usize, usize)> = HashMap::new();
+        type Row = (usize, HashSet<AssetId<Mesh>>, usize, usize);
+        let mut by: HashMap<String, Row> = HashMap::new();
         for (m, name) in q.iter(world) {
             let key = name.map_or("(unnamed)".to_string(), |n| n.as_str().to_string());
             let e = by.entry(key).or_default();
@@ -362,7 +395,7 @@ mod dev {
             }
         }
         let mut rows: Vec<_> = by.into_iter().collect();
-        rows.sort_by(|a, b| (b.1.2, b.1.0).cmp(&(a.1.2, a.1.0)));
+        rows.sort_by_key(|r| std::cmp::Reverse((r.1.2, r.1.0)));
         // Compact rows, biggest first: [name, entities, unique meshes, MB on the CPU, render-only meshes].
         let rows: Vec<_> = rows.into_iter().take(14).map(|(k, (n, u, b, r))| json!([k, n, u.len(), b / 1_000_000, r])).collect();
         let images = world.resource::<Assets<Image>>();

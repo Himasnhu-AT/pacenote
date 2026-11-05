@@ -68,22 +68,26 @@ matter inside events. Section 10 asks what the unifying hook should be.
 
 | Area | State | Notes |
 |---|---|---|
-| Open world (4 x 4 km) | **Playable** | 23 roads (~31 km), terrain, town and farms with 617 buildings, ~238k trees. Stored as a level file the game loads. |
+| Open world (4 x 4 km) | **Playable** | 21 roads (~38 km), smooth eroded terrain, the town of Fernhollow, outskirts, hamlets, farms and huts: 654 buildings, ~238k trees. Stored as a level file the game loads. |
 | World editor (dev) | **Working** | The engine's editor on the game binary: roads, buildings, event starts, trees, terrain; edits rebuild the world live. Needs the engine's `editor` branch. |
-| Free roam | **Playable** | Spawn in town, R recovers onto nearest road, no clock. |
-| Events (7) | **Playable** | 4 forest rallies, 2 gravel sprints, 1 ring lap; AI pace notes; records, ghosts, results. |
+| Free roam | **Playable** | Spawn at the service park; R recovers; a day clock runs at 5x (Settings › World). |
+| Events (5) | **Playable** | Rally/Sprint/Lap in Fernhollow's valley; Time Trial or Race (5 AI rivals, 4 difficulties, grid or pursuit start, purse by position, liveries); AI pace notes; records, ghosts. |
 | Traffic | **Playable** | 40 AI cars around the player; lanes, junction right-of-way; solid. Off during events. |
 | Car handling | **Mature** | Custom deterministic sim, tuned and measured (`docs/HANDLING.md`). |
 | Damage | **Working** | Engine/steering/suspension damage, body parts come off, retire on a fully broken part. |
-| Cockpit / views | **Working** | Cockpit (default), bonnet, chase. Detailed cabin with animated hands. |
-| Audio | **Working** | Recorded CC0 engine + drift; synthesised wind, impacts, ambience. |
+| Cockpit / views | **Working** | Cockpit (default), bonnet, spring-arm chase with speed FOV, motion blur, shake; exhaust flames; headlights. |
+| Audio | **Working** | Recorded CC0 engine + drift; synthesised pops and bangs, gameplay cues, wind; recorded Openverse crowds, horn, radar shutter, money, church bell, rail scrapes, ambience beds; menu and loading music (`tools/audio/`). |
 | AI co-driver voice | **Working** | OS text-to-speech; events only in the open world. |
-| Menus, settings, HUD | **Working** | Engine UI kit; recently ported to Bevy 0.20 picking. |
+| Menus, settings, HUD | **Working** | Service Park hub with 3D showroom, Garage/Upgrades/Dealership, Events, Challenges, Logbook; briefing loading screen; Rhythm (Style) panel, challenge cards, race positions. |
 | Records & ghosts | **Working** | Local leaderboard file, ghost replay (bit-exact). Per event id in the open world. |
 | Driver + guide (2 players) | **Legacy** | Works on the old 20 stages only; not in the open world. |
 | Voice chat | **Legacy** | Works in the driver + guide session; radio for the open world not built. |
 | The 20 old stages | **Hidden** | Still in code; reachable with `--stage N` and from "Play together". |
 | Map / minimap | **Working** | Free-roam minimap (heading up, roads by kind, events, traffic, route); full map on `M` / d-pad up or the pause menu: terrain, roads, village, events, pick one for a route along the roads (`src/map/`). Hidden during events. |
+| Economy & garage | **Working** | Notes currency, 8 cars, 7 upgrade parts as Spec multipliers, PI classes, `career.json` save. |
+| Style & challenges | **Working** | 11 skills chained into a Rhythm (×6 max, banked for Notes and xp); 13 roadside challenges (Radar Posts, Pace/Slide Sections, Yump Boards) with 1-3 stars. |
+| Sky & time of day | **Working** | Bevy atmosphere, cloud dome with stars and cloud shadows, solar sun + moon, street lamps; PBR Neutral tonemapping. |
+| Roadside | **Working** | Guard rails on drops, chevrons, warning/speed/town signs, knockable posts, potholes, wet, mud, washouts. |
 | Online play, matchmaking | **Missing** | LAN / forwarded port only (engine has no relay). |
 | Steam demo build | **Outdated** | Built for the 3-stage demo before the open-world pivot. |
 | Website / store copy | **Outdated** | Describes the stage-based game. |
@@ -138,32 +142,45 @@ file**, which is the source of truth: the game loads it and the editor (4.7) cha
 │  │ (switch-    camp ● logging│   stream   quarry ●      │
 │  │  backs)     track─┘       │     │         │          │
 │  │                           │     gully road│          │
-│  ●══ valley B-road ═ VILLAGE ═╧═ SERVICE PARK ═════════●  │
+│  ●══ valley B-road ═ FERNHOLLOW ═╧═ SERVICE PARK ══════●  │
 │      (tarmac)    ~~~~~~~~~ river ~~~~~~~~~~~~~          │
 │        ╰──── southern gravel loop (2 crossings) ────╯   │
 └─────────────────────────────────────────────────────────┘ z = −2,000 m
 x = −2,000 m                                             x = +2,000 m
 ```
 
-- **Land** (`land.rs`): zones from a warped macro shape (valley floor 80-120 m, basin, an
-  escarpment, a plateau up to ~490 m: **405 m of relief**, was 91), domain-warped ridged noise,
-  then **600k droplets of hydraulic erosion** on a 4 m grid (gullies, spurs, fans) and a
+- **Land** (`land.rs`, smoothed in the festival world pass, `docs/festival/WORLD_PASS.md` §2):
+  zones from a warped macro shape (valley floor 80-120 m with two river terraces, basin, an
+  escarpment, a plateau up to ~490 m: **405 m of relief**), domain-warped ridged noise with
+  rounded crests (knife edges only in a few crag patches on the plateau rim), one continuous
+  amplitude by height, then **1.2M droplets of hydraulic erosion** on a 4 m grid (gullies,
+  spurs, fans), a thermal pass that holds slopes to 75 % (110 % in the crags) and a levelled
+  town site; Catmull-Rom sampling between the grid points. `open::land::tests::slope_report`
+  measures it: > 100 % slope on 0.01 % of the map (was 3.4 %), the worst 20 m height band 46 %
+  mean slope (was 71 %), and a
   moisture map from where the water ran (mud on forest roads; ecology next).
 - **Roads solve the land** (`plan.rs`): an anisotropic A* on a 10 m grid in 16 headings; each
   step costs its length times grade above a target (4-5 %, soft limit 11-14 %), cross-slope and
   turning. On steep ground the cheapest path traverses and **switches back**; the turn limit per
   step gives **hairpins of ~8-10 m radius** (tightest on the map: 8.1 m). Paths are smoothed
   (Chaikin), untangled (no road crosses itself), and approach every junction straight.
-- **9 roads, ~29.5 km, 15 junctions, no dead ends** (every road ends on another):
-  - valley **B-road** (6.5 m tarmac, 3.7 km) through the village and service park;
+- **21 roads, ~38 km, 37 junctions, no dead ends** (every road ends on another; roads 0-7 keep
+  their kinds and order for the events, the town's streets are 8-20):
+  - valley **B-road** (6.5 m tarmac, 3.7 km), straight through Fernhollow as Main Street, and
+    past the service park;
   - **tarmac hillclimb** (6.5 m, 5.2 km) up the west side to the plateau;
   - **mountain pass** (forest, 3.4 m, 3.7 km) over the plateau by the radio tower;
   - **basin gravel** (4.6 m, 5.6 km) past the quarry and up the east wall;
-  - **forestry road** (3.4 m, 5.9 km) from the village up the escarpment past the logging camp
-    to the pass, and a **logging track** (0.7 km) from the camp to the hillclimb;
-  - **gully road** (gravel, 1.9 km) from the service park to the basin road;
-  - **southern loop** (gravel, 2.2 km) over the river twice;
-  - a **village lane** (5 m, 0.5 km).
+  - **forestry road** (3.4 m, 5.2 km) from the top of the town up the escarpment past the
+    logging camp to the pass, and a **logging track** (0.5 km) from the camp to the hillclimb;
+  - **gully road** (gravel, 3.4 km) from the service park to the basin road;
+  - **southern loop** (gravel, 3.8 km) over the river twice, straight over each bridge;
+  - **Fernhollow's streets** (5 m, ~3.6 km): the spine (6 m) from Main Street to the top of
+    the town, West and East Lane with Upper Road, Church and Mill Street, six cross lanes, all
+    T-junctions (`open/town.rs`).
+- **Three jumps** for the Yump challenges (on the hillclimb, the pass and the gully road): a
+  kicker on a straight, level stretch, crest radius 55 m on tarmac and 45 m on gravel
+  (`RoadNet::yumps`, kept in the world data). At 95-105 km/h a car flies 0.5-0.65 s.
 - Widths are rally widths: B-road 6.5 m, fast gravel 4.2-5.0 m, forest 3.0-3.8 m (were 14 / 11 /
   8 / 5.4-6.6 m).
 
@@ -179,7 +196,8 @@ x = −2,000 m                                             x = +2,000 m
 - Road heights follow the land, held to the grade (14 % forest, 13 % gravel, 11 % tarmac; up to
   ~17 % for a few metres where a road meets another), crests kept.
 - **Junctions** get their own meshes (`open/junctions.rs`, `art/junctions.rs`), ribbons trimmed
-  back to the mouths. No town kerbs or zebras any more.
+  back to the mouths. Fernhollow's blocks have kerbs and sidewalks that follow the ground; no
+  zebras. Road ribbons, verges and patches are merged per 512 m tile and material.
 - **Cross-section** (`profile.rs`): a crown (5-8 cm), worn wheel tracks (2-4 cm) on gravel,
   corners banked in (60 %), flat (25 %) or off-camber (15 %, called "off camber"), small
   undulations on gravel and forest roads; beyond the edge a 0.5 m shoulder, then on the side cut
@@ -194,20 +212,30 @@ x = −2,000 m                                             x = +2,000 m
 
 - A 2001² heightfield at 2 m, stored with the level as `assets/levels/open/terrain.r16` (16-bit,
   ~6 mm steps over the 405 m range) + `terrain.ron`.
-- It is the eroded land **shaped by the nearest road** with the stage rules (road sunk in, a
-  shoulder, fill ≤ 16 %, cut ≤ 45 %, blending back 34-52 m out). In the editor it can be
-  sculpted and painted; moving a road re-shapes the ground around the part that moved (from the
-  land, rebuilt from the seed).
+- It is the eroded land **shaped by the nearest road** (`profile::shaped`): road sunk in, a
+  shoulder, fill ≥ 16 % where the land falls gently and a 70 % bank where it drops away (how
+  fast it falls is averaged per station over ±10 m), cut ≤ 60 %, then back to the land from
+  30 m out over a width that keeps the blend under ~60 % (110 m out at most). Where a second
+  road or the next leg of a switchback is nearly as near, the two shapes blend (no crease
+  half way). A last thermal pass on the 2 m grid (`roads::terrain`) takes out what steps are
+  left, outside 3 m of each road's edge. In the editor it can be sculpted and painted; moving a
+  road re-shapes the ground around the part that moved.
 - Render: the engine's chunked, LOD'd terrain with a 4-layer splat material (`art/terrain.rs`).
 
 ### 4.4 Buildings (`buildings.rs`, `level.rs`)
 
-- **110 buildings** (were 617): a **valley village** of houses and, near its middle, shops on
-  both sides of the B-road and the lane (about 90), big sheds at the **service park**, and
-  farmhouses with barns along the low gravel roads. Each faces its road, sits on its own ground
-  (no town plateau any more) and is kept clear of every road.
-- Each is a **level entity** with a `Building` component placed by its Transform, drawn as its
-  own mesh with one shared material (a procedural facade atlas + vertex colours).
+- **654 buildings** (were 110), WORLD_PASS §3: **Fernhollow**, a mill town north of Main
+  Street (486 in its core): shops along Main Street and a riverside row, tall continuous
+  terraces round the market square, lower rows and semis towards the edge, apartments by East
+  Lane, a church with a tower, the town hall on the square, the mill by the river; the
+  **outskirts** (101 houses along the B-road, up the spine and in three hamlets: Westbrook,
+  Southford, Quarryside); **34 farm steadings** on the low gravel roads and the valley B-road;
+  sheds at the **service park**; **10 huts** at places of interest in the mountains. Rows
+  stand on the sidewalk, every building on its own ground, clear of every road.
+- Each is a **level entity** with a `Building` component placed by its Transform. In play the
+  town is drawn as **merged tiles** (128 m in the town, 512 m out in the country: 53 meshes,
+  240k triangles, one material: a procedural facade atlas + vertex colours); in the editor each
+  building draws on its own so it can be picked and moved.
 - **Collision:** each facade is a **line-segment wall** (`vehicle::Wall`, `open::walls`), so a car
   scrapes along it instead of snagging (a 4° brush at 110 km/h keeps 97 % of its speed; the old
   rows of 1.2 m cylinders spun it in).
@@ -215,7 +243,8 @@ x = −2,000 m                                             x = +2,000 m
 ### 4.5 Trees, rocks and dressing
 
 - Trees (pine / spruce / birch, near and far versions), rocks, shrubs and ground cover come from a
-  `pcg-core` graph, kept off every road, building and the village. **Ecology** (`open/ecology.rs`):
+  `pcg-core` graph, kept off every road, building and sidewalk (Fernhollow's back yards keep a
+  few garden trees). **Ecology** (`open/ecology.rs`):
   none above the **treeline** (~410 m: stunted trees and scree on the plateau), on the flat
   **valley fields** (single trees), or in **7 clear-cuts** beside the gravel and forest roads
   (stumps, a timber pile; long views open up). Two engine PCG volumes: trees (whole map) and
@@ -234,7 +263,7 @@ x = −2,000 m                                             x = +2,000 m
 ### 4.6 Events, home and traffic on the map
 
 - **Events (5)**, each a **chain of road pieces across junctions** (`EventData::then`):
-  **Fernhollow escarpment** (rally, 6.9 km of forest track from the village to the plateau),
+  **Fernhollow escarpment** (rally, 6.5 km of forest track from the top of the town to the plateau),
   **Blackpine marathon** (rally, 12.8 km: tarmac hillclimb, gravel over the plateau, down the
   basin road), **Quarry loop** (5.2 km, tarmac and gravel round the basin), **River crossings**
   (2.8 km, over the river twice) and the **Hillclimb** (5.2 km tarmac). Each finishes onto a
@@ -245,7 +274,8 @@ x = −2,000 m                                             x = +2,000 m
   tightens, opens, over crest, crest into, narrows, off camber), records and ghosts keyed by
   event id and the level's content, results screen.
 - **Home** is on the B-road by the service park.
-- **Traffic** (`traffic.rs`) drives **only the tarmac** (B-road and village lane: the gravel and
+- **Traffic** (`traffic.rs`) drives **only the tarmac** (B-road and town streets, 50 km/h on
+  the B-road through Fernhollow, fewer cars starting in the streets; the gravel and
   forest tracks are single-car rally roads); cars turn round where the tarmac ends. Intelligent-
   driver model, speed limits, junction reservation. Solid; free roam only.
 - **Map** (`src/map/`, 4 Nov 2026): the region painted once per world on a worker (~0.1 s: height tints, hill shading, 50 m contours, river, buildings, roads by kind; 2048² with mips). Free roam has a heading-up minimap (bottom left) with event dots, nearby traffic, the route line and the nearest or picked event with its distance; `M` / d-pad up (or Map on the pause menu) opens the full map, which pauses: Q/E / LB/RB pick an event, Enter / A sets a route to it along the roads (Dijkstra over the junction graph, `map/path.rs`), pan, zoom, F / X back to the car. During an event there is no map (pillar: the pace notes are the map). The map puts −z at the top (left turns stay left); the ASCII sketch in 4.1 has +z up, so it is the mirror image of the in-game map.
@@ -255,7 +285,7 @@ x = −2,000 m                                             x = +2,000 m
 | Level entity | What |
 |---|---|
 | `road 0 (BRoad)` … `road 8 (Street)` | `Spline` + `RoadSpline` |
-| `open world` | `WorldDoc`: seed, village height, time of day, events, terrain folder |
+| `open world` | `WorldDoc`: seed, town height, time of day, events, jumps, terrain folder |
 | `home`, `event start: …`, grade notes | `HomePoint`, `EventStart`, `GradeNote` (placeables) |
 | `house 0` … (110) | `Building` |
 | `Trees`, `Dressing` | `PcgOverrides` (+ the game's PCG volume at run time) |
@@ -343,7 +373,7 @@ buttons), `render_budget` (quality governor, render scale, frame pacing, detail 
 pipeline warm-up). Engine docs: `engine/docs/`, `engine/CLAUDE.md`, `GAME_GUIDE.md`.
 
 Shared by three games: Pacenote, Shroud (an FPS) and Courier (hover-bike delivery). One shared
-Cargo target dir (`shroud/target`); toolchain stable 1.99 via rustup overrides.
+Cargo target dir (`engine/target`, shared with the engine and every game); toolchain stable 1.99 via rustup overrides.
 
 ### 6.2 Determinism
 

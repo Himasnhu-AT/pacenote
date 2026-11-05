@@ -890,3 +890,19 @@ When downloading from Sketchfab, pick "glTF" (or "Autoconverted format (glTF)"),
 - All Poly Haven glTFs reference their own `textures/` subfolder; keep each folder intact. Normal maps are OpenGL convention (`nor_gl`), which Bevy expects. `arm` = AO (R), roughness (G), metal (B): Bevy's occlusion + metallic-roughness layout.
 - Triangle counts above are counted from the downloaded glTFs (all variants in the file summed). Multi-node models (e.g. `fir_sapling_a/b/c`) hold several variants: spawn one node each. No LODs are included; generate them (meshopt/Blender).
 - The ambientCG `Displacement` / Poly Haven `disp` maps are heightmaps for terrain blending or parallax.
+
+<!-- SFX BEGIN (tools/audio/cook_sfx.py) -->
+## audio/openverse
+
+Downloaded with `tools/audio/openverse_sounds.py` (packs in `tools/audio/sfx_wishlist.json`), cooked by `tools/audio/cook_sfx.py` into `assets/sounds/sfx/`. Only CC0, PDM and CC BY are cooked.
+
+- `car_horn/2_Car_Horns_273272fd.mp3`: "2 Car Horns" by alukahn (BY 3.0, freesound): https://freesound.org/people/alukahn/sounds/144137 (downloaded 2026-11-05)
+- `car_horn/Car_Horn_Beepsmp3_eab7cb51.mp3`: "Car Horn Beeps.mp3" by hsaunier10 (CC0 1.0, freesound): https://freesound.org/people/hsaunier10/sounds/254678 (downloaded 2026-11-05)
+- `car_horn/My_Car_Horn_-_Beep_Beepwav_9680f167.mp3`: "My Car Horn - Beep Beep.wav" by fogma (BY 3.0, freesound): https://freesound.org/people/fogma/sounds/26185 (downloaded 2026-11-05)
+- `dog_bark/A_dog_barking_close_recording_f3344937.mp3`: "A dog barking (close recording)" by felix.blume (CC0 1.0, freesound): https://freesound.org/people/felix.blume/sounds/199261 (downloaded 2026-11-05)
+- `dog_bark/Small_Dog_Bark_01_d5dcb31d.mp3`: "Small Dog Bark 01" by noctaro (BY 4.0, freesound): https://freesound.org/people/noctaro/sounds/242414 (downloaded 2026-11-05)
+- `gravel_hit/Gravel_Impacts_and_Fallswav_3bb6fd08.mp3`: "Gravel Impacts and Falls.wav" by lolamadeus (CC0 1.0, freesound): https://freesound.org/people/lolamadeus/sounds/179341 (downloaded 2026-11-05)
+- `gravel_hit/Gravel_impact_3_acb293ba.mp3`: "Gravel impact 3" by jorickhoofd (BY 4.0, freesound): https://freesound.org/people/jorickhoofd/sounds/169551 (downloaded 2026-11-05)
+- `service_park/Auto_Repair_Shop_with_Pneumatic_Drill_Sounds_562bf3af.mp3`: "Auto Repair Shop with Pneumatic Drill Sounds" by ericreinert (BY 3.0, freesound): https://freesound.org/people/ericreinert/sounds/120227 (downloaded 2026-11-05)
+- `service_park/CarAuto_Mechanic_Shop_93b4133b.mp3`: "Car/Auto Mechanic Shop" by producerdan (CC0 1.0, freesound): https://freesound.org/people/producerdan/sounds/266626 (downloaded 2026-11-05)
+<!-- SFX END -->

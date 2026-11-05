@@ -3,10 +3,12 @@
 //! drives on (`vehicle::Ground`).
 
 pub mod buildings;
+pub mod challenges;
 pub mod data;
 pub mod ecology;
 pub mod events;
 pub mod forest;
+pub mod furniture;
 pub mod junctions;
 pub mod land;
 pub mod plan;
@@ -16,6 +18,7 @@ pub mod live;
 pub mod placeable;
 pub mod roads;
 pub mod tour;
+pub mod town;
 pub mod traffic;
 pub mod walls;
 
@@ -63,6 +66,9 @@ pub struct OpenWorld {
     /// Town and farm buildings, and the straight walls the car can hit (their facades).
     pub buildings: Arc<buildings::Layout>,
     pub walls: Arc<walls::WallGrid>,
+    /// Guard rails, signs and road conditions (`furniture`, stream B): built from the roads and
+    /// the heights. Empty until B fills it in.
+    pub furniture: Arc<furniture::Furniture>,
     /// Where the traffic cars are (written by `traffic::TrafficPlugin` each step; the same
     /// `Arc` as the `TrafficSolids` resource): solid for the car in free roam.
     pub traffic: traffic::TrafficSolids,
@@ -135,7 +141,7 @@ impl OpenWorld {
                 }
                 h
             }
-            None => Heightfield::from_fn(n, n, SPACING, origin, |x, z| roads::height(&net, x, z)),
+            None => roads::terrain(&net, SPACING),
         };
         let layout = buildings::layout_baked(&net, &data.lots, &data.buildings);
         // Every straight wall the car can hit: facades now; parapets and barriers go here too.
@@ -146,6 +152,10 @@ impl OpenWorld {
             let hf = &heights;
             all_walls.extend(crate::art::roadside::walls(&crate::art::roadside::items(&net, &cuts), &|p| hf.height_at(p.x, p.y)));
         }
+        // Fernhollow's parked cars are solid too.
+        all_walls.extend(town::parked(&net, &layout).iter().map(|p| town::parked_wall(p, heights.height_at(p.pos.x, p.pos.y))));
+        let furniture = furniture::build(&net, &heights);
+        furniture::walls(&furniture, &mut all_walls);
         let walls = walls::WallGrid::new(&all_walls, 10.0);
         Ok(OpenWorld {
             data: Arc::new(data),
@@ -153,6 +163,7 @@ impl OpenWorld {
             heights: Arc::new(heights),
             buildings: Arc::new(layout),
             walls: Arc::new(walls),
+            furniture: Arc::new(furniture),
             traffic: traffic::TrafficSolids::default(),
             traffic_solid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             terrain_dir: None,
@@ -173,7 +184,13 @@ impl OpenWorld {
     /// tracks, shoulder, ditch; `profile::ground`), the terrain elsewhere.
     pub fn ground_height(&self, x: f32, z: f32) -> f32 {
         let hf = self.heights.height_at(x, z);
-        profile::ground(&self.net, Vec2::new(x, z), hf).unwrap_or(hf)
+        profile::ground(&self.net, Vec2::new(x, z), hf).unwrap_or(hf) - furniture::dip(&self.furniture, x, z)
+    }
+
+    /// What the tyres are on at (x, z): a road condition patch (`furniture`), else the road's
+    /// or the land's surface (`roads::surface`).
+    pub fn surface_at(&self, x: f32, z: f32) -> Surface {
+        furniture::surface_override(&self.furniture, x, z).unwrap_or_else(|| roads::surface(&self.net, x, z))
     }
 
     /// The ground's normal: from the exact profile near a road, the terrain's elsewhere.
@@ -197,7 +214,7 @@ impl Ground for OpenWorld {
         self.ground_normal(x, z)
     }
     fn surface(&self, x: f32, z: f32) -> Surface {
-        roads::surface(&self.net, x, z)
+        self.surface_at(x, z)
     }
     fn obstacles(&self, p: Vec2, r: f32, out: &mut Vec<Obstacle>) {
         out.clear();

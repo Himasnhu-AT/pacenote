@@ -16,3 +16,13 @@ Recorded by Chippy569 (engine), craigsmith, audible-edge, deerlord, qubodup and 
 
 Thanks:
 Everyone who reads the road out loud.
+
+# SFX BEGIN (tools/audio/cook_sfx.py)
+Sound effects (from Openverse):
+"2 Car Horns" by alukahn (BY 3.0, freesound): https://freesound.org/people/alukahn/sounds/144137  [CC BY: credit required]
+"My Car Horn - Beep Beep.wav" by fogma (BY 3.0, freesound): https://freesound.org/people/fogma/sounds/26185  [CC BY: credit required]
+"Small Dog Bark 01" by noctaro (BY 4.0, freesound): https://freesound.org/people/noctaro/sounds/242414  [CC BY: credit required]
+"Gravel impact 3" by jorickhoofd (BY 4.0, freesound): https://freesound.org/people/jorickhoofd/sounds/169551  [CC BY: credit required]
+"Auto Repair Shop with Pneumatic Drill Sounds" by ericreinert (BY 3.0, freesound): https://freesound.org/people/ericreinert/sounds/120227  [CC BY: credit required]
+CC0 / public domain sounds, with thanks: felix.blume, hsaunier10, lolamadeus, producerdan.
+# SFX END

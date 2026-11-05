@@ -7,6 +7,7 @@ import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     forward_io::{VertexOutput, FragmentOutput},
+    mesh_view_bindings::view,
 };
 @if(VISIBILITY_RANGE_DITHER)
 import bevy_pbr::render::pbr_functions::visibility_range_dither;
@@ -20,6 +21,10 @@ struct Params {
     extent: vec4<f32>,
     // x: macro variation strength, y: macro frequency (1/m), z: detail blend (0..1), w: unused
     misc: vec4<f32>,
+    // Cloud shadows (stream C, `sky.rs`): xy wind offset (m), z coverage, w strength (0 = off)
+    cloud: vec4<f32>,
+    // xyz towards the sun, w cloud mid-height (m)
+    cloud_sun: vec4<f32>,
 };
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> p: Params;
@@ -38,6 +43,30 @@ struct Params {
 @group(constants::MATERIAL_BIND_GROUP) @binding(113) var o2: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(114) var o3: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(115) var smp: sampler;
+// Light under the forest canopy (R: 1 open .. 0 dense), over the same extent as the splat.
+@group(constants::MATERIAL_BIND_GROUP) @binding(116) var canopy_tex: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(117) var canopy_smp: sampler;
+// The cloud layer's weather map (`clouds.wesl`): R macro coverage, G shape, B puffs.
+@group(constants::MATERIAL_BIND_GROUP) @binding(118) var cloud_tex: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(119) var cloud_smp: sampler;
+
+// Direct sun let through by the clouds above `wp` (1 = clear), using the same coverage maths
+// as `clouds.wesl` at the layer's mid-height, softened; only sun-facing ground darkens.
+fn cloud_shadow(wp: vec3<f32>, n: vec3<f32>) -> f32 {
+    let L = p.cloud_sun.xyz;
+    if p.cloud.w <= 0.0 || L.y < 0.05 {
+        return 1.0;
+    }
+    let q = wp.xz + L.xz * ((p.cloud_sun.w - wp.y) / L.y) + p.cloud.xy;
+    // Tile sizes as `clouds.wesl` (MACRO_TILE, SHAPE_TILE).
+    let m = textureSampleLevel(cloud_tex, cloud_smp, q / 60000.0, 0.0).r;
+    let s = textureSampleLevel(cloud_tex, cloud_smp, q / 19000.0 + vec2<f32>(0.31, 0.17), 0.0);
+    let cov = clamp(p.cloud.z + (m - 0.5) * 0.7, 0.0, 1.0);
+    let shape = s.g * 0.75 + s.b * 0.25;
+    let lo = 1.0 - cov * 1.25;
+    let d = clamp((shape - lo) / max(1.05 - cov * 0.4 - lo, 1e-3), 0.0, 1.0);
+    return 1.0 - smoothstep(0.2, 0.55, d) * p.cloud.w * clamp(dot(n, L), 0.0, 1.0);
+}
 
 fn hash21(q0: vec2<f32>) -> f32 {
     let q = fract(q0 * vec2<f32>(123.34, 456.21));
@@ -122,6 +151,14 @@ fn fragment(vertex_output: VertexOutput, @builtin(front_facing) is_front: bool) 
     let freq = p.misc.y;
     let mv = value_noise(wp * freq) * 0.6 + value_noise(wp * freq * 4.7) * 0.4;
     col = col * (1.0 + p.misc.x * (mv - 0.5));
+
+    // Forest floor in shade beyond the shadow distance (near trees cast real shadows).
+    let light = textureSample(canopy_tex, canopy_smp, suv).r;
+    let far = smoothstep(110.0, 170.0, distance(view.world_position.xyz, in.world_position.xyz));
+    col = col * mix(1.0, 0.3, (1.0 - light) * far);
+
+    // Drifting cloud shadows on sunlit ground.
+    col = col * cloud_shadow(in.world_position.xyz, normalize(in.world_normal));
 
     // World-aligned tangent frame (UVs are world XZ; green = -Z).
     let N = normalize(in.world_normal);

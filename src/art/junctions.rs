@@ -449,7 +449,13 @@ fn kerbs(bufs: &mut Bufs, open: &OpenWorld, geoms: &[JunctionGeom], plan: &Plan)
         }
         for p in pieces {
             total += p.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>();
-            kerb_piece(bufs.at(Layer::Kerb, blk.centre()), &p, net.town_y);
+            // Every ~3 m, each point on the ground at the road's edge (the town slopes).
+            let mut dense = vec![p[0]];
+            for w in p.windows(2) {
+                let n = (w[0].distance(w[1]) / 3.0).ceil().max(1.0) as usize;
+                dense.extend((1..=n).map(|k| w[0].lerp(w[1], k as f32 / n as f32)));
+            }
+            kerb_piece(bufs.at(Layer::Kerb, blk.centre()), &dense, &|q| open.heights.height_at(q.x, q.y));
         }
     }
     total
@@ -457,8 +463,8 @@ fn kerbs(bufs: &mut Bufs, open: &OpenWorld, geoms: &[JunctionGeom], plan: &Plan)
 
 /// A kerb along `pts` (counter-clockwise round its block: the block on the left), profile
 /// (offset into the block, height above the street): a vertical face, a small chamfer and the
-/// top, with end caps.
-fn kerb_piece(b: &mut Buf, pts: &[Vec2], y0: f32) {
+/// top, with end caps; its foot at `ground` at each point.
+fn kerb_piece(b: &mut Buf, pts: &[Vec2], ground: &dyn Fn(Vec2) -> f32) {
     let face = [(0.0f32, 0.0f32), (0.0, KERB_TOP - 0.025)];
     let chamfer = [(0.0f32, KERB_TOP - 0.025), (0.025, KERB_TOP)];
     let top = [(0.025f32, KERB_TOP), (0.25, KERB_TOP)];
@@ -491,6 +497,7 @@ fn kerb_piece(b: &mut Buf, pts: &[Vec2], y0: f32) {
                 _ => Vec3::Y,
             };
             let row = b.pos.len() as u32;
+            let y0 = ground(pts[k]);
             for (o, h) in strip {
                 b.v(v3(pts[k] + inn * o, y0 + h), [along / 1.0, h + o], [1.0, 1.0, 1.0, 1.0]);
                 b.nrm.push(nrm.to_array());
@@ -512,6 +519,7 @@ fn kerb_piece(b: &mut Buf, pts: &[Vec2], y0: f32) {
         let inn = inward[k];
         let prof = [(0.0f32, 0.0f32), (0.0, KERB_TOP - 0.025), (0.025, KERB_TOP), (0.25, KERB_TOP), (0.25, 0.0)];
         let base = b.pos.len() as u32;
+        let y0 = ground(pts[k]);
         for (o, h) in prof {
             b.v(v3(pts[k] + inn * o, y0 + h), [o, h], [1.0, 1.0, 1.0, 1.0]);
             b.nrm.push(nrm.to_array());
