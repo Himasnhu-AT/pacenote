@@ -190,14 +190,8 @@ fn race_pre(mut race: ResMut<RaceRun>, run: Res<StageRun>, mut cars: Query<&mut 
             }
         }
     }
-    // A Recover (drive adds +5 s to the penalty): held for 5 s instead (the clock is shared).
-    if run.penalty > race.last_penalty {
-        race.last_penalty = run.penalty;
-        race.hold = super::racers::RECOVER_HOLD;
-    }
     let hold_start = run.countdown <= 0.0 && race.sim.player_held();
-    let hold = hold_start || race.hold > 0;
-    race.hold = race.hold.saturating_sub(1);
+    let hold = recover_hold(&mut race.hold, &mut race.last_penalty, run.penalty) || hold_start;
     if hold {
         auto.0 = Some(Input { handbrake: true, ..Input::default() });
         race.holding = true;
@@ -205,6 +199,19 @@ fn race_pre(mut race: ResMut<RaceRun>, run: Res<StageRun>, mut cars: Query<&mut 
         auto.0 = None;
         race.holding = false;
     }
+}
+
+/// One step of the Recover hold: a Recover (drive adds +5 s to the penalty) holds the player
+/// for [`RECOVER_HOLD`](super::racers::RECOVER_HOLD) steps instead (the clock is shared).
+/// True while held.
+pub fn recover_hold(hold: &mut u32, last_penalty: &mut f32, penalty: f32) -> bool {
+    if penalty > *last_penalty {
+        *last_penalty = penalty;
+        *hold = super::racers::RECOVER_HOLD;
+    }
+    let held = *hold > 0;
+    *hold = hold.saturating_sub(1);
+    held
 }
 
 /// After the player's step: every rival steps; solids, field and result go out.
@@ -392,4 +399,21 @@ pub fn standings(race: &RaceRun, run: &StageRun) -> Vec<(Who, f32, Option<Finish
         run.finished.map(|t| Finish::Time(t - run.penalty))
     };
     race.sim.standings(run.progress.max(race.player_progress), pf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_recover_holds_the_player_300_steps() {
+        let (mut hold, mut last) = (0u32, 0.0f32);
+        assert!(!recover_hold(&mut hold, &mut last, 0.0), "no recover, no hold");
+        // drive adds +5 s on a Recover: held for exactly 300 steps (5 s), then free.
+        let held = (0..400).filter(|_| recover_hold(&mut hold, &mut last, 5.0)).count();
+        assert_eq!(held, super::super::racers::RECOVER_HOLD as usize);
+        assert_eq!(super::super::racers::RECOVER_HOLD, 300);
+        // A second Recover holds again.
+        assert!(recover_hold(&mut hold, &mut last, 10.0));
+    }
 }
