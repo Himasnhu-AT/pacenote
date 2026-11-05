@@ -31,11 +31,6 @@ dev = ["engine/editor", "engine/devtools", "engine/devkit", "telemetry"]
 telemetry = ["engine/trace", "dep:ashlar-trace"]
 # The free demo: three stages, wishlist prompts (src/demo.rs). PACENOTE_STEAM_URL at build time.
 demo = []
-# Temporary no-op tags for parallel worktrees (own pacenote artifacts in the shared target dir).
-wt_world = []
-wt_style = []
-wt_career = []
-wt_carfeel = []
 
 [profile.dev]
 opt-level = 1
