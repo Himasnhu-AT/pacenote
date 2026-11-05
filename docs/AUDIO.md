@@ -392,6 +392,25 @@ Freesound results carry no `category`, so don't filter on it. Listen to every ne
 wiring it in: search results vary in quality. Packs with nothing usable today: service park,
 dog bark, car horn, gravel hits (search with other words, or synthesise).
 
+### Where they play (`src/audio/festival_recorded.rs`)
+
+| Sound | When | Bus, level |
+|---|---|---|
+| `start_crowd` | an event's countdown reaches 3 (races: `career::race_flow`; time trials and classic stages: `trial_cues`) | sfx −14 |
+| `air_horn` | GO, and at the finish; a win or a best adds a second horn | sfx −8 / −6 |
+| `finish_crowd` | the finish: applause (`_3`, −15), or a long cheer on a win / best (`_1`, `_2`, −8) | sfx |
+| `radar_shutter_2` | a Radar Post flash, 3D at the camera, under the synthesised readout chime | sfx −4 |
+| `money_1` | `MoneyEarned`, and a purchase (the wallet's `spent` grew) | hud −14 |
+| `church_bell_1` | on the hour, 07:00-21:00, 3D from the town square (heard to ~1.4 km) | sfx −2 |
+| `guardrail_scrape_1/2` | the car's side touching one of B's rails above 2 m/s, 3D at the contact | sfx −8 |
+| beds | looping on `ambience`, weights crossfaded (τ 1.5 s): `town_ambience_2` in and around the Fernhollow core, `birds_morning_1` 05:00-11:00, `night_insects_1` by night, `wind_pines_1` above ~250 m (the pass, the plateau) | ambience −5 to −9 |
+
+The beds and driving one-shots load (AssetServer, decoded off-thread) on entering the game and are
+released on leaving it; money loads at startup (the Dealership). Not used after a check of level,
+spectrogram and title: `birds_morning_2` (rain), `night_insects_2` (a band), `town_ambience_1`
+(a snowstorm), `radar_shutter_1` (beeps), `radar_shutter_3` (a phone), `guardrail_scrape_3`
+(a tick), `wind_pines_2` (a step at the loop seam). Dev: `festival.beds`, `festival.voices`.
+
 ## Music (menus and loading screen, `src/audio/music.rs`)
 
 Recorded music, picked by ear from Openverse and pinned by id in `tools/audio/sfx_wishlist.json`

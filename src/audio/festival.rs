@@ -29,9 +29,14 @@ pub const LOST_DB: f32 = -18.0;
 
 pub struct FestivalAudioPlugin;
 
+/// The recorded effects and ambience beds (`assets/sounds/sfx`).
+#[path = "festival_recorded.rs"]
+pub mod recorded;
+
 impl Plugin for FestivalAudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FestivalAudioStats>().add_systems(Startup, setup).add_systems(Update, play);
+        recorded::register(app);
     }
 }
 
@@ -116,7 +121,8 @@ fn play(
     }
     for r in radar.read() {
         stats.radar += 1;
-        ctl.play_at("fest.radar", r.pos + Vec3::Y * 3.0);
+        // The recorded shutter (the synthesised one stays registered as `fest.radar`).
+        ctl.play_at("rec.shutter", r.pos + Vec3::Y * 3.0);
         ctl.play(if r.personal_best {
             "fest.readout.best"
         } else if r.target_beaten {
@@ -135,16 +141,10 @@ fn play(
             RunCue::Fail => ctl.play("fest.fail"),
         };
     }
-    for m in money.read() {
+    for _ in money.read() {
         stats.money += 1;
-        let secs = (0.3 + 0.15 * (m.amount.max(1) as f32).log10()).min(1.2);
-        ctl.play(if secs < 0.6 {
-            "fest.money.s"
-        } else if secs < 0.95 {
-            "fest.money.m"
-        } else {
-            "fest.money.l"
-        });
+        // The recorded coins (`recorded`); the synthesised roll stays as `fest.money.*`.
+        ctl.play("rec.money");
     }
 }
 
