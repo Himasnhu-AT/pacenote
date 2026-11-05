@@ -41,7 +41,8 @@ pub struct CarArtPlugin;
 
 impl Plugin for CarArtPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (rig, wheels, cockpit, wear, super::hands::find_levers, super::hands::find_arms, super::hands::animate).chain()).add_plugins(super::mirror::MirrorPlugin);
+        app.add_systems(Update, cabin_fill.run_if(resource_exists::<crate::daytime::DayClock>))
+            .add_systems(Update, (rig, wheels, cockpit, wear, super::hands::find_levers, super::hands::find_arms, super::hands::animate).chain()).add_plugins(super::mirror::MirrorPlugin);
     }
 }
 
@@ -208,6 +209,28 @@ const DIALS: [&str; 3] = ["SteeringWheel", "Tacho", "Speedo"];
 
 /// Where the model's origin (its hub height) sits in the body frame: the front mounts at static
 /// load, raised by the model's bigger tyres.
+/// The cabin's fill light.
+#[derive(Component)]
+pub struct CabinFill;
+
+/// How much of the cabin fill a `daylight` (0 night .. 1 day, `DayClock::daylight`) keeps: it
+/// stands in for daylight leaking in, so it falls with the exposure (~12 stops to night).
+/// Without this the cockpit glares white-cyan at dusk and night (stream C's report).
+pub fn cabin_fill_scale(daylight: f32) -> f32 {
+    2f32.powf(-12.0 * (1.0 - daylight.clamp(0.0, 1.0)))
+}
+
+/// The fill follows the day (only rewritten when it moves by more than 5 %).
+fn cabin_fill(clock: Res<crate::daytime::DayClock>, mut fills: Query<&mut PointLight, With<CabinFill>>) {
+    let want = CABIN_FILL_LUMENS * cabin_fill_scale(clock.daylight());
+    for mut l in &mut fills {
+        let now = l.bypass_change_detection().intensity;
+        if (now - want).abs() > 0.05 * now.max(want) {
+            l.intensity = want;
+        }
+    }
+}
+
 pub fn model_height(s: &crate::vehicle::Spec) -> f32 {
     let static_comp = (s.mass * 9.81 / 4.0 / s.spring).min(s.travel);
     s.mounts[0].y - (s.rest - static_comp) + (MODEL_WHEEL_RADIUS - s.wheel_radius)
@@ -228,6 +251,7 @@ pub fn spawn(world: &mut World, car: Entity) {
     let fill = world
         .spawn((
             Name::new("cabin fill light"),
+            CabinFill,
             PointLight { color: Color::srgb(1.0, 0.97, 0.92), intensity: CABIN_FILL_LUMENS, range: 1.6, radius: 0.3, shadow_maps_enabled: false, ..default() },
             Transform::from_translation(CABIN_FILL_MODEL),
             Actor,
@@ -619,6 +643,13 @@ fn wear(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cabin_fill_fades_with_the_day() {
+        assert_eq!(cabin_fill_scale(1.0), 1.0);
+        assert!(cabin_fill_scale(0.0) < 3e-4);
+        assert!(cabin_fill_scale(0.5) > cabin_fill_scale(0.2));
+    }
 
     #[test]
     fn lamp_glass_splits_front_from_back() {
