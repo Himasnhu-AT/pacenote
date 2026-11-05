@@ -152,6 +152,8 @@ impl OpenWorld {
             let hf = &heights;
             all_walls.extend(crate::art::roadside::walls(&crate::art::roadside::items(&net, &cuts), &|p| hf.height_at(p.x, p.y)));
         }
+        // Fernhollow's parked cars are solid too.
+        all_walls.extend(town::parked(&net, &layout).iter().map(|p| town::parked_wall(p, heights.height_at(p.pos.x, p.pos.y))));
         let furniture = furniture::build(&net, &heights);
         furniture::walls(&furniture, &mut all_walls);
         let walls = walls::WallGrid::new(&all_walls, 10.0);

@@ -128,3 +128,109 @@ mod tests {
         }
     }
 }
+
+/// A parked car in Fernhollow: where (on the ground), which way it points, and which of the
+/// four parked looks it has (two body shapes × two paints, so they batch into few draws).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Parked {
+    pub pos: Vec2,
+    pub dir: Vec2,
+    pub look: u8,
+}
+
+/// Parked cars' size (m): a traffic car's.
+pub const PARKED_LEN: f32 = super::traffic::CAR_LEN;
+pub const PARKED_WIDTH: f32 = super::traffic::CAR_WIDTH;
+
+/// Fernhollow's parked cars: most bays of the car park filled, and cars pulled up on the
+/// sidewalk (town style, two wheels on the kerb side) along the town's streets and Main
+/// Street, clear of junctions and of each other. Pure: the same from the roads and blocks.
+pub fn parked(net: &super::RoadNet, layout: &super::buildings::Layout) -> Vec<Parked> {
+    use super::buildings::{LotKind, SIDEWALK};
+    let mut rng = crate::stage::Rng::new(net.seed ^ 0x9A2C_ED);
+    let mut out: Vec<Parked> = Vec::new();
+    let lots: Vec<&super::buildings::Block> = layout.blocks.iter().filter(|b| b.cell.is_some()).collect();
+    // The car park: its bays (2.5 x 5.5 m cells on the world grid, every third row an aisle).
+    for blk in lots.iter().filter(|b| b.kind == LotKind::Parking) {
+        let (i0, i1) = ((blk.min.x / 2.5).ceil() as i32, (blk.max.x / 2.5).floor() as i32 - 1);
+        let (j0, j1) = ((-blk.max.y / 5.5).ceil() as i32, (-blk.min.y / 5.5).floor() as i32 - 1);
+        for j in j0..=j1 {
+            if j.rem_euclid(3) == 2 {
+                continue;
+            }
+            for i in i0..=i1 {
+                if rng.chance(0.65) {
+                    let dir = if j.rem_euclid(3) == 0 { Vec2::Y } else { -Vec2::Y };
+                    out.push(Parked { pos: Vec2::new(2.5 * (i as f32 + 0.5), -5.5 * (j as f32 + 0.5)), dir, look: (rng.f() * 4.0) as u8 % 4 });
+                }
+            }
+        }
+    }
+    // On the sidewalk along the streets (roads 8 on) and Main Street in town.
+    let on_sidewalk = |p: Vec2| {
+        lots.iter().any(|b| {
+            let (lo, hi) = (b.min - Vec2::splat(SIDEWALK), b.max + Vec2::splat(SIDEWALK));
+            let inside_ring = p.x > lo.x && p.y > lo.y && p.x < hi.x && p.y < hi.y;
+            let in_lot = p.x > b.min.x - 0.3 && p.y > b.min.y - 0.3 && p.x < b.max.x + 0.3 && p.y < b.max.y + 0.3;
+            inside_ring && !in_lot
+        })
+    };
+    for (k, r) in net.roads.iter().enumerate() {
+        if !(k == 0 || k >= 8) {
+            continue;
+        }
+        let road = &r.road;
+        let here: Vec<usize> = net.junctions.iter().flat_map(|j| j.roads.iter().filter(|x| x.0 == k).map(|x| x.1)).collect();
+        let mut i = 0;
+        while i < road.len() {
+            let c = Vec2::new(road.pts[i].x, road.pts[i].z);
+            if !in_core(c) || here.iter().any(|&j| j.abs_diff(i) as f32 * crate::stage::STEP < 16.0) {
+                i += 3;
+                continue;
+            }
+            let d = road.dir[i];
+            for side in [1.0f32, -1.0] {
+                if !rng.chance(0.1) {
+                    continue;
+                }
+                // Left of travel = (dz, −dx); the car's centre 1 m in from the kerb.
+                let p = c + Vec2::new(d.y, -d.x) * side * (road.width[i] * 0.5 + 1.0);
+                let corners = [p + d * (PARKED_LEN * 0.5), p - d * (PARKED_LEN * 0.5)];
+                if corners.iter().all(|q| on_sidewalk(*q)) && out.iter().all(|o| o.pos.distance(p) > PARKED_LEN + 1.5) && !layout.occupied(p, 1.2) {
+                    let dir = if rng.chance(0.5) { d } else { -d };
+                    out.push(Parked { pos: p, dir, look: (rng.f() * 4.0) as u8 % 4 });
+                }
+            }
+            i += (6.0 / crate::stage::STEP) as usize;
+        }
+    }
+    out
+}
+
+/// A parked car as a solid: a capsule along it, as wide as the car, `top` m high.
+pub fn parked_wall(p: &Parked, ground: f32) -> crate::vehicle::Wall {
+    let r = PARKED_WIDTH * 0.5;
+    let h = p.dir * (PARKED_LEN * 0.5 - r);
+    crate::vehicle::Wall::new(p.pos - h, p.pos + h, r, ground + 1.5)
+}
+
+#[cfg(test)]
+mod parked_tests {
+    /// Cars park in town, off the traffic lanes (on sidewalks or in the car park), apart.
+    #[test]
+    fn parked_cars_keep_off_the_lanes() {
+        let net = crate::open::roads::generate(crate::open::SEED);
+        let layout = crate::open::buildings::layout(&net);
+        let cars = super::parked(&net, &layout);
+        eprintln!("{} parked cars", cars.len());
+        assert!((30..=160).contains(&cars.len()), "{}", cars.len());
+        for c in &cars {
+            for q in [c.pos + c.dir * 2.2, c.pos - c.dir * 2.2, c.pos] {
+                if let Some(n) = net.nearest(q, 30.0) {
+                    let half = net.roads[n.road].road.half_width(&n.at);
+                    assert!(n.at.lateral.abs() > half - 0.1, "parked car at {} on a road", c.pos);
+                }
+            }
+        }
+    }
+}
