@@ -86,19 +86,19 @@ const KEYS: [Key; 13] = [
     // Sun ≈ −3.5°: dawn glow.
     Key { h: 5.35, ev: 7.6, vis: 3000.0, haze: [0.3, 0.3, 0.38], glow: [0.7, 0.5, 0.4], amb: 40.0, amb_col: [0.55, 0.62, 0.9], cover: 0.35 },
     // Sun ≈ +3.7°: low gold, a little valley mist.
-    Key { h: 6.0, ev: 10.6, vis: 4000.0, haze: [0.72, 0.68, 0.68], glow: [1.0, 0.72, 0.5], amb: 150.0, amb_col: [0.66, 0.72, 0.95], cover: 0.35 },
+    Key { h: 6.0, ev: 10.6, vis: 4000.0, haze: [0.72, 0.68, 0.68], glow: [1.0, 0.72, 0.5], amb: 150.0, amb_col: [0.66, 0.72, 0.95], cover: 0.25 },
     // Sun ≈ +8.5°.
-    Key { h: 6.5, ev: 11.6, vis: 5000.0, haze: [0.74, 0.74, 0.76], glow: [1.0, 0.82, 0.62], amb: 230.0, amb_col: [0.7, 0.74, 0.95], cover: 0.35 },
+    Key { h: 6.5, ev: 11.6, vis: 5000.0, haze: [0.74, 0.74, 0.76], glow: [1.0, 0.82, 0.62], amb: 230.0, amb_col: [0.7, 0.74, 0.95], cover: 0.28 },
     // Sun 34°.
-    Key { h: 9.0, ev: 13.6, vis: 8000.0, haze: [0.7, 0.77, 0.88], glow: [1.0, 0.94, 0.82], amb: 450.0, amb_col: [0.75, 0.82, 1.0], cover: 0.38 },
+    Key { h: 9.0, ev: 13.6, vis: 8000.0, haze: [0.7, 0.77, 0.88], glow: [1.0, 0.94, 0.82], amb: 450.0, amb_col: [0.75, 0.82, 1.0], cover: 0.42 },
     // Sun 60°.
-    Key { h: 12.0, ev: 14.4, vis: 9000.0, haze: [0.72, 0.79, 0.9], glow: [1.0, 0.96, 0.88], amb: 600.0, amb_col: [0.78, 0.84, 1.0], cover: 0.5 },
+    Key { h: 12.0, ev: 14.4, vis: 9000.0, haze: [0.72, 0.79, 0.9], glow: [1.0, 0.96, 0.88], amb: 600.0, amb_col: [0.78, 0.84, 1.0], cover: 0.55 },
     // Sun 45°.
-    Key { h: 16.0, ev: 14.1, vis: 8000.0, haze: [0.72, 0.78, 0.88], glow: [1.0, 0.94, 0.84], amb: 550.0, amb_col: [0.78, 0.83, 1.0], cover: 0.45 },
+    Key { h: 16.0, ev: 14.1, vis: 8000.0, haze: [0.72, 0.78, 0.88], glow: [1.0, 0.94, 0.84], amb: 550.0, amb_col: [0.78, 0.83, 1.0], cover: 0.55 },
     // Sun 13.5°.
-    Key { h: 19.0, ev: 12.4, vis: 5500.0, haze: [0.76, 0.74, 0.74], glow: [1.0, 0.8, 0.58], amb: 300.0, amb_col: [0.68, 0.72, 0.95], cover: 0.4 },
+    Key { h: 19.0, ev: 12.4, vis: 5500.0, haze: [0.76, 0.74, 0.74], glow: [1.0, 0.8, 0.58], amb: 300.0, amb_col: [0.68, 0.72, 0.95], cover: 0.45 },
     // Sun ≈ +3.7°: sunset.
-    Key { h: 20.0, ev: 10.4, vis: 4000.0, haze: [0.72, 0.64, 0.62], glow: [1.0, 0.66, 0.42], amb: 140.0, amb_col: [0.62, 0.66, 0.95], cover: 0.4 },
+    Key { h: 20.0, ev: 10.4, vis: 4000.0, haze: [0.72, 0.64, 0.62], glow: [1.0, 0.66, 0.42], amb: 140.0, amb_col: [0.62, 0.66, 0.95], cover: 0.38 },
     // Sun ≈ −1°: dusk glow.
     Key { h: 20.5, ev: 8.8, vis: 3000.0, haze: [0.38, 0.36, 0.44], glow: [0.8, 0.52, 0.4], amb: 70.0, amb_col: [0.55, 0.6, 0.95], cover: 0.35 },
     // Sun ≈ −7.5°: blue hour.
@@ -142,6 +142,13 @@ pub fn cloud_cover(hours: f32, weather: Weather) -> f32 {
         Weather::Clear => sample(hours).cover,
         _ => 0.9,
     }
+}
+
+/// How built-up the cumulus are at clock hour `hours` (0 flat morning puffs .. 1 towering
+/// afternoon cells): daytime convection, peaking mid-afternoon.
+pub fn cloud_growth(hours: f32) -> f32 {
+    let x = ((hours - 15.0) / 5.0).clamp(-1.0, 1.0);
+    (0.15 + 0.85 * (1.0 - x * x)).clamp(0.0, 1.0)
 }
 
 /// Moon: the sun light below this sun elevation (degrees), fully in by [`MOON_FULL`].
@@ -247,8 +254,10 @@ pub fn day_look(hours: f32, weather: Weather, vis: f32) -> Look {
     look.grading.midtones = GradeSection { contrast: 1.06, ..GradeSection::default() };
     look.bloom.intensity = 0.1;
     if light.moon > 0.0 {
-        // Night: cool and desaturated (scotopic), a touch of vignette.
+        // Night: cool and desaturated (scotopic). The cool white balance alone leans the moonlit
+        // sky teal under PBR Neutral; a magenta tint takes it back to navy.
         look.grading.temperature = -0.06;
+        look.grading.tint = 0.07;
         look.grading.post_saturation = 0.72;
         look.bloom.intensity = 0.16;
     }
@@ -305,6 +314,13 @@ fn overcast(look: &mut Look, k: &Key, weather: Weather, true_el: f32) {
 /// clock then moves it ([`drive_look`]).
 pub fn stage_look(def: &StageDef, vis: f32) -> Look {
     day_look(stage_hours(def.time), def.weather, vis)
+}
+
+/// How bright a fake fill light tuned for daylight should be at clock hour `hours` (1 at noon):
+/// the keyed exposure relative to noon's, so it keeps the same share of the frame all day
+/// (the cabin fill, `art::car`).
+pub fn daylight_fill_scale(hours: f32) -> f32 {
+    2f32.powf(sample(hours).ev - 14.4).clamp(1e-5, 1.0)
 }
 
 /// Clock hours per 0.02° of sun travel (15°/h): the look is rewritten once per step.

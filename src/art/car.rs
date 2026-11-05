@@ -213,16 +213,16 @@ const DIALS: [&str; 3] = ["SteeringWheel", "Tacho", "Speedo"];
 #[derive(Component)]
 pub struct CabinFill;
 
-/// How much of the cabin fill a `daylight` (0 night .. 1 day, `DayClock::daylight`) keeps: it
-/// stands in for daylight leaking in, so it falls with the exposure (~12 stops to night).
-/// Without this the cockpit glares white-cyan at dusk and night (stream C's report).
-pub fn cabin_fill_scale(daylight: f32) -> f32 {
-    2f32.powf(-12.0 * (1.0 - daylight.clamp(0.0, 1.0)))
+/// How much of the cabin fill is kept at clock hour `hours`: it stands in for daylight leaking
+/// in, so it falls with the keyed exposure (`art::look::daylight_fill_scale`, ~14 stops to
+/// night). Without this the cockpit glares white-cyan at dusk and night.
+pub fn cabin_fill_scale(hours: f32) -> f32 {
+    super::look::daylight_fill_scale(hours)
 }
 
 /// The fill follows the day (only rewritten when it moves by more than 5 %).
 fn cabin_fill(clock: Res<crate::daytime::DayClock>, mut fills: Query<&mut PointLight, With<CabinFill>>) {
-    let want = CABIN_FILL_LUMENS * cabin_fill_scale(clock.daylight());
+    let want = CABIN_FILL_LUMENS * cabin_fill_scale(clock.hours);
     for mut l in &mut fills {
         let now = l.bypass_change_detection().intensity;
         if (now - want).abs() > 0.05 * now.max(want) {
@@ -647,9 +647,9 @@ mod tests {
 
     #[test]
     fn cabin_fill_fades_with_the_day() {
-        assert_eq!(cabin_fill_scale(1.0), 1.0);
-        assert!(cabin_fill_scale(0.0) < 3e-4);
-        assert!(cabin_fill_scale(0.5) > cabin_fill_scale(0.2));
+        assert_eq!(cabin_fill_scale(12.0), 1.0);
+        assert!(cabin_fill_scale(23.0) < 3e-4);
+        assert!(cabin_fill_scale(19.0) > cabin_fill_scale(20.5));
     }
 
     #[test]

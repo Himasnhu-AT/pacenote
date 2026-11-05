@@ -16,7 +16,7 @@ struct Clouds {
     // rgb: sky radiance from above / ground bounce from below
     amb_top: vec4<f32>,
     amb_bot: vec4<f32>,
-    // rgb: horizon haze radiance; w: distance (m) at which clouds are half haze
+    // rgb: horizon haze radiance; w: cumulus growth 0..1
     haze: vec4<f32>,
     // coverage, extinction (1/m), base and top altitude (m)
     shape: vec4<f32>,
@@ -40,7 +40,9 @@ const PI: f32 = 3.14159265;
 const MAX_PATH: f32 = 14000.0;
 // Map scales (m per texture tile): macro coverage, shape, detail volume.
 const MACRO_TILE: f32 = 60000.0;
-const SHAPE_TILE: f32 = 14000.0;
+const SHAPE_TILE: f32 = 19000.0;
+// Distance (m) at which far clouds are half haze.
+const HAZE_DIST: f32 = 30000.0;
 const DETAIL_TILE: f32 = 1700.0;
 
 struct VOut {
@@ -78,7 +80,7 @@ fn density(p: vec3<f32>, detail: bool) -> f32 {
     // Local coverage: the global value moved by the macro map (clear and cloudy regions).
     let cov = clamp(c.shape.x + (m.r - 0.5) * 0.7, 0.0, 1.0);
     // Height profile: flat-ish bases, rounded tops; denser cells grow taller.
-    let tall = mix(0.35, 1.0, s.b);
+    let tall = mix(0.3, 1.0, s.b) * mix(0.45, 1.0, c.haze.w);
     let profile = remap(h, 0.0, 0.08) * remap(h, tall, tall * 0.55);
     // Puffy cells (B) round the Perlin-Worley lumps (G) into cumulus.
     let base_shape = s.g * 0.75 + s.b * 0.25;
@@ -217,7 +219,7 @@ fn fragment(in: VOut) -> @location(0) vec4<f32> {
             }
         }
         // Far clouds melt into the horizon haze, and thin out towards it.
-        let f = 1.0 - exp(-hit_t / c.haze.w);
+        let f = 1.0 - exp(-hit_t / HAZE_DIST);
         let a = 1.0 - trans;
         radiance = mix(radiance, c.haze.rgb * a, f * 0.85);
         trans = 1.0 - a * (1.0 - f * 0.6);

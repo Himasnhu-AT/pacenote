@@ -59,8 +59,9 @@ impl Plugin for SkyPlugin {
         bevy::asset::embedded_asset!(app, "clouds.wesl");
         app.add_plugins(MaterialPlugin::<CloudMaterial>::default())
             .init_resource::<CloudState>()
+            .add_systems(Startup, make_textures)
             .init_resource::<Lamps>()
-            .add_systems(Update, (spawn_clouds, update_clouds).chain().after(engine::gfx::QualitySet::Look))
+            .add_systems(Update, (spawn_clouds, update_clouds, cloud_shadows).chain().after(engine::gfx::QualitySet::Look))
             .add_systems(Update, (spawn_lamps, update_lamps).chain())
             .add_systems(OnExit(AppState::InGame), |mut l: ResMut<Lamps>| *l = Lamps::default());
         look::register(app);
@@ -99,7 +100,7 @@ pub struct CloudUniform {
     /// rgb: sky radiance lighting the clouds from above / from the ground below.
     pub amb_top: Vec4,
     pub amb_bot: Vec4,
-    /// rgb: horizon haze radiance; w: distance (m) at which clouds are half haze.
+    /// rgb: horizon haze radiance; w: cumulus growth 0..1 (how tall the cells build).
     pub haze: Vec4,
     /// coverage 0..1, extinction (1/m) at full density, base and top altitude (m).
     pub shape: Vec4,
@@ -155,6 +156,18 @@ pub struct CloudState {
     textures: Option<(Handle<Image>, Handle<Image>)>,
     /// Accumulated wind drift (m).
     pub drift: Vec2,
+}
+
+/// The cloud layer's weather map, made at startup so the terrain material can bind it when it
+/// is built (cloud shadows; a texture added to it later never reached the GPU bind group).
+#[derive(Resource, Clone)]
+pub struct CloudWeather(pub Handle<Image>);
+
+fn make_textures(mut commands: Commands, mut st: ResMut<CloudState>, mut images: ResMut<Assets<Image>>) {
+    let w = images.add(weather_image());
+    let d = images.add(detail_image());
+    commands.insert_resource(CloudWeather(w.clone()));
+    st.textures = Some((w, d));
 }
 
 /// A unit ico-sphere with positions only (the vertex shader scales and centres it).
@@ -263,7 +276,8 @@ fn update_clouds(
         sun_rad: (c * lux * trans).extend(daylight),
         amb_top: sky.extend(0.0),
         amb_bot: ground.extend(0.0),
-        haze: haze.extend(30_000.0),
+        // w: convective growth (taller cells in the afternoon).
+        haze: haze.extend(look::cloud_growth(hours)),
         shape: Vec4::new(cover, 0.045, CLOUD_BASE, CLOUD_TOP),
         wind: Vec4::new(st.drift.x, st.drift.y, st.drift.x * 0.6, steps),
         // Stars at ≈ 3× mid-grey of the night exposure at full strength.
@@ -285,6 +299,36 @@ pub fn sun_transmittance(el: f32) -> Vec3 {
     let mass = 1.0 / (e.to_radians().sin() + 0.505_72 * (e + 6.079_95).powf(-1.636_4));
     let tau = Vec3::new(0.1, 0.17, 0.32) * 0.8;
     (-tau * mass.max(1.0)).exp()
+}
+
+/// How much cloud shadows take off the direct sun on the ground (stream A's terrain shader).
+const CLOUD_SHADOW: f32 = 0.75;
+
+/// Feeds the cloud layer to the terrain material's shadows ≈ 10 times a second (each update
+/// re-prepares that one material; a shadow moves ~1 m between updates).
+fn cloud_shadows(
+    real: Res<Time<Real>>,
+    st: Res<CloudState>,
+    clouds: Res<Assets<CloudMaterial>>,
+    domes: Query<&Visibility, With<CloudDome>>,
+    terrain: Option<Res<super::terrain::PnTerrainHandle>>,
+    mut mats: ResMut<Assets<super::terrain::PnTerrain>>,
+    mut last: Local<f64>,
+) {
+    let (Some(terrain), Some(h)) = (terrain, st.material.as_ref()) else { return };
+    let now = real.elapsed_secs_f64();
+    if now - *last < 0.1 {
+        return;
+    }
+    *last = now;
+    let Some(c) = clouds.get(h) else { return };
+    let shown = domes.iter().all(|v| *v != Visibility::Hidden);
+    // Sun only (no moon shadows), fading with the daylight.
+    let strength = if shown && c.p.sun_dir.w == 0.0 { CLOUD_SHADOW * c.p.sun_rad.w } else { 0.0 };
+    let Some(mut m) = mats.get_mut(&terrain.0) else { return };
+    let ext = &mut m.extension;
+    ext.params.cloud = Vec4::new(c.p.wind.x, c.p.wind.y, c.p.shape.x, strength);
+    ext.params.cloud_sun = c.p.sun_dir.truncate().extend((CLOUD_BASE + CLOUD_TOP) * 0.5);
 }
 
 /// Display value of 1 cd/m² at the look's exposure (the fog colour is display-referred).
