@@ -505,3 +505,14 @@ sources = ["fab_people_x10_01"]
 collision = "none"
 lod = "mips"
 built_by = "tools/art/render_crowd_cards.py + engine cook"
+
+# ---------------------------------------------------------------- night sky
+
+[[asset]]
+name = "night_sky"
+paths = ["sky/stars.bin", "sky/milkyway.bin", "sky/moon.bin"]
+kind = "text"
+sources = ["yale_bsc5", "nasa_cgi_moon_kit", "original"]
+collision = "none"
+lod = "none (sky)"
+built_by = "tools/art/bake_sky.py"

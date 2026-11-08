@@ -108,6 +108,9 @@ pub struct CloudUniform {
     pub wind: Vec4,
     /// x: star radiance, y: sky rotation (rad), z: time (s), w: light taps.
     pub stars: Vec4,
+    /// x: the moon's angular radius (rad), y: phase angle (rad, 0 = full), z: its radiance at
+    /// full light, w: visible 0..1 (drawn where `sun_dir` points while it is the moon).
+    pub moon: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
@@ -120,6 +123,16 @@ pub struct CloudMaterial {
     #[texture(103, dimension = "3d")]
     #[sampler(104)]
     pub detail: Handle<Image>,
+    /// Night sky (`tools/art/bake_sky.py`, `assets/sky/*.bin`): star cells, Milky Way, moon.
+    #[texture(105)]
+    #[sampler(106)]
+    pub stars: Handle<Image>,
+    #[texture(107)]
+    #[sampler(108)]
+    pub milkyway: Handle<Image>,
+    #[texture(109)]
+    #[sampler(110)]
+    pub moon: Handle<Image>,
 }
 
 impl Material for CloudMaterial {
@@ -154,6 +167,7 @@ pub struct CloudDome;
 pub struct CloudState {
     pub material: Option<Handle<CloudMaterial>>,
     textures: Option<(Handle<Image>, Handle<Image>)>,
+    night: Option<[Handle<Image>; 3]>,
     /// Accumulated wind drift (m).
     pub drift: Vec2,
 }
@@ -191,13 +205,25 @@ fn spawn_clouds(
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<CloudMaterial>>,
+    dir: Option<Res<engine::prelude::AssetsDir>>,
 ) {
     let (Some(_), Some(look)) = (sw, look) else { return };
     if !domes.is_empty() || look.sky.mode != engine::look::SkyMode::Atmosphere {
         return;
     }
     let (weather, detail) = st.textures.get_or_insert_with(|| (images.add(weather_image()), images.add(detail_image()))).clone();
-    let mat = mats.add(CloudMaterial { p: CloudUniform::default(), weather, detail });
+    let [stars, milkyway, moon] = st
+        .night
+        .get_or_insert_with(|| {
+            let root = dir.map(|d| d.0.join("sky")).unwrap_or_default();
+            [
+                images.add(sky_image(&root.join("stars.bin"), TextureFormat::Rgba8Unorm, 4, false)),
+                images.add(sky_image(&root.join("milkyway.bin"), TextureFormat::R8Unorm, 1, true)),
+                images.add(sky_image(&root.join("moon.bin"), TextureFormat::Rgba8UnormSrgb, 4, true)),
+            ]
+        })
+        .clone();
+    let mat = mats.add(CloudMaterial { p: CloudUniform::default(), weather, detail, stars, milkyway, moon });
     st.material = Some(mat.clone());
     commands.spawn((
         Name::new("Clouds"),
@@ -282,6 +308,10 @@ fn update_clouds(
         wind: Vec4::new(st.drift.x, st.drift.y, st.drift.x * 0.6, steps),
         // Stars at ≈ 3× mid-grey of the night exposure at full strength.
         stars: Vec4::new(stars * 2.2 * MOON_LUX.max(0.6) / 0.6, rot, real.elapsed_secs_wrapped(), taps),
+        // The moon at 3.5× its true size (0.26°: a dot through the wide game camera; it looks
+        // bigger to the eye), a waxing gibbous a few times the night's mid-grey (its maria stay
+        // visible); it comes up with the stars.
+        moon: Vec4::new(MOON_RADIUS, MOON_PHASE, 12.0, stars * light.moon),
     };
     // Sorted as the farthest transparent thing (drawn first): far ahead of the camera.
     if let (Some(cam), Ok(mut tf)) = (cam.iter().next(), dome.single_mut()) {
@@ -290,6 +320,34 @@ fn update_clouds(
             tf.translation = p;
         }
     }
+}
+
+/// The drawn moon's angular radius (rad) and phase angle (rad from full; lit from the west).
+const MOON_RADIUS: f32 = 0.016;
+const MOON_PHASE: f32 = 0.6;
+
+/// A baked night-sky image (`tools/art/bake_sky.py`: b"PSKY", u32 width, height, pixels), or one
+/// black pixel when it's missing (the sky then has no stars / moon, nothing breaks).
+fn sky_image(path: &std::path::Path, format: TextureFormat, bpp: usize, filter: bool) -> Image {
+    let parsed = std::fs::read(path).ok().and_then(|b| {
+        let (head, px) = b.split_at_checked(12)?;
+        let (w, h) = (u32::from_le_bytes(head[4..8].try_into().ok()?), u32::from_le_bytes(head[8..12].try_into().ok()?));
+        (&head[..4] == b"PSKY" && px.len() == w as usize * h as usize * bpp).then(|| (w, h, px.to_vec()))
+    });
+    let (w, h, px) = parsed.unwrap_or_else(|| {
+        error!("sky: {} missing or bad", path.display());
+        (1, 1, vec![0; bpp])
+    });
+    let mut img = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, format, RenderAssetUsages::RENDER_WORLD);
+    let f = if filter { ImageFilterMode::Linear } else { ImageFilterMode::Nearest };
+    img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        mag_filter: f,
+        min_filter: f,
+        ..default()
+    });
+    img
 }
 
 /// Rough sunlight transmittance through the air at sun elevation `el` (degrees), seen from

@@ -26,3 +26,6 @@ Sound effects (from Openverse):
 "Auto Repair Shop with Pneumatic Drill Sounds" by ericreinert (BY 3.0, freesound): https://freesound.org/people/ericreinert/sounds/120227  [CC BY: credit required]
 CC0 / public domain sounds, with thanks: felix.blume, hsaunier10, lolamadeus, producerdan.
 # SFX END
+
+Night sky: star positions from the Yale Bright Star Catalogue (Hoffleit & Warren 1991), via NASA HEASARC.
+Moon: NASA's Scientific Visualization Studio (LRO LROC data, NASA/GSFC/Arizona State University).

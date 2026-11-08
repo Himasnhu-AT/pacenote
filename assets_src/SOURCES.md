@@ -1099,6 +1099,26 @@ Megascans asset id (in the folder name and the bundled JSON); search the id on f
 - **Resolution / polys:** 2K texture set
 - **Credit line:** Optional (CC0)
 
+### Yale Bright Star Catalogue, 5th ed. (`yale_bsc5`)
+
+- **Use:** the night sky's naked-eye stars (positions, magnitudes, colours): `assets/sky/stars.bin` (tools/art/bake_sky.py)
+- **Path:** `assets_src/night/bsc5/heasarc_bsc5p.tdat.gz`
+- **Source page:** https://heasarc.gsfc.nasa.gov/W3Browse/star-catalog/bsc5p.html
+- **Author:** D. Hoffleit, W. H. Warren Jr. (Yale University Observatory, 1991); NASA HEASARC distribution
+- **Licence:** Public catalogue data (HEASARC table security: public); factual star data, free to use with acknowledgement
+- **Resolution / polys:** 9,110 stars; 8,404 to magnitude 6.5 baked
+- **Credit line:** "Star positions: Yale Bright Star Catalogue (Hoffleit & Warren 1991), via NASA HEASARC"
+
+### CGI Moon Kit (`nasa_cgi_moon_kit`)
+
+- **Use:** the moon's albedo map: `assets/sky/moon.bin` (resized to 512 × 256)
+- **Path:** `assets_src/night/moon/lroc_color_poles_2k.tif`
+- **Source page:** https://svs.gsfc.nasa.gov/4720
+- **Author:** NASA's Scientific Visualization Studio (Ernie Wright); LRO LROC data, NASA/GSFC/Arizona State University
+- **Licence:** Public domain (NASA imagery, not copyrighted; NASA media guidelines)
+- **Resolution / polys:** 2048 × 1024 colour mosaic
+- **Credit line:** "Moon: NASA's Scientific Visualization Studio (LRO)"
+
 <!-- SFX BEGIN (tools/audio/cook_sfx.py) -->
 ## audio/openverse
 

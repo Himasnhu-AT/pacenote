@@ -24,6 +24,9 @@ struct Clouds {
     wind: vec4<f32>,
     // x: star radiance, y: sky rotation (rad), z: time (s), w: light taps
     stars: vec4<f32>,
+    // x: moon's angular radius (rad), y: phase angle (rad, 0 = full), z: moon radiance at
+    // full light, w: visible 0..1 (the moon is the light: `sun_dir`)
+    moon: vec4<f32>,
 };
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> c: Clouds;
@@ -31,6 +34,14 @@ struct Clouds {
 @group(constants::MATERIAL_BIND_GROUP) @binding(102) var weather_smp: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(103) var detail_tex: texture_3d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(104) var detail_smp: sampler;
+// Night sky (`tools/art/bake_sky.py`): the Bright Star Catalogue as a cube-cell lookup, the
+// Milky Way's glow (galactic equirect), the moon's albedo (equirect).
+@group(constants::MATERIAL_BIND_GROUP) @binding(105) var star_tex: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(106) var star_smp: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(107) var mw_tex: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(108) var mw_smp: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(109) var moon_tex: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(110) var moon_smp: sampler;
 
 const DOME_R: f32 = 40000.0;
 const EARTH_R: f32 = 6360000.0;
@@ -110,41 +121,97 @@ fn hash2(p: vec2<f32>) -> vec2<f32> {
     return fract(sin(q) * 43758.5453);
 }
 
-// A star field on a rotating sky: cube-face cells, about one star in twelve cells.
-fn stars(d: vec3<f32>, px_angle: f32) -> vec3<f32> {
-    // Rotate about the celestial pole (46° up, due north = −Z).
+// World direction → equatorial (J2000) unit vector: the sky turns about the celestial pole
+// (46° up, due north = −Z) by the sky rotation; x = east at rotation 0, z = the pole.
+fn equatorial(d: vec3<f32>) -> vec3<f32> {
     let pole = normalize(vec3<f32>(0.0, 0.719, -0.695));
     let a = c.stars.y;
     let v = d * cos(a) + cross(pole, d) * sin(a) + pole * dot(pole, d) * (1.0 - cos(a));
-    let av = abs(v);
+    let ex = vec3<f32>(1.0, 0.0, 0.0);
+    let ey = cross(pole, ex);
+    return vec3<f32>(dot(v, ex), dot(v, ey), dot(v, pole));
+}
+
+// The naked-eye stars (Yale Bright Star Catalogue): one per cube-face cell, real positions,
+// magnitudes and colours; a little twinkle.
+fn stars(e: vec3<f32>, px_angle: f32) -> vec3<f32> {
+    let av = abs(e);
     var uv: vec2<f32>;
     var face: f32;
     if av.x >= av.y && av.x >= av.z {
-        uv = v.yz / av.x;
-        face = select(0.0, 1.0, v.x > 0.0);
+        uv = e.yz / av.x;
+        face = select(0.0, 1.0, e.x > 0.0);
     } else if av.y >= av.z {
-        uv = v.xz / av.y;
-        face = select(2.0, 3.0, v.y > 0.0);
+        uv = e.xz / av.y;
+        face = select(2.0, 3.0, e.y > 0.0);
     } else {
-        uv = v.xy / av.z;
-        face = select(4.0, 5.0, v.z > 0.0);
+        uv = e.xy / av.z;
+        face = select(4.0, 5.0, e.z > 0.0);
     }
-    let cells = 180.0;
-    let g = (uv * 0.5 + 0.5) * cells;
-    let cell = floor(g);
-    let r = hash2(cell + face * 271.0);
-    if r.x > 0.055 {
+    let n = f32(textureDimensions(star_tex).x);
+    let g = (uv * 0.5 + 0.5) * n;
+    let cell = min(floor(g), vec2<f32>(n - 1.0));
+    let s = textureLoad(star_tex, vec2<i32>(i32(cell.x), i32(face * n + cell.y)), 0);
+    if s.b <= 0.0 {
         return vec3<f32>(0.0);
     }
-    let centre = cell + 0.2 + 0.6 * hash2(cell + face * 97.0 + 13.0);
-    // Angular distance in pixels (a cell is ≈ 2/cells rad on the face).
-    let dist_px = length(g - centre) * (2.0 / cells) / max(px_angle, 1e-5);
-    let core = exp(-dist_px * dist_px * 1.6);
-    // Magnitudes: many faint, few bright; slight colour spread; a little twinkle.
-    let mag = pow(r.y, 6.0) * 6.0 + 0.25;
-    let tw = 0.85 + 0.15 * sin(c.stars.z * (3.0 + r.y * 7.0) + r.x * 40.0);
-    let tint = mix(vec3<f32>(1.0, 0.85, 0.7), vec3<f32>(0.75, 0.85, 1.0), fract(r.y * 13.7));
-    return tint * core * mag * tw;
+    let mag = 6.5 - s.b * 8.0;
+    // Angular distance in pixels (a cell is ≈ 2/n rad on the face).
+    let dist_px = length(g - (cell + s.rg)) * (2.0 / n) / max(px_angle, 1e-5);
+    // Bright stars bloom a little wider.
+    let width = 1.0 + 0.35 * max(2.5 - mag, 0.0);
+    let core = exp(-dist_px * dist_px * 1.6 / (width * width));
+    // Perceived brightness ~ flux^0.5 (a factor of 2.5 per magnitude would make faint stars
+    // vanish on a screen).
+    let flux = 0.12 * pow(10.0, 0.2 * (6.5 - mag));
+    let bv = s.a * 2.4 - 0.4;
+    let tint = select(mix(vec3<f32>(1.0, 0.97, 0.92), vec3<f32>(1.0, 0.7, 0.45), clamp((bv - 0.5) / 1.1, 0.0, 1.0)), mix(vec3<f32>(0.72, 0.82, 1.0), vec3<f32>(1.0, 0.97, 0.92), clamp((bv + 0.3) / 0.8, 0.0, 1.0)), bv < 0.5);
+    let r = hash2(cell + face * 271.0);
+    let tw = 0.82 + 0.18 * sin(c.stars.z * (3.0 + r.y * 7.0) + r.x * 40.0);
+    return tint * core * flux * tw;
+}
+
+// The Milky Way's glow at equatorial direction `e` (J2000 → galactic).
+fn milky_way(e: vec3<f32>) -> f32 {
+    let gx = dot(vec3<f32>(-0.0548755604, -0.8734370902, -0.4838350155), e);
+    let gy = dot(vec3<f32>(0.4941094279, -0.4448296300, 0.7469822445), e);
+    let gz = dot(vec3<f32>(-0.8676661490, -0.1980763734, 0.4559837762), e);
+    let l = atan2(gy, gx);
+    let b = asin(clamp(gz, -1.0, 1.0));
+    let uv = vec2<f32>(l / (2.0 * PI) + 0.5, 0.5 - b / PI);
+    return textureSampleLevel(mw_tex, mw_smp, uv, 0.0).r;
+}
+
+// The moon: a disc of the LRO albedo map lit for its phase (light from the west), earthshine on
+// the dark side, and a halo in the air around it. rgb: radiance, a: coverage of the disc.
+fn moon(d: vec3<f32>, px_angle: f32) -> vec4<f32> {
+    let m = c.sun_dir.xyz;
+    let cos_a = dot(d, m);
+    let ang = acos(clamp(cos_a, -1.0, 1.0));
+    let glow = (exp(-ang / 0.03) * 0.03 + exp(-ang / 0.3) * 0.004) * c.moon.z * vec3<f32>(0.72, 0.78, 0.92);
+    let rad = c.moon.x;
+    if cos_a < 0.99 || ang > rad * 1.5 {
+        return vec4<f32>(glow, 0.0);
+    }
+    let right = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), m));
+    let up = cross(m, right);
+    let p = vec2<f32>(dot(d, right), dot(d, up)) / rad;
+    let r = length(p);
+    let cover = 1.0 - smoothstep(1.0 - 1.5 * px_angle / rad, 1.0, r);
+    if cover <= 0.0 {
+        return vec4<f32>(glow, 0.0);
+    }
+    let z = sqrt(max(1.0 - r * r, 0.0));
+    let nrm = vec3<f32>(p.x, p.y, z);
+    let ph = c.moon.y;
+    let to_sun = normalize(vec3<f32>(sin(ph), 0.12, cos(ph)));
+    // The moon is nearly flat-lit (no Lambert falloff to the limb): a soft terminator.
+    let lit = smoothstep(-0.03, 0.08, dot(nrm, to_sun));
+    let lon = atan2(nrm.x, nrm.z);
+    let lat = asin(clamp(nrm.y, -1.0, 1.0));
+    let albedo = textureSampleLevel(moon_tex, moon_smp, vec2<f32>(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI), 0.0).rgb;
+    let surface = albedo * (lit + 0.012) * c.moon.z;
+    return vec4<f32>(surface * cover + glow * (1.0 - cover), cover);
 }
 
 @fragment
@@ -229,11 +296,20 @@ fn fragment(in: VOut) -> @location(0) vec4<f32> {
         trans = mix(1.0, trans, edge);
     }
 
+    // The moon, and the stars and Milky Way where it isn't: behind the clouds, dimmed near
+    // the horizon (extinction).
+    var disc = 0.0;
+    if c.moon.w > 0.0 && c.sun_dir.w > 0.5 {
+        let mo = moon(d, px_angle);
+        radiance += mo.rgb * c.moon.w * trans;
+        disc = mo.a;
+    }
     if c.stars.x > 0.0 && mu > 0.0 {
-        // Stars behind the clouds, dimmed near the horizon (extinction).
-        let s = stars(d, px_angle) * c.stars.x * smoothstep(0.0, 0.25, mu);
-        radiance += s * trans;
+        let e = equatorial(d);
+        let sky = stars(e, px_angle) + vec3<f32>(1.0, 0.95, 0.86) * milky_way(e) * 0.09;
+        radiance += sky * c.stars.x * smoothstep(0.0, 0.25, mu) * trans * (1.0 - disc);
     }
 
-    return vec4<f32>(radiance * view.exposure, 1.0 - trans);
+    // The moon's disc is opaque: it hides the atmosphere's own disc for the light behind it.
+    return vec4<f32>(radiance * view.exposure, max(1.0 - trans, disc * c.moon.w));
 }
