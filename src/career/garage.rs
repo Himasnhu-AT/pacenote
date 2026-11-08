@@ -140,6 +140,10 @@ pub static CARS: &[CarDef] = &[
     // Debadged look-alike of a real car (owner's ruling, 8 Nov 2026: no logos, badges, names or
     // sponsor liveries), its own model (`assets/models/car_<id>.glb`).
     CarDef { id: "brawn", name: "Brawn 70", body: Body::Rally, price: 38_000, base: brawn, paint: Paint { colour: 4, metallic: false }, pop_profile: PopProfile::Road, model: "models/car_brawn.glb" },
+    // Original designs (concept image -> TripoSG; tools/art/concept_cars.py).
+    CarDef { id: "lynx", name: "Lynx 1600", body: Body::Rally, price: 16_000, base: lynx, paint: Paint { colour: 2, metallic: false }, pop_profile: PopProfile::Rally, model: "models/car_lynx.glb" },
+    CarDef { id: "kite", name: "Kite Coupe", body: Body::Rally, price: 21_000, base: kite, paint: Paint { colour: 1, metallic: false }, pop_profile: PopProfile::Road, model: "models/car_kite.glb" },
+    CarDef { id: "tarn", name: "Tarn 4WD", body: Body::Rally, price: 52_000, base: tarn, paint: Paint { colour: 3, metallic: false }, pop_profile: PopProfile::Rally, model: "models/car_tarn.glb" },
 ];
 
 /// A roster car from the Saker's spec: torque ×, mass (inertia scales with it), grip, front
@@ -179,6 +183,18 @@ fn fennec() -> Spec {
 fn brawn() -> Spec {
     let s = variant(1.15, 1_620.0, 0.9, 0.0);
     Spec { lsd: 35.0, drag: 0.76, ..s }
+}
+/// Light 1980s FWD rally hatch: eager, a firm diff.
+fn lynx() -> Spec {
+    Spec { lsd: 30.0, ..variant(0.55, 1_000.0, 0.93, 1.0) }
+}
+/// Light 1970s RWD coupe: balanced, a medium diff.
+fn kite() -> Spec {
+    Spec { lsd: 45.0, ..variant(0.68, 1_080.0, 0.92, 0.0) }
+}
+/// Early-1990s AWD rally saloon: grippy and planted.
+fn tarn() -> Spec {
+    Spec { lsd: 50.0, ..variant(1.05, 1_280.0, 0.98, 0.45) }
 }
 /// The top car: AWD, big brakes.
 fn ossian() -> Spec {
@@ -567,8 +583,8 @@ mod tests {
     #[test]
     fn the_roster_hits_its_pis_and_classes() {
         // GAME_SYSTEMS §4.1 (Ossian: 742 with its brakes, see `pi`).
-        let want = [("saker", 570, Class::B), ("wren", 370, Class::D), ("marten", 362, Class::D), ("bruin", 428, Class::C), ("vale", 456, Class::C), ("harrier", 585, Class::B), ("fennec", 659, Class::A), ("ossian", 742, Class::S), ("brawn", 463, Class::C)];
-        assert_eq!(CARS.len(), 9);
+        let want = [("saker", 570, Class::B), ("wren", 370, Class::D), ("marten", 362, Class::D), ("bruin", 428, Class::C), ("vale", 456, Class::C), ("harrier", 585, Class::B), ("fennec", 659, Class::A), ("ossian", 742, Class::S), ("brawn", 463, Class::C), ("lynx", 386, Class::D), ("kite", 434, Class::C), ("tarn", 571, Class::B)];
+        assert_eq!(CARS.len(), 12);
         for (id, p, class) in want {
             let d = def(id).unwrap();
             let got = pi(&(d.base)());

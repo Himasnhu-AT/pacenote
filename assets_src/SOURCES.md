@@ -1129,6 +1129,17 @@ Megascans asset id (in the folder name and the bundled JSON); search the id on f
 - **Resolution / polys:** 892k faces, converted to 57.7k triangles by tools/art/import_sketchfab.py --profile brawn
 - **Credit line:** "Chevrolet Chevelle SS 1970" by mohamedhussien, CC BY 4.0, https://sketchfab.com/3d-models/chevrolet-chevelle-ss-1970-ddcba6667cce46ad92545fc38beda4ed (modified: debadged, repainted, rigged)
 
+### Original concept cars (`original_concept_cars`)
+
+- **Use:** the Lynx 1600, Kite Coupe and Tarn 4WD bodies (`assets/models/car_{lynx,kite,tarn}.glb`): original designs, no real car's name, badge or livery
+- **Path:** `assets_src/concept_cars/`: the picked concept images (`<id>_<seed>.png`), their rear views (`_rear.png`) and the refined bodies (`_body.glb`, the import's input)
+- **Source page:** n/a (made for Pacenote; recipe below)
+- **Author:** Pacenote (generated and converted in-house)
+- **Made with:** concept images by Qwen-Image 2.1 Turbo (Apache-2.0, local via mflux; `tools/art/concept_cars.py`, fixed seeds); shapes by TripoSG (VAST-AI, local; `asset-forge/tools/triposg_run.py`); materials from the concept images (`asset-forge/tools/image3d_project.py`); clean-up, real dimensions and new wheels (`asset-forge/tools/image3d_refine.py`, Blender); rig and cockpit by `tools/art/import_sketchfab.py --profile <id>`
+- **Licence:** ours. **Caveat (TripoSG):** its DiT core and package carry Tencent Hunyuan community licences whose territory excludes the EU, the UK and South Korea and which reach generated outputs (see `image3d/triposg/THIRD_PARTY_LICENSES.md`). Before shipping in those regions, regenerate the shapes with a model without that limit or remodel them by hand.
+- **Resolution / polys:** 0.57–1.28M-face raw meshes, refined to ~67k faces, about 64–67k triangles per car after the import
+- **Credit line:** none required
+
 <!-- SFX BEGIN (tools/audio/cook_sfx.py) -->
 ## audio/openverse
 

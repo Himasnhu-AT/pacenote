@@ -539,3 +539,30 @@ collision = "none"
 lod = "none"
 built_by = "tools/audio/gen_music_ace.py (ACE-Step 1.5, MIT code and weights) + tools/audio/cook_ace.py"
 
+
+[[asset]]
+name = "car_lynx"
+paths = ["models/car_lynx.glb"]
+kind = "model"
+sources = ["original"]
+collision = "none"
+lod = "none (one level; body only)"
+built_by = "tools/art/import_sketchfab.py --profile lynx"
+
+[[asset]]
+name = "car_kite"
+paths = ["models/car_kite.glb"]
+kind = "model"
+sources = ["original"]
+collision = "none"
+lod = "none (one level; body only)"
+built_by = "tools/art/import_sketchfab.py --profile kite"
+
+[[asset]]
+name = "car_tarn"
+paths = ["models/car_tarn.glb"]
+kind = "model"
+sources = ["original"]
+collision = "none"
+lod = "none (one level; body only)"
+built_by = "tools/art/import_sketchfab.py --profile tarn"

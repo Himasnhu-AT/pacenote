@@ -83,12 +83,19 @@ pub const HATCH: CarArt = CarArt {
     exhaust: Vec3::new(0.46, 0.27 - MODEL_WHEEL_RADIUS, 1.99),
 };
 
-/// Every body: the hatch and converted look-alikes (owner's ruling 8 Nov 2026;
-/// `import_sketchfab.py --profile <id>`).
-pub const BODIES: [CarArt; 2] = [
+/// Every body: the hatch, converted look-alikes (owner's ruling 8 Nov 2026;
+/// `import_sketchfab.py --profile <id>`) and original cars made from concept images
+/// (`tools/art/concept_cars.py`, then TripoSG and asset-forge's image3d_project/refine).
+pub const BODIES: [CarArt; 5] = [
     HATCH,
     // 1970 muscle coupe: pipes at both rear corners.
     CarArt { model: "models/car_brawn.glb", wheel_radius: 0.276, eye: Vec3::new(-0.37, 0.615, 0.60), bonnet: Vec3::new(0.0, 0.696, -1.6), fill: Vec3::new(0.0, 0.62, 0.5), rig: Vec3::new(0.0, -0.18, 0.0), exhaust: Vec3::new(0.51, 0.042, 2.236) },
+    // Original: 1980s boxy rally hatch.
+    CarArt { model: "models/car_lynx.glb", wheel_radius: 0.355, eye: Vec3::new(-0.37, 0.795, 0.60), bonnet: Vec3::new(0.0, 0.717, -1.6), fill: Vec3::new(0.0, 0.80, 0.5), rig: Vec3::ZERO, exhaust: Vec3::new(0.45, -0.10, 2.08) },
+    // Original: 1970s rear-drive coupe.
+    CarArt { model: "models/car_kite.glb", wheel_radius: 0.336, eye: Vec3::new(-0.37, 0.755, 0.60), bonnet: Vec3::new(0.0, 0.716, -1.6), fill: Vec3::new(0.0, 0.76, 0.5), rig: Vec3::new(0.0, -0.04, 0.0), exhaust: Vec3::new(0.45, -0.12, 2.40) },
+    // Original: early-1990s four-door rally saloon.
+    CarArt { model: "models/car_tarn.glb", wheel_radius: 0.304, eye: Vec3::new(-0.37, 0.65, 0.60), bonnet: Vec3::new(0.0, 0.621, -1.6), fill: Vec3::new(0.0, 0.655, 0.5), rig: Vec3::new(0.0, -0.145, 0.0), exhaust: Vec3::new(0.45, -0.08, 2.0) },
 ];
 
 /// The body drawn for model `path` (the hatch's constants for an unknown one).

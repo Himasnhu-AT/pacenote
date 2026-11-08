@@ -110,6 +110,18 @@ PROFILES = {
         "small-mat": "^Glass$",
     },
 }
+# Original cars (concept image -> TripoSG -> asset-forge image3d_project.py + image3d_refine.py,
+# see tools/art/concept_cars.py): one body surface with class materials, WheelFL.. objects.
+_ORIGINAL = {
+    "forward": "+y",
+    "interior": "ours",
+    "paint": r"^Body$",
+    "plain": "^Glass$=1c2126,0,0.05,0.45;^Plastic$=0b0b0c,0,0.6;^Chrome$=d9dbe0,1,0.12;^LampAmber$=ff7a10,0,0.2;^LampRed$=b00808,0,0.2;^Tyre$=141415,0,0.85;^Rim$=8c8f94,1,0.3",
+    "decimate": "^Body$|^Paint$=0.55;^Plastic$=0.5;*=1",
+    "small-mat": "^Glass$",
+}
+for _id in ("lynx", "kite", "tarn"):
+    PROFILES[_id] = dict(_ORIGINAL, out=os.path.join(ROOT, f"assets/models/car_{_id}.glb"))
 EXTS = (".glb", ".gltf", ".fbx", ".blend", ".obj")
 WHEEL_RE = re.compile(r"wheel|tire|tyre|rim|disc|disk|brake|hub|caliper|rotor", re.I)
 CALIPER_RE = re.compile(r"caliper", re.I)
