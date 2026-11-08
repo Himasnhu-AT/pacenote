@@ -18,8 +18,9 @@ memory budgets. The rules are in `docs/ASSETS_BRIEF.md` (§0 licences and tradem
 ## Adding or changing an asset
 
 1. Download into `assets_src/<category>/...` and add a `### Title (`key`)` entry to
-   `assets_src/SOURCES.md` with **Source page**, **Author**, **Licence** (CC0, CC BY or SIL OFL
-   only; no NC, no game rips, no branded vehicles or logos: brief §0).
+   `assets_src/SOURCES.md` with **Source page**, **Author**, **Licence** (CC0, CC BY, SIL OFL
+   or Fab Standard (any-engine listings, cooked files only); no NC, no game rips, no branded
+   vehicles or logos: brief §0).
 2. Build the shipped files with the tool for its kind (textures: `tools/art/prep_textures.sh`
    then the engine cook; meshes: `tools/art/build_meshes.py` in Blender; sounds:
    `tools/audio/cook_car.py`). Ship KTX2 for textures, ≤ 2048² (≤ 1024² for anything that

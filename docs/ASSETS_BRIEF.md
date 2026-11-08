@@ -15,9 +15,12 @@ scattered in it) that stays **original** and ships on Steam on Mac and Windows.
 
 ## 0. Rules that override everything below
 
-- **Licences:** only CC0, CC-BY (with credit) or assets we made. Record every outside asset in
-  `ATTRIBUTION.md` (name, author, source URL, licence, where used). CC-BY-NC, BBC RemArc,
-  "free for personal use" and anything from a game's own files are **not allowed**.
+- **Licences:** only CC0, CC-BY (with credit), the **Fab Standard License** for listings that
+  work in any engine (owner's ruling, 7 Nov 2026: Professional tier; ship only cooked KTX2 /
+  .pnm, never the raw files; Unreal-only listings are out), or assets we made. Record every
+  outside asset in `ATTRIBUTION.md` (name, author, source URL, licence, where used).
+  CC-BY-NC, BBC RemArc, "free for personal use" and anything from a game's own files are
+  **not allowed**.
 - **Trademarks and likeness:** no real car makes, models, badges, liveries or recognisable
   silhouettes; no real road signs that carry logos; no fonts whose licence forbids embedding;
   no recognisable map, festival theme or UI from any existing racing game. A CC licence on a

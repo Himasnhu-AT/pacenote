@@ -25,6 +25,7 @@ pub mod sky;
 pub mod spray;
 pub mod terrain;
 pub mod traffic_car;
+pub mod trackside;
 pub mod trees;
 pub mod water;
 
@@ -61,7 +62,7 @@ impl Plugin for ArtPlugin {
             .add_systems(Update, dressing::tag_cover)
             .add_systems(PostUpdate, gpu_only_textures)
             .add_systems(Update, traffic_car::lamps_update.run_if(resource_exists::<crate::open::traffic::Traffic>))
-            .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin))
+            .add_plugins((car::CarArtPlugin, spray::SprayPlugin, terrain::TerrainArtPlugin, props::PropArtPlugin, trackside::TracksidePlugin))
             // Festival streams (wave 0 stubs): C sky, D exhaust + headlights, B signs + conditions.
             .add_plugins((sky::SkyPlugin, exhaust::ExhaustPlugin, headlights::HeadlightsPlugin, signs::SignsPlugin, conditions::ConditionsPlugin));
     }
@@ -139,6 +140,7 @@ pub fn spawn_stage(world: &mut World, s: &StageWorld) {
     world.insert_resource(cat);
     trees::setup(world, s, view, q);
     props::spawn(world, s);
+    trackside::spawn(world, s);
     water::spawn(world, s);
     let half = stage::half_size(&s.def);
     let area = Area::new(Vec2::splat(-half), Vec2::splat(half));

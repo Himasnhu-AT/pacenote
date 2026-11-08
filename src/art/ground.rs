@@ -49,17 +49,20 @@ pub fn layers(b: Biome, wet: bool) -> Vec<SplatLayer> {
             l("leaves", "leaves", [0.44, 0.42, 0.38], 0.95, [0.0, 26.0], 0.75, 0.55, 4.0),
             rock("rock", [0.5, 0.5, 0.5], 30.0),
         ],
+        // Dry ochre soil with red-earth and cracked patches (Fab scans; tints near 0.5 keep
+        // the scan's own colour, matching the untinted road).
         Biome::Scrub => vec![
-            l("dry", "heath", [0.64, 0.56, 0.36], 0.95, [0.0, 90.0], 0.3, 1.0, 5.0),
-            l("dirt", "dirt", [0.48, 0.45, 0.41], 0.95, [0.0, 30.0], 0.65, 0.75, 6.0),
-            l("gravel", "gravel_red", [0.48, 0.46, 0.43], 0.9, [0.0, 30.0], 0.75, 0.4, 4.0),
+            l("dry", "soil_dry", [0.5, 0.42, 0.36], 0.95, [0.0, 90.0], 0.3, 1.0, 5.0),
+            l("red", "soil_red", [0.66, 0.56, 0.54], 0.95, [0.0, 30.0], 0.55, 1.0, 6.0),
+            l("crack", "soil_crack", [0.48, 0.46, 0.43], 0.9, [0.0, 30.0], 0.75, 0.4, 5.0),
             rock("cliff", [0.5, 0.48, 0.46], 25.0),
         ],
+        // Golden grassland: straw-coloured soil under patches of dry heath and meadow.
         Biome::Moor => vec![
-            l("heath", "heath", [0.5, 0.48, 0.42], 0.95, [0.0, 90.0], 0.3, 1.0, 5.0),
-            l("grass", "meadow", [0.46, 0.46, 0.38], 0.95, [0.0, 18.0], 0.55, 0.8, 5.0),
-            l("moss", "moss", [0.44, 0.44, 0.38], 0.95, [0.0, 20.0], 0.7, 0.5, 6.0),
-            rock("rock", [0.48, 0.48, 0.48], 24.0),
+            l("dry", "soil_dry", [0.46, 0.41, 0.31], 0.95, [0.0, 90.0], 0.3, 1.0, 5.0),
+            l("heath", "heath", [0.66, 0.58, 0.4], 0.95, [0.0, 26.0], 0.45, 1.0, 5.0),
+            l("grass", "meadow", [0.5, 0.48, 0.36], 0.95, [0.0, 18.0], 0.6, 0.6, 5.0),
+            rock("rock", [0.5, 0.5, 0.5], 24.0),
         ],
         Biome::SnowForest => vec![
             l("snow", "snow", [0.52, 0.53, 0.56], 0.55, [0.0, 90.0], 0.2, 1.0, 6.0),
@@ -73,11 +76,11 @@ pub fn layers(b: Biome, wet: bool) -> Vec<SplatLayer> {
 pub(super) fn surface_sets(surf: Surface, biome: Biome) -> (&'static str, &'static str) {
     match (surf, biome) {
         (Surface::Tarmac, Biome::SnowForest) => ("tarmac", "snow"),
-        (Surface::Tarmac, Biome::Scrub) => ("tarmac", "dirt"),
+        (Surface::Tarmac, Biome::Scrub) => ("tarmac", "dirt_road"),
         (Surface::Tarmac, _) => ("tarmac", "shoulder"),
         (Surface::Mud, _) => ("mud", "shoulder"),
         (Surface::Snow, _) => ("snow", "snow"),
-        (_, Biome::Scrub) => ("gravel_red", "dirt"),
+        (_, Biome::Scrub) => ("gravel_red", "dirt_road"),
         (_, Biome::SnowForest) => ("gravel", "snow"),
         _ => ("gravel", "shoulder"),
     }

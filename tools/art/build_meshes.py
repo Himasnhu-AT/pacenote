@@ -17,6 +17,9 @@ argv = sys.argv[sys.argv.index("--") + 1:]
 SRC, OUT = argv[0], argv[1]
 
 # out name, folder (under models/), gltf stem, object, target triangles, uniform scale, sink
+# [, options: `origin` keeps the object's own origin as the pivot (pieces that must line up, e.g.
+# the tape and its stakes; ground at z = 0), `weld: False` skips merging coincident vertices
+# (double-sided ribbons)]
 ITEMS = [
     ("boulder", "rocks/boulder_01", "boulder_01", "boulder_01", 1600, 1.0, 0.12),
     ("rock_moss_a", "rocks/rock_moss_set_01", "rock_moss_set_01", "rock_moss_set_01_rock02", 1400, 0.7, 0.1),
@@ -30,6 +33,29 @@ ITEMS = [
     ("grass_b", "vegetation/grass_medium_01", "grass_medium_01", "grass_medium_01_tall_a_LOD0", 400, 2.6, 0.0),
     ("grass_c", "vegetation/grass_medium_02", "grass_medium_02", "grass_medium_02_c", 600, 2.4, 0.0),
     ("stump", "vegetation/tree_stump_01", "tree_stump_01", "tree_stump_01", 1200, 1.0, 0.05),
+    # Fab (Megascans / photoscan) models, converted by tools/art/fab_to_gltf.py; textures by
+    # tools/art/prep_fab_models.sh (sets m_*).
+    ("boulder_rauk", "rocks/coast_rauk_boulder_01", "coast_rauk_boulder_01", "coast_rauk_boulder_01", 1500, 1.0, 0.1),
+    ("sandstone_cliff", "rocks/sandstone_cliff_01", "sandstone_cliff_01", "sandstone_cliff_01", 3000, 1.0, 0.06),
+    ("dead_shrub_a", "vegetation/dead_shrubs_01", "dead_shrubs_01", "dead_shrubs_01_g", 600, 1.2, 0.02),
+    ("dead_shrub_b", "vegetation/dead_shrubs_01", "dead_shrubs_01", "dead_shrubs_01_h", 500, 1.3, 0.02),
+    ("dry_branches", "vegetation/dry_branches_01", "dry_branches_01", "dry_branches_01", 600, 2.0, 0.2),
+    ("dead_branches", "vegetation/dead_branches_01", "dead_branches_01", "dead_branches_01", 600, 2.0, 0.2),
+    ("dry_grass_a", "vegetation/dry_grass_01", "dry_grass_01", "dry_grass_01_a", 800, 1.2, 0.0),
+    ("dry_grass_b", "vegetation/dry_grass_01", "dry_grass_01", "dry_grass_01_b", 800, 1.2, 0.0),
+    ("cocksfoot", "vegetation/cocksfoot_01", "cocksfoot_01", "cocksfoot_01_a", 800, 1.0, 0.0),
+    ("graminea", "vegetation/graminea_01", "graminea_01", "graminea_01", 800, 1.0, 0.0),
+    ("kikuyu", "vegetation/kikuyu_01", "kikuyu_01", "kikuyu_01_b", 1500, 1.3, 0.0),
+    ("barrier_concrete", "props/concrete_barrier_01", "concrete_barrier_01", "concrete_barrier_01", 2000, 1.0, 0.0),
+    ("barrier_industrial", "props/industrial_barrier_01", "industrial_barrier_01", "industrial_barrier_01", 2000, 1.0, 0.0),
+    ("jersey_barrier", "props/jersey_barrier_02", "jersey_barrier_02", "jersey_barrier_02", 2000, 1.45, 0.0),
+    ("fence", "props/modular_fence_01", "modular_fence_01", "modular_fence_01", 1500, 1.0, 0.0),
+    ("fence_post", "props/modular_fence_01", "modular_fence_01", "modular_fence_01_post", 300, 1.0, 0.0),
+    # In-house (asset-forge HayBale/build_haybale.py, RallyTape/export_tape.py); sets m_hay,
+    # m_tape, m_stake. The tape run (12 m, centred on its origin) and its stakes share a pivot.
+    ("hay_bale", "props/hay_bale_01", "hay_bale_01", "hay_bale_01", 2600, 1.0, 0.0),
+    ("tape_run", "props/rally_tape_01", "rally_tape_01", "tape_run", 1000, 1.0, 0.0, {"origin": True, "weld": False}),
+    ("tape_stakes", "props/rally_tape_01", "rally_tape_01", "tape_stakes", 1000, 1.0, 0.0, {"origin": True}),
 ]
 
 
@@ -37,7 +63,8 @@ def tri_count(me):
     return sum(len(p.vertices) - 2 for p in me.polygons)
 
 
-def export(name, folder, stem, obj_name, target, scale, sink):
+def export(name, folder, stem, obj_name, target, scale, sink, opts=None):
+    opts = opts or {}
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=os.path.join(SRC, "models", folder, f"{stem}_2k.gltf"))
     obj = bpy.data.objects[obj_name]
@@ -54,11 +81,12 @@ def export(name, folder, stem, obj_name, target, scale, sink):
     before = tri_count(obj.data)
     # Merge split vertices first (scans often come with every face separate) so the collapse
     # decimation can work across them; UVs stay per corner.
-    bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.0005)
-    bm.to_mesh(obj.data)
-    bm.free()
+    if opts.get("weld", True):
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.0005)
+        bm.to_mesh(obj.data)
+        bm.free()
     if before > target:
         mod = obj.modifiers.new("dec", "DECIMATE")
         mod.decimate_type = "COLLAPSE"
@@ -81,6 +109,8 @@ def export(name, folder, stem, obj_name, target, scale, sink):
     lo, hi = co.min(0), co.max(0)
     cx, cy = (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2
     base = lo[2] + sink * (hi[2] - lo[2])
+    if opts.get("origin"):
+        cx = cy = base = 0.0
     verts, index, remap = [], [], {}
     for poly in me.polygons:
         for li in poly.loop_indices:

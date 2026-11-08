@@ -43,6 +43,9 @@ pub enum PropKind {
     Reflector,
     KmStone,
     RoadSign,
+    /// A round hay bale on a rally stage's corner apex ([`trackside`]): solid when nudged,
+    /// shoved aside by a real hit.
+    HayBale,
 }
 
 impl PropKind {
@@ -56,6 +59,7 @@ impl PropKind {
             PropKind::Reflector => (0.07, 1.0),
             PropKind::KmStone => (0.14, 0.8),
             PropKind::RoadSign => (0.05, 2.7),
+            PropKind::HayBale => (0.75, 1.2),
         }
     }
 
@@ -65,6 +69,7 @@ impl PropKind {
             PropKind::Post | PropKind::Sign | PropKind::Reflector | PropKind::KmStone | PropKind::RoadSign => 0.8,
             PropKind::Sapling => 2.0,
             PropKind::Shrub => 0.6,
+            PropKind::HayBale => 1.0,
         }
     }
 
@@ -80,6 +85,8 @@ impl PropKind {
             PropKind::Reflector => Give::Breaks { id, mass: 6.0, speed: 1.0 },
             PropKind::KmStone => Give::Breaks { id, mass: 40.0, speed: 2.5 },
             PropKind::RoadSign => Give::Breaks { id, mass: 20.0, speed: 2.0 },
+            // ~250 kg of straw: a firm nudge below ~20 km/h, knocked away above.
+            PropKind::HayBale => Give::Breaks { id, mass: 250.0, speed: 5.5 },
         }
     }
 }
@@ -95,6 +102,9 @@ pub struct StageWorld {
     /// Roadside things the car can knock down (posts, signs, saplings) or drive through
     /// (shrubs), in a fixed order (their ids).
     pub props: Arc<Vec<Prop>>,
+    /// Rally-stage trackside dressing that isn't a prop: concrete barriers (solid, in
+    /// `obstacles`), spectator tape and crowds (drawn only). Empty in the open world.
+    pub trackside: Arc<Vec<Trackside>>,
     /// Trunks, boulders and props near the road: 8 m grid.
     obstacles: Arc<HashMap<(i32, i32), Vec<Obstacle>>>,
     /// The open world (`def.id == open::ID`): every road, its surfaces. `road` is then the
@@ -225,6 +235,7 @@ pub fn generate(def: &StageDef) -> StageWorld {
         corners: Arc::new(corners),
         crests: Arc::new(crests),
         props: Arc::new(Vec::new()),
+        trackside: Arc::new(Vec::new()),
         obstacles: Arc::new(HashMap::new()),
         open: None,
         event: None,
@@ -254,6 +265,21 @@ pub fn generate(def: &StageDef) -> StageWorld {
         }
         // Props: sorted by position so ids are the same on every machine.
         let mut found = roadside(&world);
+        let (track, bales) = trackside(&world);
+        found.extend(bales);
+        for t in &track {
+            if t.kind == TrackKind::Barrier {
+                // A barrier is a row of short solid cylinders along its length.
+                let d = Vec2::new(libm::sinf(t.yaw), libm::cosf(t.yaw));
+                let c = Vec2::new(t.pos.x, t.pos.z);
+                let n = (BARRIER_LEN / 0.5) as i32;
+                for k in 0..=n {
+                    let q = c + d * (k as f32 / n as f32 - 0.5) * (BARRIER_LEN - 0.5);
+                    grid.entry(cell(q)).or_default().push(Obstacle::solid(q, 0.3, t.pos.y + 0.9));
+                }
+            }
+        }
+        world.trackside = Arc::new(track);
         for (port, kind) in [("saplings", PropKind::Sapling), ("shrubs", PropKind::Shrub)] {
             if let Some(p) = out.emits.get(port) {
                 for k in 0..p.len() {
@@ -301,6 +327,7 @@ fn generate_open(def: &StageDef) -> StageWorld {
         corners: Arc::new(Vec::new()),
         crests: Arc::new(Vec::new()),
         props: Arc::new(Vec::new()),
+        trackside: Arc::new(Vec::new()),
         obstacles: Arc::new(HashMap::new()),
         open: Some(Arc::new(open)),
         event: None,
@@ -370,6 +397,146 @@ fn roadside(w: &StageWorld) -> Vec<(PropKind, Vec3, f32, f32, u64)> {
         s += 1000.0;
     }
     out
+}
+
+/// Rally-stage trackside dressing that isn't a [`Prop`] (drawn by `art::trackside`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrackKind {
+    /// A concrete barrier block ([`BARRIER_LEN`] long, along `yaw`): solid.
+    Barrier,
+    /// One 12 m run of spectator tape on stakes, centred on `pos`, along `yaw`.
+    Tape,
+    /// One spectator standing at `pos`, facing `yaw`.
+    Crowd,
+}
+
+/// One piece of [`TrackKind`] dressing. `yaw` turns +Z towards the piece's direction (as the
+/// props'), `seed` picks variants.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Trackside {
+    pub kind: TrackKind,
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub seed: u64,
+}
+
+/// Length of one concrete barrier block (m).
+pub const BARRIER_LEN: f32 = 5.4;
+/// Length of one tape run (m), the in-house `rally_tape_01` model.
+pub const TAPE_LEN: f32 = 12.0;
+
+/// Where a rally stage puts its crowd, tape, hay bales and barriers: spectator spots on the
+/// inside of the tightest corners (and at the start), hay bales on corner apexes in farm
+/// country, concrete barriers on the outside of hairpins on dry and tarmac stages. Plain
+/// arithmetic on the road, the corners and the heightfield (libm trig): the same everywhere.
+/// Returns the drawn-only pieces and the bales (props).
+/// A prop to place: kind, base, yaw, scale, seed (as [`roadside`]'s).
+type Placed = (PropKind, Vec3, f32, f32, u64);
+
+pub fn trackside(w: &StageWorld) -> (Vec<Trackside>, Vec<Placed>) {
+    let (mut out, mut bales) = (Vec::new(), Vec::new());
+    if w.open.is_some() {
+        return (out, bales);
+    }
+    let road = &w.road;
+    let len = road.length();
+    let biome = w.def.biome;
+    let mut rng = stage::Rng::new(w.def.seed ^ 0x7AC5_51DE);
+    // Point `off` m to the side (+1 = left of travel) of station `s`, on the ground, and the
+    // road's heading there.
+    let at = |s: f32, side: f32, off: f32| -> (Vec3, Vec2, f32) {
+        let i = road.station(s);
+        let (p, d) = (road.pts[i], road.dir[i]);
+        let left = Vec2::new(d.y, -d.x);
+        let c = Vec2::new(p.x, p.z) + left * side * (road.width[i] * 0.5 + off);
+        (Vec3::new(c.x, w.heights.height_at(c.x, c.y), c.y), d, p.y)
+    };
+    let heading = |d: Vec2| libm::atan2f(d.x, d.y);
+    // A spot is usable when the ground there isn't far above or below the road.
+    let level = |s: f32, side: f32, off: f32| {
+        let (g, _, road_y) = at(s, side, off);
+        (g.y - road_y).abs() < 3.5
+    };
+    let spot = |out: &mut Vec<Trackside>, rng: &mut stage::Rng, s: f32, side: f32| {
+        // Tape 4.5 m off the edge, three runs along the corner; the crowd 2–7 m behind it.
+        for k in -1..=1 {
+            let ss = s + k as f32 * TAPE_LEN;
+            if ss < 5.0 || ss > len - 5.0 {
+                continue;
+            }
+            let (pos, d, _) = at(ss, side, 4.5);
+            out.push(Trackside { kind: TrackKind::Tape, pos, yaw: heading(d), seed: pcg_core::mix64(w.def.seed ^ ss.to_bits() as u64) });
+        }
+        let n = 10 + (rng.f() * 14.0) as usize;
+        for _ in 0..n {
+            let ss = s + rng.range(-16.0, 16.0);
+            if ss < 5.0 || ss > len - 5.0 {
+                continue;
+            }
+            let (pos, d, _) = at(ss, side, rng.range(6.5, 11.5));
+            // Facing the road (its left side faces right, and back), give or take.
+            let to_road = heading(Vec2::new(-d.y, d.x) * side);
+            out.push(Trackside { kind: TrackKind::Crowd, pos, yaw: to_road + rng.range(-0.6, 0.6), seed: (rng.f() * 1.0e6) as u64 });
+        }
+    };
+    // The start: a crowd both sides of the first straight.
+    if biome != Biome::SnowForest || rng.chance(0.5) {
+        for side in [1.0, -1.0] {
+            if level(40.0, side, 8.0) {
+                spot(&mut out, &mut rng, 40.0, side);
+            }
+        }
+    }
+    // Spectator spots: the tightest corners first, at least 350 m apart.
+    let mut order: Vec<&Corner> = w.corners.iter().filter(|c| c.start > 150.0 && c.end < len - 150.0 && c.grade <= 3).collect();
+    order.sort_by(|a, b| a.grade.cmp(&b.grade).then(a.start.total_cmp(&b.start)));
+    let max_spots = ((len / 700.0) as usize).clamp(3, 7);
+    let mut taken: Vec<f32> = Vec::new();
+    for c in &order {
+        if taken.len() >= max_spots {
+            break;
+        }
+        let mid = (c.start + c.end) * 0.5;
+        if taken.iter().any(|t| (t - mid).abs() < 350.0) {
+            continue;
+        }
+        let inside = if c.turn == stage::Turn::Left { 1.0 } else { -1.0 };
+        let side = if level(mid, inside, 8.0) { inside } else if level(mid, -inside, 8.0) { -inside } else { continue };
+        spot(&mut out, &mut rng, mid, side);
+        taken.push(mid);
+    }
+    // Hay bales on the apex of tight corners in farm country (and wherever there's a crowd).
+    let farm = matches!(biome, Biome::Scrub | Biome::Moor | Biome::BirchHills);
+    for c in w.corners.iter().filter(|c| c.grade <= 3 && c.start > 60.0 && c.end < len - 60.0) {
+        let mid = (c.start + c.end) * 0.5;
+        let crowd = taken.iter().any(|t| (t - mid).abs() < 1.0);
+        if !(farm || crowd) || bales.len() >= 24 {
+            continue;
+        }
+        let inside = if c.turn == stage::Turn::Left { 1.0 } else { -1.0 };
+        let n = if c.grade <= 1 { 2 } else { 1 };
+        for k in 0..n {
+            let s = mid + (k as f32 - (n - 1) as f32 * 0.5) * 1.7;
+            let (pos, d, _) = at(s, inside, 1.9);
+            let seed = pcg_core::mix64(w.def.seed ^ 0xBA1E ^ (s.to_bits() as u64) << 8);
+            // Rolled along the road, give or take.
+            bales.push((PropKind::HayBale, pos, heading(d) + rng.range(-0.25, 0.25), 1.0, seed));
+        }
+    }
+    // Concrete barriers outside the tightest corners (hairpin to grade 2) on dry and tarmac
+    // stages.
+    if biome == Biome::Scrub || w.def.surface == Surface::Tarmac {
+        for c in w.corners.iter().filter(|c| c.grade <= 2 && c.start > 60.0 && c.end < len - 60.0) {
+            let mid = (c.start + c.end) * 0.5;
+            let outside = if c.turn == stage::Turn::Left { -1.0 } else { 1.0 };
+            for k in -1..=1 {
+                let s = mid + k as f32 * (BARRIER_LEN + 0.1);
+                let (pos, d, _) = at(s, outside, 2.4);
+                out.push(Trackside { kind: TrackKind::Barrier, pos, yaw: heading(d), seed: pcg_core::mix64(w.def.seed ^ 0xC0C0 ^ s.to_bits() as u64) });
+            }
+        }
+    }
+    (out, bales)
 }
 
 fn road_area(road: &Road, pad: f32) -> Area {
@@ -482,7 +649,8 @@ pub fn dressing(w: &StageWorld) -> (Graph, Inputs) {
         Biome::PineForest => (4.2, 0.3, 0.6, 0.25, 0.3),
         Biome::BirchHills => (6.0, 0.42, 0.7, 0.2, 0.45),
         Biome::Scrub => (9.0, 0.45, 0.75, 0.6, 0.6),
-        Biome::Moor => (14.0, 0.6, 0.85, 0.5, 0.35),
+        // Grassland: dense seed-head grass and dry tufts (Fab scans).
+        Biome::Moor => (14.0, 0.6, 0.85, 0.5, 0.85),
         Biome::SnowForest => (4.6, 0.32, 0.6, 0.2, 0.15),
     };
     // Roadside props (`crate::props`): saplings and shrubs kept per biome.

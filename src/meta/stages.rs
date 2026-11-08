@@ -19,9 +19,17 @@ use super::board::Hasher;
 
 /// Hash of a generated stage: its definition and every road station (position, width,
 /// banking, surface). Hex, 16 digits.
+/// Bumped when a stage's solid dressing changes on purpose (what the car can hit off the
+/// road): old ghosts and records then show as stale instead of replaying into new obstacles.
+/// 1: trackside hay bales and concrete barriers (`world::trackside`).
+pub const DRESSING_REV: u64 = 1;
+
 pub fn stage_hash(def: &StageDef, road: &Road) -> String {
     let mut h = Hasher::default();
     h.u64(def.id as u64);
+    if DRESSING_REV > 0 {
+        h.u64(0xD7E5_0000 + DRESSING_REV);
+    }
     h.u64(def.seed);
     h.f32(def.length);
     h.u64(road.len() as u64);

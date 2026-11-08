@@ -78,6 +78,8 @@ pub enum Species {
     SnowSpruce,
     Birch,
     Olive,
+    /// Eucalyptus (blue gum): tall, pale trunk, open crown high up (Scrub).
+    Gum,
 }
 
 /// Species mix per biome (weights).
@@ -86,7 +88,7 @@ pub fn mix(b: Biome) -> &'static [(Species, f32)] {
     match b {
         Biome::PineForest => &[(Pine, 4.0), (Spruce, 2.0), (Birch, 0.6)],
         Biome::BirchHills => &[(Birch, 3.0), (Pine, 1.0)],
-        Biome::Scrub => &[(Olive, 2.0), (Pine, 0.5)],
+        Biome::Scrub => &[(Gum, 2.5), (Olive, 1.2)],
         Biome::Moor => &[(Pine, 1.0), (Birch, 1.0)],
         Biome::SnowForest => &[(SnowSpruce, 4.0), (Spruce, 1.5)],
     }
@@ -214,6 +216,17 @@ const ATLAS_BIRCH: Atlas = Atlas {
     aspect: 0.6818,
     crown: 0.4442,
     branches: [fr!(0.6906, 0.0133, 0.9969, 0.3197), fr!(0.6906, 0.3463, 0.9969, 0.6527), fr!(0.6906, 0.6793, 0.9969, 0.9857)],
+    branch_aspect: [1.0000, 1.0000, 1.0000],
+};
+
+/// In-house procedural Eucalyptus globulus (`asset-forge/assets_out/Eucalyptus`), crown only
+/// (`no_trunk`: the main stem is ours, `bark_gum`); the three small pictures are leaf clumps.
+const ATLAS_GUM: Atlas = Atlas {
+    set: "card_gum",
+    tree: fr!(0.0034, 0.4365, 0.6841, 1.0),
+    aspect: 0.6040,
+    crown: 0.6519,
+    branches: [fr!(0.6906, 0.0899, 0.9969, 0.2431), fr!(0.6906, 0.4229, 0.9969, 0.5761), fr!(0.6906, 0.7559, 0.9969, 0.9091)],
     branch_aspect: [1.0000, 1.0000, 1.0000],
 };
 
@@ -440,6 +453,42 @@ pub fn build(sp: Species, variant: usize) -> TreeGeo {
                 let yaw = rng.range(0.0, TAU);
                 let r = w * rng.range(0.15, 0.3);
                 let sz = w * rng.range(0.4, 0.55);
+                let mut c = Geo::default();
+                core_card(&mut c, yaw + PI / 2.0, -sz * 0.5, sz * 0.5, sz * a.branch_aspect[k % 3], a.branches[k % 3]);
+                let at = Vec3::new(yaw.sin() * r, y, yaw.cos() * r) + leanv;
+                crown.append(&c, 0.0, Vec3::ONE, at);
+                if k % LOD1_KEEP == 0 {
+                    lod1.append(&c, 0.0, Vec3::ONE, at);
+                }
+            }
+        }
+        Species::Gum => {
+            // A tall pale stem; the picture's limbs and crown from about half its height.
+            let a = &ATLAS_GUM;
+            let h = rng.range(16.0, 23.0);
+            let w = h * a.aspect * rng.range(0.8, 0.95);
+            let lean = Vec2::new(rng.range(-0.6, 0.6), rng.range(-0.6, 0.6));
+            trunk(&mut tr, h * 0.9, 0.26, 0.03, 6, 2.0, lean);
+            let mut t1 = Geo::default();
+            trunk(&mut t1, h * 0.9, 0.26, 0.03, 4, 2.0, lean);
+            trunk1 = Some(t1);
+            let leanv = Vec3::new(lean.x, 0.0, lean.y) * 0.5;
+            let y0 = h * a.crown * 0.75;
+            let f = a.tree.top(1.0 - a.crown * 0.75);
+            for k in 0..3 {
+                let yaw = yaw0 + k as f32 * PI / 3.0;
+                let mut c = Geo::default();
+                core_card(&mut c, yaw, y0, h, w, f);
+                crown.append(&c, 0.0, Vec3::ONE, leanv);
+                lod1.append(&c, 0.0, Vec3::ONE, leanv);
+            }
+            bill = Bill { half_w: w * 0.5, y0, y1: h, frame: f, offset: leanv };
+            let crown0 = h * a.crown;
+            for k in 0..6 {
+                let y = rng.range(crown0 + 1.0, h - 1.5);
+                let yaw = rng.range(0.0, TAU);
+                let r = w * rng.range(0.15, 0.32);
+                let sz = w * rng.range(0.35, 0.5);
                 let mut c = Geo::default();
                 core_card(&mut c, yaw + PI / 2.0, -sz * 0.5, sz * 0.5, sz * a.branch_aspect[k % 3], a.branches[k % 3]);
                 let at = Vec3::new(yaw.sin() * r, y, yaw.cos() * r) + leanv;
@@ -683,6 +732,8 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32, q: usize) {
         let h = world.resource_mut::<Assets<Image>>().add(img);
         world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color_texture: Some(h), perceptual_roughness: 0.85, ..default() })
     };
+    // Smooth pale eucalyptus bark (in-house, `bark_gum`).
+    let gum_bark = pbr(world, "bark_gum", |m| m.perceptual_roughness = if wet { 0.55 } else { 0.8 });
     let mut species = HashMap::new();
     for &(sp, _) in mix {
         let (set, tint) = match sp {
@@ -691,6 +742,7 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32, q: usize) {
             Species::SnowSpruce => ("card_fir_snow", Color::srgb(0.9, 0.92, 0.94)),
             Species::Birch => (ATLAS_BIRCH.set, Color::srgb(0.95, 1.0, 0.88)),
             Species::Olive => (ATLAS_OLIVE.set, Color::srgb(0.95, 0.98, 0.88)),
+            Species::Gum => (ATLAS_GUM.set, Color::srgb(0.93, 0.96, 0.9)),
         };
         let crown_mats = TINTS
             .iter()
@@ -725,6 +777,7 @@ pub fn setup(world: &mut World, s: &StageWorld, view: f32, q: usize) {
             Species::Birch => Some(birch_bark.clone()),
             Species::Spruce | Species::SnowSpruce => Some(spruce_bark.clone()),
             Species::Pine => Some(bark.clone()),
+            Species::Gum => Some(gum_bark.clone()),
         };
         species.insert(sp, SpeciesKit { variants, trunk_mat, crown_mats, imp_mat });
     }
@@ -1041,7 +1094,7 @@ mod tests {
 
     #[test]
     fn every_species_builds_cheap_valid_variants() {
-        for sp in [Species::Pine, Species::Spruce, Species::SnowSpruce, Species::Birch, Species::Olive] {
+        for sp in [Species::Pine, Species::Spruce, Species::SnowSpruce, Species::Birch, Species::Olive, Species::Gum] {
             for v in 0..VARIANTS {
                 let g = build(sp, v);
                 let n = g.crown.pos.len() as u32;
@@ -1061,7 +1114,7 @@ mod tests {
     /// The atlas constants match the renderer's `frame.txt` (re-render → update the constants).
     #[test]
     fn atlas_constants_match_the_rendered_frames() {
-        for a in [&ATLAS_FIR, &ATLAS_PINE, &ATLAS_BIRCH, &ATLAS_OLIVE] {
+        for a in [&ATLAS_FIR, &ATLAS_PINE, &ATLAS_BIRCH, &ATLAS_OLIVE, &ATLAS_GUM] {
             let path = format!("{}/assets/textures/{}/frame.txt", env!("CARGO_MANIFEST_DIR"), a.set);
             let txt = std::fs::read_to_string(&path).expect(&path);
             let row = |key: &str| -> Vec<f32> {

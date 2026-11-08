@@ -72,7 +72,7 @@ built_by = "tools/art/prep_textures.sh + engine cook"
 name = "rock"
 paths = ["textures/rock/*"]
 kind = "texture_set"
-sources = ["rock_face_03"]
+sources = ["fab_layered_rock"]
 collision = "none"
 lod = "mips"
 built_by = "tools/art/prep_textures.sh + engine cook"
@@ -96,10 +96,46 @@ lod = "mips"
 built_by = "tools/art/prep_textures.sh + engine cook"
 
 [[asset]]
+name = "soil_dry"
+paths = ["textures/soil_dry/*"]
+kind = "texture_set"
+sources = ["fab_dry_soil_surface"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "soil_red"
+paths = ["textures/soil_red/*"]
+kind = "texture_set"
+sources = ["fab_arid_soil_ground"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "soil_crack"
+paths = ["textures/soil_crack/*"]
+kind = "texture_set"
+sources = ["fab_cracked_soil"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
+name = "dirt_road"
+paths = ["textures/dirt_road/*"]
+kind = "texture_set"
+sources = ["fab_dirt_road"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/prep_textures.sh + engine cook"
+
+[[asset]]
 name = "gravel"
 paths = ["textures/gravel/*"]
 kind = "texture_set"
-sources = ["forest_ground_04"]
+sources = ["fab_gravel_on_soil"]
 collision = "none"
 lod = "mips"
 built_by = "tools/art/prep_textures.sh + engine cook"
@@ -108,7 +144,7 @@ built_by = "tools/art/prep_textures.sh + engine cook"
 name = "gravel_red"
 paths = ["textures/gravel_red/*"]
 kind = "texture_set"
-sources = ["rocky_gravel"]
+sources = ["fab_soil_and_gravel"]
 collision = "none"
 lod = "mips"
 built_by = "tools/art/prep_textures.sh + engine cook"
@@ -135,7 +171,7 @@ built_by = "tools/art/prep_textures.sh + engine cook"
 name = "mud"
 paths = ["textures/mud/*"]
 kind = "texture_set"
-sources = ["muddy_tracks"]
+sources = ["fab_mud_tire_tracks"]
 collision = "none"
 lod = "mips"
 built_by = "tools/art/prep_textures.sh + engine cook"
@@ -339,3 +375,133 @@ sources = ["original"]
 collision = "none"
 lod = "n/a"
 built_by = "by hand"
+
+# ---------------------------------------------------------------- Fab (Megascans) scans
+
+[[asset]]
+name = "boulder_rauk"
+paths = ["models/boulder_rauk.pnm", "textures/m_rock_rauk/*"]
+kind = "mesh"
+sources = ["fab_coast_rauk_boulder"]
+collision = "solid_cylinder"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+[[asset]]
+name = "dead_shrubs"
+paths = ["models/dead_shrub_a.pnm", "models/dead_shrub_b.pnm", "textures/m_dead_shrub/*"]
+kind = "mesh"
+sources = ["fab_dead_shrubs"]
+collision = "brush"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+[[asset]]
+name = "dry_branches"
+paths = ["models/dry_branches.pnm", "textures/m_dry_branches/*"]
+kind = "mesh"
+sources = ["fab_dry_branches"]
+collision = "none"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+[[asset]]
+name = "dead_branches"
+paths = ["models/dead_branches.pnm", "textures/m_dead_branches/*"]
+kind = "mesh"
+sources = ["fab_dead_branches"]
+collision = "none"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+[[asset]]
+name = "dry_grass"
+paths = ["models/dry_grass_a.pnm", "models/dry_grass_b.pnm", "textures/m_dry_grass/*"]
+kind = "mesh"
+sources = ["fab_dry_grass"]
+collision = "none"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+[[asset]]
+name = "cocksfoot"
+paths = ["models/cocksfoot.pnm", "textures/m_cocksfoot/*"]
+kind = "mesh"
+sources = ["fab_cocksfoot_grass"]
+collision = "none"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+[[asset]]
+name = "graminea"
+paths = ["models/graminea.pnm", "textures/m_graminea/*"]
+kind = "mesh"
+sources = ["fab_graminea"]
+collision = "none"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+[[asset]]
+name = "kikuyu"
+paths = ["models/kikuyu.pnm", "textures/m_kikuyu/*"]
+kind = "mesh"
+sources = ["fab_kikuyu_grass"]
+collision = "none"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+[[asset]]
+name = "barrier_concrete"
+paths = ["models/barrier_concrete.pnm", "textures/m_barrier_concrete/*"]
+kind = "mesh"
+sources = ["fab_concrete_barrier"]
+collision = "solid_cylinder"
+lod = "engine detail tier; no authored LOD chain yet"
+built_by = "tools/art/fab_to_gltf.py, tools/art/build_meshes.py, tools/art/prep_fab_models.sh"
+
+# ---------------------------------------------------------------- in-house realism props
+
+[[asset]]
+name = "hay_bale"
+paths = ["models/hay_bale.pnm", "textures/m_hay/*"]
+kind = "mesh"
+sources = ["original", "fab_hay_bale"]
+collision = "breakable"
+lod = "none (small, fades at 170-260 m)"
+built_by = "asset-forge/assets_out/HayBale/build_haybale.py, tools/art/build_meshes.py"
+
+[[asset]]
+name = "rally_tape"
+paths = ["models/tape_run.pnm", "models/tape_stakes.pnm", "textures/m_tape/*", "textures/m_stake/*"]
+kind = "mesh"
+sources = ["original"]
+collision = "none"
+lod = "none (small, fades at 170-260 m)"
+built_by = "asset-forge/assets_out/RallyTape/export_tape.py, tools/art/build_meshes.py"
+
+[[asset]]
+name = "card_gum"
+paths = ["textures/card_gum/*"]
+kind = "texture_set"
+sources = ["original"]
+collision = "solid_cylinder"
+lod = "mips"
+built_by = "asset-forge/assets_out/Eucalyptus/export_eucalyptus.py, tools/art/render_tree_cards.py"
+
+[[asset]]
+name = "bark_gum"
+paths = ["textures/bark_gum/*"]
+kind = "texture_set"
+sources = ["original", "ph_bark_platanus"]
+collision = "none"
+lod = "mips"
+built_by = "asset-forge/assets_out/Eucalyptus/export_eucalyptus.py + engine cook"
+
+[[asset]]
+name = "card_crowd"
+paths = ["textures/card_crowd/*"]
+kind = "texture_set"
+sources = ["fab_people_x10_01"]
+collision = "none"
+lod = "mips"
+built_by = "tools/art/render_crowd_cards.py + engine cook"

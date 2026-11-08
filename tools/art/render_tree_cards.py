@@ -36,6 +36,10 @@ TREES = [
     ("card_birch", "tree_small_02", "tree_small_02_LOD0", {"tree_small_02_leaves": "tree_small_02_leaves_alpha_2k.jpg"}, [(0.5, 30), (0.68, 150), (0.84, 270)], 0.75, 0.6, False, {"height": 1024, "clusters": True, "no_trunk": True}),
     ("card_olive", "island_tree_01", "island_tree_01_LOD0", {"island_tree_01_leaves": "island_tree_01_leaves_alpha_2k.jpg"}, [(0.45, 30), (0.65, 150), (0.82, 270)], 0.8, 0.6, False, {"height": 1024, "clusters": True, "trunk": ("island_tree_01",)}),
     ("card_pine", "pine_tree_01", "pine_tree_01_a_LOD0", {"pine_tree_01_twig": "pine_tree_01_twig_alpha_2k.jpg"}, [(0.62, 30), (0.74, 150), (0.5, 270)], 0.8, 0.55, False, {"grade": (0.13, 1.05, 0.85)}),
+    # In-house procedural Eucalyptus globulus (asset-forge Eucalyptus/export_eucalyptus.py, seed 7):
+    # leaves are geometry (no alpha map: `None` marks the leaf material); the main stem is
+    # `eucalyptus_01_trunk`, left out of the picture (the game draws it with `bark_gum`).
+    ("card_gum", "eucalyptus_01", "eucalyptus_01_a", {"eucalyptus_01_leaves": None}, [(0.35, 30), (0.6, 150), (0.82, 270)], 1.3, 0.6, False, {"height": 2048, "clusters": True, "no_trunk": True}),
 ]
 
 

@@ -27,7 +27,22 @@ set_() {
     i=$((i + 1))
   done
 }
+# set_orm <name> <size> <color> <normal> <orm>: ORM packed as R = AO, G = roughness.
+set_orm() {
+  local name=$1 size=$2 color=$3 normal=$4 orm=$5
+  mkdir -p "$OUT/$name"
+  magick "$color" -resize "${size}x${size}" -quality 95 "$OUT/$name/color.jpg"
+  magick "$normal" -resize "$((size / 2))x$((size / 2))" -quality 95 "$OUT/$name/normal.jpg"
+  magick "$orm" -resize "${size}x${size}" -channel G -separate -quality 95 "$OUT/$name/rough.jpg"
+  magick "$orm" -resize "${size}x${size}" -channel R -separate -quality 95 "$OUT/$name/ao.jpg"
+}
 ph() { echo "$G/$1/$1_diff_2k.jpg" "$G/$1/$1_nor_gl_2k.jpg" "$G/$1/$1_rough_2k.jpg" "$G/$1/$1_ao_2k.jpg"; }
+# Fab (Quixel Megascans) surfaces, Fab Standard licence (assets_src/fab_batch1/SOURCES.md).
+# Normals are OpenGL (measured against the height maps). mq: <folder> <file prefix>, separate
+# maps; mqo: <folder> <id>, glTF tier (T_<id>_4K_B/_N/_ORM.png).
+F=$SRC/fab_batch1
+mq() { echo "$F/$1/$2_BaseColor.jpg" "$F/$1/$2_Normal.jpg" "$F/$1/$2_Roughness.jpg" "$F/$1/$2_AO.jpg"; }
+mqo() { echo "$F/$1/Textures/T_$2_4K_B.png" "$F/$1/Textures/T_$2_4K_N.png" "$F/$1/Textures/T_$2_4K_ORM.png"; }
 acg() { echo "$G/$1/$1_2K-JPG_Color.jpg" "$G/$1/$1_2K-JPG_NormalGL.jpg" "$G/$1/$1_2K-JPG_Roughness.jpg" "$G/$1/$1_2K-JPG_AmbientOcclusion.jpg"; }
 
 # Terrain layers.
@@ -37,15 +52,20 @@ set_ heath 1024 $(ph sparse_grass)
 set_ needles 1024 $(acg Ground077)
 set_ leaves 1024 "$G/forest_leaves_02/forest_leaves_02_diffuse_2k.jpg" "$G/forest_leaves_02/forest_leaves_02_nor_gl_2k.jpg" "$G/forest_leaves_02/forest_leaves_02_rough_2k.jpg" "$G/forest_leaves_02/forest_leaves_02_ao_2k.jpg"
 set_ dirt 1024 $(ph gravel_road)
-set_ rock 1024 $(ph rock_face_03)
+set_ rock 1024 $(mq layered_rock_vl0fdhdo_8k Layered_Rock_vl0fdhdo_8K)
 set_ cliff 1024 $(ph cliff_side)
 set_ snow 1024 $(ph snow_02)
+# Dry ground (Scrub, Moor patches).
+set_orm soil_dry 1024 $(mqo dry_soil_surface_sbkiznp0_4k_ue_high sbkiznp0)
+set_orm soil_red 1024 $(mqo arid_soil_ground_wihgahybw_4k_ue_high wihgahybw)
+set_orm soil_crack 1024 $(mqo cracked_soil_rmgfzqp0_4k_ue_high rmgfzqp0)
 # Road surfaces and the verge.
-set_ gravel 1024 $(ph forest_ground_04)
-set_ gravel_red 1024 $(ph rocky_gravel)
+set_orm gravel 1024 $(mqo gravel_on_soil_rmsiidp0_4k_ue_high rmsiidp0)
+set_ gravel_red 1024 $(mq soil_and_gravel_pcciq0_4k Soil_And_Gravel_pcciQ0_4K)
+set_ dirt_road 1024 $(mq dirt_road_omdg10_4k Dirt_Road_omDg10_4K)
 set_ shoulder 1024 $(ph grass_path_2)
 set_ tarmac 1024 $(ph tarred_gravel)
-set_ mud 1024 $(ph muddy_tracks)
+set_orm mud 1024 $(mqo mud_tire_tracks_wcksce0_4k_ue_high wcksce0)
 
 # Model sets: <folder> <stem> <set name> <size> [alpha map] (ARM = AO, roughness, metal).
 M=$SRC/models

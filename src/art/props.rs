@@ -66,6 +66,8 @@ struct Kit {
     /// Sapling parts per prop come from the tree kit (`trees::near_parts`), with the full
     /// tree's height at scale 1.
     tree_height: f32,
+    /// Round hay bale (`hay_bale` mesh, `m_hay`; origin at its base), when shipped.
+    hay: Vec<Part>,
     chips: [DebrisSpec; 3],
 }
 
@@ -96,7 +98,7 @@ impl StageProps {
 pub fn spawn(world: &mut World, s: &StageWorld) {
     let heights = s.heights.clone();
     world.insert_resource(PropGround::new(move |x, z| heights.height_at(x, z)));
-    let kit = kit(world);
+    let kit = kit(world, s.def.biome == crate::stage::Biome::Scrub, s.open.is_none());
     let give = s
         .props
         .iter()
@@ -118,7 +120,8 @@ pub fn spawn(world: &mut World, s: &StageWorld) {
     world.insert_resource(props);
 }
 
-fn kit(world: &mut World) -> Kit {
+/// `dry`: dead shrubs (Scrub) instead of green bushes. `rally`: a rally stage (hay bales).
+fn kit(world: &mut World, dry: bool, rally: bool) -> Kit {
     let dir = world.resource::<engine::prelude::AssetsDir>().0.clone();
     let wet = world.get_resource::<super::Wet>().is_some_and(|w| w.0);
     let mat = |world: &mut World, c: Color, rough: f32| world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: c, perceptual_roughness: if wet { rough * 0.6 } else { rough }, ..default() });
@@ -146,15 +149,18 @@ fn kit(world: &mut World) -> Kit {
         DebrisSpec { mesh: chip, material: wood, count: 10, size: (0.6, 1.4), speed: (1.5, 4.0), life: (1.8, 3.0) },
     ];
     // Shrubs: the dressing's shrub models, foliage like `dressing::catalog`'s.
-    let shrub_mat = pbr(world, "m_shrub", |m| {
+    let shrub_mat = pbr(world, if dry { "m_dead_shrub" } else { "m_shrub" }, |m| {
         m.alpha_mode = AlphaMode::Mask(0.5);
         m.double_sided = true;
         m.cull_mode = None;
         m.diffuse_transmission = 0.25;
         m.perceptual_roughness = 0.8;
+        if dry {
+            m.base_color = super::dressing::DEAD_SHRUB_TINT;
+        }
     });
     let mut shrubs = Vec::new();
-    for name in ["shrub_a", "shrub_b"] {
+    for name in if dry { ["dead_shrub_a", "dead_shrub_b"] } else { ["shrub_a", "shrub_b"] } {
         match super::meshfile::load(&dir, name) {
             Ok(mut mesh) => {
                 // Normalise to a 1 m footprint radius (the collision's, at scale 1 × kind size).
@@ -166,7 +172,16 @@ fn kit(world: &mut World) -> Kit {
         }
     }
     let tree_height = tree_height(world).unwrap_or(11.0);
-    Kit { post, sign, shrubs, tree_height, chips }
+    let mut hay = Vec::new();
+    match if rally { super::meshfile::load(&dir, "hay_bale") } else { Err(String::new()) } {
+        Err(_) if !rally => {}
+        Ok(mesh) => {
+            let m = pbr(world, "m_hay", |m| m.perceptual_roughness = 0.9);
+            hay.push((world.resource_mut::<Assets<Mesh>>().add(mesh), m));
+        }
+        Err(e) => error!("props: hay_bale mesh: {e}"),
+    }
+    Kit { post, sign, shrubs, tree_height, hay, chips }
 }
 
 /// Horizontal reach of a mesh from its origin (m).
@@ -211,6 +226,8 @@ fn spawn_one(world: &mut World, props: &StageProps, i: usize) -> Option<Entity> 
             let sign = props.furniture.as_ref()?.signs.get(p.seed as usize)?.kind;
             (vec![super::signs::prop_part(world, sign)], 1.0, Tag::Breaks(Breakable { height, radius, fallen: Fallen::Stay }))
         }
+        PropKind::HayBale if !kit.hay.is_empty() => (kit.hay.clone(), p.scale, Tag::Breaks(Breakable { height, radius, fallen: Fallen::Stay })),
+        PropKind::HayBale => return None,
         PropKind::Shrub => {
             let (m, mat, unit) = kit.shrubs.get((p.seed % kit.shrubs.len().max(1) as u64) as usize)?.clone();
             (vec![(m, mat)], radius * unit, Tag::Bends(Sway::new(radius, height)))

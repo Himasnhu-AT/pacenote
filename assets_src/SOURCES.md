@@ -891,6 +891,214 @@ When downloading from Sketchfab, pick "glTF" (or "Autoconverted format (glTF)"),
 - Triangle counts above are counted from the downloaded glTFs (all variants in the file summed). Multi-node models (e.g. `fir_sapling_a/b/c`) hold several variants: spawn one node each. No LODs are included; generate them (meshopt/Blender).
 - The ambientCG `Displacement` / Poly Haven `disp` maps are heightmaps for terrain blending or parallax.
 
+## Fab (Quixel Megascans): Fab Standard License
+
+Downloaded 7 Nov 2026 by the owner from fab.com (free, Professional tier). The owner allowed Fab Standard
+assets that work in any engine on 7 Nov 2026 (docs/ASSETS_BRIEF.md §0). Fab Standard: no credit required;
+raw files must not be redistributed, so only cooked KTX2 / .pnm files ship. Folder list and per-item notes:
+`assets_src/fab_batch1/SOURCES.md`. Fab lists several items per title, so each is identified by its
+Megascans asset id (in the folder name and the bundled JSON); search the id on fab.com to find the listing.
+
+### Gravel on Soil (`fab_gravel_on_soil`)
+
+- **Use:** road gravel (`gravel`: forest, birch, moor and open-world roads)
+- **Path:** `assets_src/fab_batch1/gravel_on_soil_rmsiidp0_4k_ue_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `rmsiidp0`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K (8K for Layered Rock) PBR scan, shipped at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Soil and Gravel (`fab_soil_and_gravel`)
+
+- **Use:** ochre gravel road (`gravel_red`: Scrub roads)
+- **Path:** `assets_src/fab_batch1/soil_and_gravel_pcciq0_4k/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `pcciQ0`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K (8K for Layered Rock) PBR scan, shipped at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Dirt Road (`fab_dirt_road`)
+
+- **Use:** packed dirt verge (`dirt_road`: Scrub verges)
+- **Path:** `assets_src/fab_batch1/dirt_road_omdg10_4k/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `omDg10`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K (8K for Layered Rock) PBR scan, shipped at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Mud Tire Tracks (`fab_mud_tire_tracks`)
+
+- **Use:** mud road surface (`mud`)
+- **Path:** `assets_src/fab_batch1/mud_tire_tracks_wcksce0_4k_ue_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `wcksce0`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K (8K for Layered Rock) PBR scan, shipped at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Layered Rock (`fab_layered_rock`)
+
+- **Use:** terrain rock layer (`rock`)
+- **Path:** `assets_src/fab_batch1/layered_rock_vl0fdhdo_8k/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `vl0fdhdo`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K (8K for Layered Rock) PBR scan, shipped at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Dry Soil Surface (`fab_dry_soil_surface`)
+
+- **Use:** dry ground (`soil_dry`: Scrub and Moor base layer)
+- **Path:** `assets_src/fab_batch1/dry_soil_surface_sbkiznp0_4k_ue_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `sbkiznp0`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K (8K for Layered Rock) PBR scan, shipped at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Arid Soil Ground (`fab_arid_soil_ground`)
+
+- **Use:** red earth (`soil_red`: Scrub patches)
+- **Path:** `assets_src/fab_batch1/arid_soil_ground_wihgahybw_4k_ue_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `wihgahybw`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K (8K for Layered Rock) PBR scan, shipped at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Cracked Soil (`fab_cracked_soil`)
+
+- **Use:** cracked dry ground (`soil_crack`: Scrub patches)
+- **Path:** `assets_src/fab_batch1/cracked_soil_rmgfzqp0_4k_ue_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `rmgfzqp0`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K (8K for Layered Rock) PBR scan, shipped at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Coast Rauk Boulder L 03 (`fab_coast_rauk_boulder`)
+
+- **Use:** granite boulder (`boulder_rauk`)
+- **Path:** `assets_src/fab_batch1/coast_rauk_boulder_l_03_wfepegb_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `wfepegb`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K scan, decimated by tools/art/fab_to_gltf.py + build_meshes.py; textures at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Dead Shrubs (`fab_dead_shrubs`)
+
+- **Use:** dead shrubs (`dead_shrub_a/b`; Scrub ground cover and roadside shrubs)
+- **Path:** `assets_src/fab_batch1/dead_shrubs_vdknafgha_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `vdknafgha`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K scan, decimated by tools/art/fab_to_gltf.py + build_meshes.py; textures at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Dry Branches (`fab_dry_branches`)
+
+- **Use:** branch pile (`dry_branches`)
+- **Path:** `assets_src/fab_batch1/dry_branches_pdye3_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `pdye3`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K scan, decimated by tools/art/fab_to_gltf.py + build_meshes.py; textures at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Dead Branches (`fab_dead_branches`)
+
+- **Use:** branch pile (`dead_branches`)
+- **Path:** `assets_src/fab_batch1/dead_branches_qjuwd_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `qjuwd`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K scan, decimated by tools/art/fab_to_gltf.py + build_meshes.py; textures at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Dry Grass (`fab_dry_grass`)
+
+- **Use:** dry grass tufts (`dry_grass_a/b`)
+- **Path:** `assets_src/fab_batch1/dry_grass_tbbqejqr_ue_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `tbbqejqr`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K scan, decimated by tools/art/fab_to_gltf.py + build_meshes.py; textures at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Cocksfoot Grass (`fab_cocksfoot_grass`)
+
+- **Use:** seed-head grass (`cocksfoot`)
+- **Path:** `assets_src/fab_batch1/cocksfoot_grass_tcfoejcr_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `tcfoejcr`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K scan, decimated by tools/art/fab_to_gltf.py + build_meshes.py; textures at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Kikuyu Grass (`fab_kikuyu_grass`)
+
+- **Use:** grass clump (`kikuyu`)
+- **Path:** `assets_src/fab_batch1/kikuyu_grass_wiljearqx_ue_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `wiljearqx`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K scan, decimated by tools/art/fab_to_gltf.py + build_meshes.py; textures at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Concrete Barrier (`fab_concrete_barrier`)
+
+- **Use:** concrete barrier block (`barrier_concrete`; stage hairpins)
+- **Path:** `assets_src/fab_batch1/concrete_barrier_ubitfhtfa_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `ubitfhtfa`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K scan, decimated by tools/art/fab_to_gltf.py + build_meshes.py; textures at 1024²
+- **Credit line:** Not required (Fab Standard)
+
+### Graminea 01 - Tall Grass (`fab_graminea`)
+
+- **Use:** tall grass clumps (`graminea`; Moor)
+- **Path:** `assets_src/fab_batch1/graminea01_additional_files/`
+- **Source page:** https://www.fab.com/listings/6d44f8b5-2759-4cc3-b89c-6d269c2aca5f
+- **Author:** Neon Grid
+- **Licence:** Fab Standard License (free Professional tier; any engine; no raw redistribution). Tagged NoAI on Fab: not for AI training or texture tools.
+- **Resolution / polys:** 2K atlas; one card split into three crossed-card tufts by tools/art/fab_to_gltf.py
+- **Credit line:** Not required (Fab Standard)
+
+### Hay Bale (`fab_hay_bale`)
+
+- **Use:** straw colours for the in-house hay bale texture (`m_hay`, painted in asset-forge/assets_out/HayBale/build_haybale.py)
+- **Path:** `assets_src/fab_batch1/hay_bale_tlvmcfvl_4k_ue_high/`
+- **Source page:** https://www.fab.com/sellers/Quixel%20Megascans (Megascans asset id `tlvmcfvl`)
+- **Author:** Quixel Megascans
+- **Licence:** Fab Standard License (free; any engine; no raw redistribution)
+- **Resolution / polys:** 4K texture set; sampled into a 1024² in-house atlas
+- **Credit line:** Not required (Fab Standard)
+
+### Models of people x 10 01 (`fab_people_x10_01`)
+
+- **Use:** seated spectator impostor cards (`card_crowd`, tools/art/render_crowd_cards.py)
+- **Path:** `assets_src/fab_batch1/blend/`
+- **Source page:** https://www.fab.com/listings/d374612c-c07f-4825-8688-4b57da7522f2
+- **Author:** Volandemor0026
+- **Licence:** Fab Standard License, claimed by the owner on 7 Nov 2026. **TO CONFIRM before release:** on 8 Nov the listing showed a price on both tiers (Personal 468.93 INR, Professional 938.8 INR), so it was probably a limited-time free claim; check in the owner's Fab library which licence tier was claimed (Professional covers commercial use without limits).
+- **Resolution / polys:** 10 seated scans (~86k tris each), rendered to a 2048² 8-angle atlas
+- **Credit line:** Not required (Fab Standard)
+
+### Bark Platanus (`ph_bark_platanus`)
+
+- **Use:** bark micro-normal in the in-house eucalyptus bark (`bark_gum`)
+- **Path:** `assets_src/realism_batch1/bark_platanus/`
+- **Source page:** https://polyhaven.com/a/bark_platanus
+- **Author:** Dimitrios Savva / Poly Haven
+- **Licence:** CC0 1.0 Universal (Public Domain Dedication)
+- **Resolution / polys:** 2K texture set
+- **Credit line:** Optional (CC0)
+
 <!-- SFX BEGIN (tools/audio/cook_sfx.py) -->
 ## audio/openverse
 
