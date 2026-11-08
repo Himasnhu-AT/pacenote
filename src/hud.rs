@@ -13,6 +13,10 @@
 //! pulses accent ↔ white at 2 Hz at the shift point (steady with reduce motion), and in free
 //! roam a Notes chip top right shows the balance and the change for 4 s after it moves.
 //!
+//! HUD safe area (§3.7): every anchored block carries [`SafeArea`]; its anchored sides get a
+//! margin of `Prefs::hud_safe_area` of the window (`Vw` / `Vh`), on top of the 40 px inset.
+//! Written only when the setting changes or a block appears.
+//!
 //! Each readout can be turned off in Settings > HUD ([`crate::prefs::Prefs`]). Cheap: values
 //! are cached and text / colours / widths are only written when they change (no per-frame
 //! formatting or allocation while nothing changes).
@@ -89,11 +93,48 @@ struct DamageFill(usize);
 #[derive(Component)]
 struct DamagePct(usize);
 
+/// Which sides of an anchored HUD block move in by the HUD safe area.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SafeArea {
+    pub top: bool,
+    pub bottom: bool,
+    pub left: bool,
+    pub right: bool,
+}
+
+impl SafeArea {
+    pub const TOP_LEFT: Self = SafeArea { top: true, bottom: false, left: true, right: false };
+    pub const TOP_RIGHT: Self = SafeArea { top: true, bottom: false, left: false, right: true };
+    pub const BOTTOM_LEFT: Self = SafeArea { top: false, bottom: true, left: true, right: false };
+    pub const BOTTOM_RIGHT: Self = SafeArea { top: false, bottom: true, left: false, right: true };
+    pub const TOP: Self = SafeArea { top: true, bottom: false, left: false, right: false };
+    pub const BOTTOM: Self = SafeArea { top: false, bottom: true, left: false, right: false };
+
+    /// Sets the anchored sides' margins for a safe area of `share` (0..0.05) of the window;
+    /// other sides keep theirs (centred blocks use a negative left margin).
+    pub fn apply(self, share: f32, m: &mut UiRect) {
+        let pc = share.clamp(0.0, 0.05) * 100.0;
+        if self.top {
+            m.top = Val::Vh(pc);
+        }
+        if self.bottom {
+            m.bottom = Val::Vh(pc);
+        }
+        if self.left {
+            m.left = Val::Vw(pc);
+        }
+        if self.right {
+            m.right = Val::Vw(pc);
+        }
+    }
+}
+
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_hud, update_hud, shift_pulse, notes_chip, hide_under_screens).chain().run_if(resource_exists::<StageWorld>));
+        app.add_systems(Update, (spawn_hud, update_hud, shift_pulse, notes_chip, hide_under_screens).chain().run_if(resource_exists::<StageWorld>))
+            .add_systems(PostUpdate, (tag_toasts, safe_area).chain().before(bevy::ui::UiSystems::Prepare));
     }
 }
 
@@ -104,6 +145,28 @@ fn hide_under_screens(screens: Option<Res<engine::ui::prelude::Screens>>, mut q:
     for mut v in &mut q {
         if *v != want {
             *v = want;
+        }
+    }
+}
+
+/// The engine's toast stack (its marker is private: found by name) sits top right too.
+#[allow(clippy::type_complexity)]
+fn tag_toasts(mut commands: Commands, q: Query<(Entity, &Name), (Added<Name>, Without<SafeArea>)>) {
+    for (e, n) in &q {
+        if n.as_str() == "Toasts" {
+            commands.entity(e).insert(SafeArea::TOP_RIGHT);
+        }
+    }
+}
+
+/// Insets anchored blocks by the HUD safe area: when it changes, or on blocks just spawned.
+fn safe_area(prefs: Option<Res<Prefs>>, mut q: Query<(Ref<SafeArea>, &mut Node)>, mut last: Local<Option<f32>>) {
+    let share = prefs.map_or(0.0, |p| p.hud_safe_area);
+    let changed = *last != Some(share);
+    *last = Some(share);
+    for (a, mut n) in &mut q {
+        if changed || a.is_added() {
+            a.apply(share, &mut n.margin);
         }
     }
 }
@@ -148,6 +211,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
         .with_children(|root| {
             // Bottom right: revs, speed, gear.
             root.spawn((
+                SafeArea::BOTTOM_RIGHT,
                 Node { position_type: PositionType::Absolute, right: px(40), bottom: px(34), flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, row_gap: px(4), padding: UiRect::new(px(18), px(18), px(12), px(8)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
                 plate(),
                 Pickable::IGNORE,
@@ -178,6 +242,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
             // Top right: the Notes chip (free roam, after a change).
             root.spawn((
                 NotesChip,
+                SafeArea::TOP_RIGHT,
                 Node { position_type: PositionType::Absolute, right: px(40), top: px(34), column_gap: px(10), align_items: AlignItems::Baseline, padding: UiRect::new(px(16), px(16), px(6), px(8)), border_radius: BorderRadius::all(px(RADIUS)), display: Display::None, ..default() },
                 plate(),
                 Pickable::IGNORE,
@@ -189,6 +254,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
             });
             // Bottom left: stage, clock, progress.
             root.spawn((
+                SafeArea::BOTTOM_LEFT,
                 Node { position_type: PositionType::Absolute, left: px(40), bottom: px(34), flex_direction: FlexDirection::Column, row_gap: px(4), padding: UiRect::new(px(18), px(18), px(12), px(14)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
                 plate(),
                 Pickable::IGNORE,
@@ -209,6 +275,7 @@ fn spawn_hud(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<HudRoo
             // Top right: damage.
             root.spawn((
                 HudGroup::Damage,
+                SafeArea::TOP_RIGHT,
                 Node { position_type: PositionType::Absolute, right: px(40), top: px(96), flex_direction: FlexDirection::Column, row_gap: px(6), padding: UiRect::all(px(14)), border: UiRect::left(px(3)), border_radius: BorderRadius::all(px(RADIUS)), display: Display::None, ..default() },
                 plate(),
                 BorderColor::all(t.bad),
@@ -555,6 +622,18 @@ mod tests {
         s.clear();
         clock_into(&mut s, 5.05);
         assert_eq!(s, "0:05.050");
+    }
+
+    #[test]
+    fn safe_area_insets_only_anchored_sides() {
+        let mut m = UiRect::left(px(-280));
+        SafeArea::TOP.apply(0.04, &mut m);
+        assert_eq!((m.top, m.left), (Val::Vh(4.0), px(-280)), "a centred block keeps its centring");
+        let mut m = UiRect::default();
+        SafeArea::BOTTOM_RIGHT.apply(0.2, &mut m);
+        assert_eq!((m.bottom, m.right, m.top, m.left), (Val::Vh(5.0), Val::Vw(5.0), Val::ZERO, Val::ZERO), "clamped to 5 %");
+        SafeArea::BOTTOM_RIGHT.apply(0.0, &mut m);
+        assert_eq!(m.right, Val::Vw(0.0));
     }
 
     #[test]

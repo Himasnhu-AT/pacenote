@@ -48,6 +48,7 @@ fn spawn_panel(mut commands: Commands, q: Query<(), With<Panel>>) {
         .spawn((
             Panel,
             Name::new("Voice indicator"),
+            crate::hud::SafeArea::TOP_LEFT,
             Node {
                 position_type: PositionType::Absolute,
                 // Top-left: top-right holds the driver's guide notice and the guide's panel.

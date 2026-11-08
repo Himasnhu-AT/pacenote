@@ -128,6 +128,7 @@ fn spawn(mut commands: Commands, theme: Res<Theme>, icons: Option<Res<HudIcons>>
         .spawn((
             Root,
             Name::new("HUD style"),
+            crate::hud::SafeArea::BOTTOM_RIGHT,
             DespawnOnExit(engine::flow::AppState::InGame),
             Node { position_type: PositionType::Absolute, right: px(40), bottom: px(BOTTOM), width: px(WIDTH), display: Display::None, ..default() },
             Pickable::IGNORE,

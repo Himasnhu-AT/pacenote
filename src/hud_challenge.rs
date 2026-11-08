@@ -90,6 +90,7 @@ fn spawn(mut commands: Commands, theme: Res<Theme>, icons: Option<Res<HudIcons>>
         .spawn((
             Root,
             Name::new("HUD challenge"),
+            crate::hud::SafeArea::TOP,
             DespawnOnExit(engine::flow::AppState::InGame),
             Node {
                 position_type: PositionType::Absolute,

@@ -7,8 +7,9 @@
 //!   HUD, Audio, Voice chat, Video, Interface, Controls. Engine rows are moved, renamed and
 //!   given rally wording by re-registering them (same key, same get/set); rows that do
 //!   nothing in Pacenote (mouse look, sprint toggle, generic subtitles) are hidden.
-//! - Side panels: a live HUD preview (units, which readouts) and a co-driver call preview
-//!   (call order, timing).
+//! - Side panels: a live HUD preview (units, which readouts, safe area), a co-driver call
+//!   preview (call order, timing), a sun-dial strip for World › Start time and a side-view
+//!   schematic of the camera view and field of view.
 
 use bevy::prelude::*;
 use engine::settings::{FieldDef, FieldKind, RegisterSettings, SettingsRegistry, add_settings_section, format_percent};
@@ -16,6 +17,7 @@ use engine::ui::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::codriver::CoDriver;
+use crate::daytime::{self, DaySettings};
 
 /// Co-driver and HUD options.
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -39,6 +41,8 @@ pub struct Prefs {
     pub hud_clock: bool,
     pub hud_progress: bool,
     pub hud_damage: bool,
+    /// HUD safe area: share of the window (0..0.05) every anchored HUD block moves in by.
+    pub hud_safe_area: f32,
     /// Keyboard steering speed (0.6–1.6, 1 = default).
     pub steer_speed: f32,
     /// Gamepad stick linearity (1 linear … 2.5 soft around centre).
@@ -70,6 +74,7 @@ impl Default for Prefs {
             hud_clock: true,
             hud_progress: true,
             hud_damage: true,
+            hud_safe_area: 0.0,
             steer_speed: 1.0,
             stick_linearity: 1.0,
             stick_deadzone: 0.05,
@@ -118,6 +123,8 @@ impl Plugin for PrefsPlugin {
             .settings_panel("HUD", hud_preview)
             .settings_panel("Co-driver", codriver_preview)
             .settings_panel("Voice chat", voice_panel)
+            .settings_panel("World", world_panel)
+            .settings_panel("Camera", camera_panel)
             .add_systems(Startup, layout)
             .add_systems(Update, (sync_codriver, sync_steering, sync_damage, apply_assists, refresh_previews));
         register(app);
@@ -251,7 +258,16 @@ fn register(app: &mut App) {
             get: |w| p(w).stick_deadzone,
             set: |w, v| pm(w).stick_deadzone = v.clamp(0.0, 0.3),
         })
-        .register_setting(toggle("hud_damage", "HUD", "Damage", "Engine, steering and suspension damage, top right, once the car is hurt.", |w| b(p(w).hud_damage), |w, v| pm(w).hud_damage = v > 0.5));
+        .register_setting(toggle("hud_damage", "HUD", "Damage", "Engine, steering and suspension damage, top right, once the car is hurt.", |w| b(p(w).hud_damage), |w, v| pm(w).hud_damage = v > 0.5))
+        .register_setting(FieldDef {
+            key: "hud_safe_area",
+            tab: "HUD",
+            label: "HUD safe area",
+            hint: "Moves the HUD in from the edges of the screen, for TVs that crop the picture or a handheld's bezel.",
+            kind: FieldKind::Slider { min: 0.0, max: 0.05, step: 0.005, format: |v| format!("{:.1}%", v * 100.0) },
+            get: |w| p(w).hud_safe_area,
+            set: |w, v| pm(w).hud_safe_area = v.clamp(0.0, 0.05),
+        });
 }
 
 /// Where each existing row goes: (key, tab, new label, new hint). `""` tab = hidden. Rows not
@@ -294,6 +310,7 @@ const LAYOUT: &[(&str, &str, Option<&str>, Option<&str>)] = &[
     ("style_hud", "HUD", None, None),
     ("challenge_cards", "HUD", None, None),
     ("race_positions", "HUD", None, None),
+    ("hud_safe_area", "HUD", None, None),
     // Audio.
     ("master_volume", "Audio", Some("Master"), Some("Everything at once.")),
     ("music_volume", "Audio", Some("Music"), Some("Menu and loading-screen music. None plays while you drive.")),
@@ -479,8 +496,13 @@ fn rebuild_hud_preview(world: &mut World) {
         }
     }
     let (v, unit) = prefs.speed(31.0);
+    // The safe area drawn as a frame that share in from the box's edges; the readouts move in too.
+    let inset = prefs.hud_safe_area.clamp(0.0, 0.05) * 100.0;
     world.commands().entity(panel).with_children(|p| {
-        p.spawn((Node { height: px(150), flex_direction: FlexDirection::Column, justify_content: JustifyContent::FlexEnd, align_items: AlignItems::FlexEnd, row_gap: px(6), padding: UiRect::all(px(14)), ..default() }, BackgroundColor(Color::srgba(0.18, 0.22, 0.2, 0.55)), Pickable::IGNORE)).with_children(|s| {
+        p.spawn((Node { height: px(150), flex_direction: FlexDirection::Column, justify_content: JustifyContent::FlexEnd, align_items: AlignItems::FlexEnd, row_gap: px(6), padding: UiRect::all(px(14.0 + inset * 3.0)), ..default() }, BackgroundColor(Color::srgba(0.18, 0.22, 0.2, 0.55)), Pickable::IGNORE)).with_children(|s| {
+            if inset > 0.0 {
+                s.spawn((Node { position_type: PositionType::Absolute, left: percent(inset), right: percent(inset), top: percent(inset), bottom: percent(inset), border: UiRect::all(px(1)), ..default() }, BorderColor::all(t.text_dim), Pickable::IGNORE));
+            }
             if prefs.hud_damage {
                 s.spawn(text("DAMAGE \u{2022} STEERING 18%", label(SIZE_TINY), t.accent));
             }
@@ -501,6 +523,9 @@ fn rebuild_hud_preview(world: &mut World) {
             }
         });
         p.spawn(text("The HUD while driving, at 112 km/h in third. Changes show here as you make them.", body(SIZE_SMALL), t.text_dim));
+        if inset > 0.0 {
+            p.spawn(text(format!("The frame: the HUD sits {inset:.1}% in from every edge of the screen."), body(SIZE_SMALL), t.text_dim));
+        }
     });
 }
 
@@ -562,15 +587,237 @@ fn voice_panel(world: &mut World, col: Entity) {
     });
 }
 
+/// What the World and Camera panels show: (start hour, time passes, view, fov, chase distance).
+type ViewKey = (f32, bool, u32, f32, u32);
+
+fn view_key(world: &World) -> ViewKey {
+    let day = world.get_resource::<DaySettings>().cloned().unwrap_or_default();
+    let wall = if day.start == daytime::REAL_CLOCK { daytime::wall_hours() } else { 0.0 };
+    let start = daytime::start_hours(&day, wall, daytime::night_available(world));
+    let view = world.get_resource::<crate::meta::Profile>().map_or(0, |p| p.camera);
+    let fov = world.get_resource::<engine::settings::CoreSettings>().map_or(80.0, |c| c.fov_deg);
+    let dist = world.get_resource::<crate::camera::CameraFeel>().map_or(1, |c| c.chase_distance);
+    // To the minute, so "Now" doesn't rebuild every frame.
+    ((start * 60.0).floor() / 60.0, day.time_passes, view, fov, dist)
+}
+
 /// Keeps the previews in step with the options while the settings screen is open.
-fn refresh_previews(world: &mut World, mut last: Local<Option<Prefs>>) {
+fn refresh_previews(world: &mut World, mut last: Local<Option<Prefs>>, mut last_view: Local<Option<ViewKey>>) {
     let now = world.resource::<Prefs>().clone();
-    if last.as_ref() == Some(&now) {
+    if last.as_ref() != Some(&now) {
+        *last = Some(now);
+        rebuild_hud_preview(world);
+        rebuild_call_preview(world);
+    }
+    // Only while a World / Camera panel is up (the wall clock is a syscall).
+    let mut q = world.query_filtered::<(), Or<(With<WorldPreview>, With<CameraPreview>)>>();
+    if q.iter(world).next().is_none() {
+        *last_view = None;
         return;
     }
-    *last = Some(now);
-    rebuild_hud_preview(world);
-    rebuild_call_preview(world);
+    let key = view_key(world);
+    if *last_view != Some(key) {
+        *last_view = Some(key);
+        rebuild_world_preview(world);
+        rebuild_camera_preview(world);
+    }
+}
+
+/// Despawns a side panel's children after its eyebrow.
+fn clear_panel(world: &mut World, panel: Entity) {
+    if let Some(kids) = world.get::<Children>(panel).map(|c| c.iter().skip(1).collect::<Vec<_>>()) {
+        for k in kids {
+            world.entity_mut(k).despawn();
+        }
+    }
+}
+
+// ---------------------------------------------------------------- World: sun-dial strip
+
+#[derive(Component)]
+struct WorldPreview;
+
+/// Half-hour cells in the sun-dial strip.
+const DIAL_CELLS: usize = 48;
+const NIGHT_SKY: Color = Color::srgb(0.06, 0.08, 0.16);
+const LOW_SUN: Color = Color::srgb(0.86, 0.47, 0.22);
+const DAY_SKY: Color = Color::srgb(0.5, 0.68, 0.84);
+
+/// Where an hour sits along the strip, 0..1.
+pub fn dial_x(hours: f32) -> f32 {
+    hours.rem_euclid(24.0) / 24.0
+}
+
+/// Sky colour for a sun elevation (degrees): night below −6°, warm through the horizon, day
+/// sky from 10° up.
+pub fn sky_tint(el: f32) -> Color {
+    use engine::ui::widgets::mix;
+    if el <= -6.0 {
+        NIGHT_SKY
+    } else if el < 0.0 {
+        mix(NIGHT_SKY, LOW_SUN, (el + 6.0) / 6.0)
+    } else if el < 10.0 {
+        mix(LOW_SUN, DAY_SKY, el / 10.0)
+    } else {
+        DAY_SKY
+    }
+}
+
+/// Sunrise and sunset (the sun's elevation crossing 0°), clock hours.
+pub fn sun_times() -> (f32, f32) {
+    let cross = |mut lo: f32, mut hi: f32| {
+        let rising = daytime::solar(lo).1 < daytime::solar(hi).1;
+        for _ in 0..20 {
+            let mid = (lo + hi) * 0.5;
+            if (daytime::solar(mid).1 < 0.0) == rising {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    };
+    (cross(0.0, 13.0), cross(13.0, 24.0))
+}
+
+/// `9.5` → "09:30".
+pub fn hhmm(h: f32) -> String {
+    let m = (h.rem_euclid(24.0) * 60.0).round() as u32 % 1440;
+    format!("{:02}:{:02}", m / 60, m % 60)
+}
+
+/// World tab: the 24 h day (night shaded, warm dawn and sunset) with the start time marked.
+fn world_panel(world: &mut World, col: Entity) {
+    let t = world.resource::<Theme>().clone();
+    world.commands().entity(col).with_children(|c| {
+        c.spawn((panel(&t, 20.0, GAP_S), WorldPreview)).with_children(|p| {
+            p.spawn(eyebrow("Start time", t.accent));
+        });
+    });
+    world.flush();
+    rebuild_world_preview(world);
+}
+
+fn rebuild_world_preview(world: &mut World) {
+    let mut q = world.query_filtered::<Entity, With<WorldPreview>>();
+    let Some(panel) = q.iter(world).next() else { return };
+    let t = world.resource::<Theme>().clone();
+    let day = world.get_resource::<DaySettings>().cloned().unwrap_or_default();
+    let (start, passes, ..) = view_key(world);
+    clear_panel(world, panel);
+    let name = daytime::START_PRESETS.get(day.start as usize).map_or("", |p| p.0);
+    let el = daytime::solar(start).1;
+    let (rise, set) = sun_times();
+    let x = dial_x(start) * 100.0;
+    world.commands().entity(panel).with_children(|p| {
+        // The start time over its marker (kept inside the strip's ends).
+        p.spawn((Node { height: px(26), ..default() }, Pickable::IGNORE)).with_children(|r| {
+            r.spawn((text(hhmm(start), label(SIZE_LABEL + 4.0), t.accent), Node { position_type: PositionType::Absolute, left: percent(x.clamp(8.0, 92.0)), margin: UiRect::left(px(-26)), ..default() }));
+        });
+        p.spawn((Node { height: px(36), border_radius: BorderRadius::all(px(RADIUS)), overflow: Overflow::clip(), ..default() }, Pickable::IGNORE)).with_children(|s| {
+            for i in 0..DIAL_CELLS {
+                let h = (i as f32 + 0.5) * 24.0 / DIAL_CELLS as f32;
+                s.spawn((Node { flex_grow: 1.0, height: percent(100), ..default() }, BackgroundColor(sky_tint(daytime::solar(h).1)), Pickable::IGNORE));
+            }
+            s.spawn((Node { position_type: PositionType::Absolute, left: percent(x), top: px(0), bottom: px(0), width: px(4), margin: UiRect::left(px(-2)), ..default() }, BackgroundColor(t.accent), Pickable::IGNORE));
+        });
+        p.spawn((Node { justify_content: JustifyContent::SpaceBetween, ..default() }, Pickable::IGNORE)).with_children(|r| {
+            for h in ["00", "06", "12", "18", "24"] {
+                r.spawn(text(h, label(SIZE_SMALL), t.text_dim));
+            }
+        });
+        let sun = if el > 0.0 { format!("sun {el:.0}\u{b0} up") } else { "dark".to_string() };
+        p.spawn(text(format!("{name}: {} ({sun}). Sunrise {}, sunset {}.", hhmm(start), hhmm(rise), hhmm(set)), body(SIZE_SMALL + 1.0), t.text_muted));
+        let clock = if passes { "The clock runs at 5\u{d7}: a whole day takes 4 h 48 min." } else { "The clock stays at the start time." };
+        p.spawn(text(format!("{clock} Free roam only; events keep their own time."), body(SIZE_SMALL), t.text_dim));
+    });
+}
+
+// ---------------------------------------------------------------- Camera: side-view schematic
+
+#[derive(Component)]
+struct CameraPreview;
+
+/// Schematic box (px), its scale (px per metre) and where the car's centre meets the ground
+/// (chase view).
+const CAM_W: f32 = 338.0;
+const CAM_H: f32 = 150.0;
+const CAM_PX_M: f32 = 20.0;
+const CAR_X: f32 = 220.0;
+const GROUND_Y: f32 = 122.0;
+
+/// The eye (metres forward of the car's centre, metres up) and its pitch (radians, up +) at rest
+/// for a view (0 cockpit, 1 bonnet, 2 chase) and chase distance.
+pub fn view_eye(view: u32, distance: u32) -> (Vec2, f32) {
+    match view {
+        0 => (Vec2::new(-0.3, 1.15), -0.05),
+        1 => (Vec2::new(0.9, 1.0), 0.0),
+        _ => {
+            let (back, up) = crate::camera::rest_boom(0.0, distance);
+            // The arm aims 4 m ahead of the car, 0.9 m up.
+            (Vec2::new(-back, up), (0.9 - up).atan2(4.0 + back))
+        }
+    }
+}
+
+/// Camera tab: the car from the side with the chosen view's eye and its field of view.
+fn camera_panel(world: &mut World, col: Entity) {
+    let t = world.resource::<Theme>().clone();
+    world.commands().entity(col).with_children(|c| {
+        c.spawn((panel(&t, 20.0, GAP_S), CameraPreview)).with_children(|p| {
+            p.spawn(eyebrow("View", t.accent));
+        });
+    });
+    world.flush();
+    rebuild_camera_preview(world);
+}
+
+fn rebuild_camera_preview(world: &mut World) {
+    let mut q = world.query_filtered::<Entity, With<CameraPreview>>();
+    let Some(panel) = q.iter(world).next() else { return };
+    let t = world.resource::<Theme>().clone();
+    let (.., view, fov, dist) = view_key(world);
+    clear_panel(world, panel);
+    let view = view.min(2);
+    let (eye, pitch) = view_eye(view, dist);
+    // The chase view needs room behind the car; the in-car views centre it.
+    let car_x = if view == 2 { CAR_X } else { CAM_W * 0.4 };
+    let to_px = |m: Vec2| Vec2::new(car_x + m.x * CAM_PX_M, GROUND_Y - m.y * CAM_PX_M);
+    let e = to_px(eye);
+    let half = fov.to_radians() * 0.5;
+    let at = |x: f32, y: f32, w: f32, h: f32| Node { position_type: PositionType::Absolute, left: px(x), top: px(y), width: px(w), height: px(h), ..default() };
+    let paper = Color::srgba(0.95, 0.93, 0.88, 0.9);
+    world.commands().entity(panel).with_children(|p| {
+        p.spawn((Node { width: px(CAM_W), height: px(CAM_H), overflow: Overflow::clip(), ..default() }, BackgroundColor(Color::srgba(0.18, 0.22, 0.2, 0.55)), Pickable::IGNORE)).with_children(|b| {
+            b.spawn((at(0.0, GROUND_Y, CAM_W, 2.0), BackgroundColor(t.text_dim), Pickable::IGNORE));
+            // The view's wedge: faint rays across it, the two edges in accent.
+            let len = 420.0;
+            for k in 0..=12 {
+                let a = pitch - half + 2.0 * half * k as f32 / 12.0;
+                let (w, c) = if k == 0 || k == 12 { (2.0, t.accent) } else { (1.0, t.accent.with_alpha(0.22)) };
+                let mid = e + Vec2::new(a.cos(), -a.sin()) * len * 0.5;
+                b.spawn((at(mid.x - len * 0.5, mid.y - w * 0.5, len, w), UiTransform::from_rotation(Rot2::radians(-a)), BackgroundColor(c), Pickable::IGNORE));
+            }
+            // The car, nose right: body, cabin, wheels.
+            let body = to_px(Vec2::new(-2.1, 1.05));
+            b.spawn((Node { border_radius: BorderRadius::all(px(6)), ..at(body.x, body.y, 4.2 * CAM_PX_M, 0.6 * CAM_PX_M) }, BackgroundColor(paper), Pickable::IGNORE));
+            let cab = to_px(Vec2::new(-1.4, 1.45));
+            b.spawn((Node { border_radius: BorderRadius::new(px(10), px(4), px(0), px(0)), ..at(cab.x, cab.y, 2.0 * CAM_PX_M, 0.4 * CAM_PX_M) }, BackgroundColor(paper), Pickable::IGNORE));
+            for wx in [-1.25, 1.25] {
+                let w = to_px(Vec2::new(wx - 0.32, 0.64));
+                b.spawn((Node { border_radius: BorderRadius::MAX, ..at(w.x, w.y, 0.64 * CAM_PX_M, 0.64 * CAM_PX_M) }, BackgroundColor(Color::srgb(0.08, 0.09, 0.08)), Pickable::IGNORE));
+            }
+            b.spawn((Node { border_radius: BorderRadius::MAX, ..at(e.x - 6.0, e.y - 6.0, 12.0, 12.0) }, BackgroundColor(t.accent), Pickable::IGNORE));
+        });
+        let name = ["Cockpit", "Bonnet", "Chase"][view as usize];
+        let what = match view {
+            0 => "From the driver's seat, looking a little down the road.".to_string(),
+            1 => "From the bonnet, level with the road.".to_string(),
+            _ => format!("Behind the car, {} distance.", ["near", "normal", "far"][dist.min(2) as usize]),
+        };
+        p.spawn(text(format!("{name}, {fov:.0}\u{b0} field of view"), label(SIZE_LABEL + 2.0), t.text));
+        p.spawn(text(format!("{what} C changes the view while driving (Select on a gamepad)."), body(SIZE_SMALL), t.text_dim));
+    });
 }
 
 #[cfg(test)]
@@ -596,6 +843,30 @@ mod tests {
         assert_eq!(reg.tab_fields("Camera").map(|f| f.key).collect::<Vec<_>>(), vec!["camera_view", "fov_deg"], "the camera rows moved to Camera");
         assert_eq!(reg.field("sensitivity").unwrap().tab, "Co-driver", "mouse look: the guide's head in the car");
         assert_eq!(reg.field("master_volume").unwrap().label, "Master");
+    }
+
+    #[test]
+    fn sun_dial_marks_the_start_hour() {
+        assert_eq!(dial_x(0.0), 0.0);
+        assert_eq!(dial_x(12.0), 0.5);
+        assert_eq!(dial_x(25.5), dial_x(1.5), "wraps");
+        assert_eq!(sky_tint(daytime::solar(1.0).1), NIGHT_SKY);
+        assert_eq!(sky_tint(daytime::solar(13.0).1), DAY_SKY);
+        let (rise, set) = sun_times();
+        assert!((5.5..5.75).contains(&rise) && (20.25..20.5).contains(&set), "{rise} {set}");
+        assert_eq!(hhmm(9.5), "09:30");
+        assert_eq!(hhmm(23.999), "00:00");
+    }
+
+    #[test]
+    fn camera_schematic_eyes() {
+        let (cockpit, down) = view_eye(0, 1);
+        let (bonnet, _) = view_eye(1, 1);
+        assert!(bonnet.x > cockpit.x && down < 0.0, "bonnet ahead of the seat; the cockpit looks down");
+        let (near, pitch) = view_eye(2, 0);
+        let (far, _) = view_eye(2, 2);
+        assert!(far.x < near.x && far.y > near.y && pitch < 0.0, "far hangs further back and higher, looking down at the car");
+        assert!(CAR_X + far.x * CAM_PX_M > 0.0, "the far chase eye fits in the box");
     }
 
     #[test]

@@ -80,6 +80,7 @@ fn spawn_block(mut commands: Commands, theme: Res<Theme>, q: Query<(), With<Race
         .spawn((
             RaceHud,
             Name::new("Race HUD"),
+            crate::hud::SafeArea::TOP_LEFT,
             DespawnOnExit(AppState::InGame),
             Node { position_type: PositionType::Absolute, left: px(40), top: px(34), flex_direction: FlexDirection::Column, row_gap: px(2), padding: UiRect::new(px(18), px(18), px(8), px(12)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },
             plate(),
@@ -255,7 +256,7 @@ fn results_card(
         _ => 0.0,
     };
     commands
-        .spawn((ResultsCard, Name::new("Race results"), DespawnOnExit(AppState::InGame), Node { position_type: PositionType::Absolute, right: px(40), top: px(236), ..default() }, Pickable::IGNORE))
+        .spawn((ResultsCard, Name::new("Race results"), crate::hud::SafeArea::TOP_RIGHT, DespawnOnExit(AppState::InGame), Node { position_type: PositionType::Absolute, right: px(40), top: px(236), ..default() }, Pickable::IGNORE))
         .with_children(|root| {
             root.spawn((
                 Node { flex_direction: FlexDirection::Column, row_gap: px(4), padding: UiRect::all(px(26)), min_width: px(560), border: UiRect::left(px(4)), border_radius: BorderRadius::all(px(RADIUS)), ..default() },

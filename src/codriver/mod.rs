@@ -286,6 +286,7 @@ fn subtitle(mut commands: Commands, cd: Res<CoDriver>, theme: Option<Res<engine:
         commands
             .spawn((
                 SubtitlePlate,
+                crate::hud::SafeArea::TOP,
                 DespawnOnExit(AppState::InGame),
                 Node {
                     position_type: PositionType::Absolute,

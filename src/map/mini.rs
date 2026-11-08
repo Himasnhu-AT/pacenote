@@ -69,6 +69,7 @@ fn spawn(mut commands: Commands, theme: Res<Theme>, art: Res<MapArt>, events: Op
         .spawn((
             MiniRoot,
             Name::new("minimap"),
+            crate::hud::SafeArea::BOTTOM_LEFT,
             DespawnOnExit(engine::flow::AppState::InGame),
             Node { position_type: PositionType::Absolute, left: px(40), bottom: px(104), flex_direction: FlexDirection::Column, row_gap: px(6), display: Display::None, ..default() },
             Pickable::IGNORE,

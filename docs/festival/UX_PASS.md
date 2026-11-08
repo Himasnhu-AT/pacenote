@@ -443,5 +443,26 @@ depends on colour alone (glyphs, filled / hollow, words).
 `build_spec` (Upgrades' stat preview and PI change come from it), the other 7 cars, start a
 Race from `EventPick.mode`, career save of the parked pose (E reads `Profile.last_pose` until
 then). C / D: World and Camera rows (their keys are pre-placed in `LAYOUT`; unknown keys are
-ignored). Not built: the World / Camera side panels (sun-dial strip, chase still), HUD safe
-area setting, the loading ambience bed (audio).
+ignored). The loading ambience bed (8 Nov): soft wind in the pines (`wind_pines_1`, -18 dB, ambience bus) fades in with the loading screen and out as the stage takes over (`audio::festival_recorded`, `bed.loading`).
+
+**Follow-up (8 Nov 2026): safe area, World and Camera panels.**
+- *HUD safe area* (`hud_safe_area` in `Prefs`, section `"prefs"`; HUD tab; slider 0–5 % in
+  0.5 % steps, default 0). Each anchored block carries `hud::SafeArea` (which sides); its
+  anchored sides get a `Vw` / `Vh` margin on top of the 40 px inset, so it follows window size
+  with no work and updates live. Written only when the value changes or a block spawns.
+  Blocks: speedo, clock, Notes chip, damage (`hud.rs`), Rhythm, race block and results card,
+  activity card, co-driver call text, minimap, controls card and the centre pill/prompt row,
+  voice indicator, and the engine's toast stack (tagged by its name `"Toasts"`; it is global,
+  so toasts in menus move in too). The centre plates (countdown, Retired, wrecked) and the
+  guide's screens (`src/guide/`) are not inset. The HUD preview draws the safe area as a
+  frame.
+- *World panel:* a 24 h strip (48 half-hour cells coloured by the sun's elevation from
+  `daytime::solar`: night, a warm band through sunrise and sunset, day sky) with the start
+  hour marked and labelled (`daytime::start_hours`, so Now, Last and the Night → Sunset
+  fallback show where the game will actually start); sunrise / sunset times and whether the
+  clock runs. Static: nothing moves, so reduce motion needs nothing.
+- *Camera panel:* a side-view schematic from UI nodes: ground, car, the eye of the chosen view
+  (cockpit, bonnet, or chase at `camera::rest_boom` for the chase distance) and its vertical
+  field of view as a wedge (`fov_deg`), with a caption. No render-to-texture.
+- Both panels rebuild only when the start time, time passes, view, FOV or chase distance
+  changes, and only while they are on screen.

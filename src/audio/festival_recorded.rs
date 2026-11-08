@@ -46,6 +46,8 @@ const MONEY: OneShot = ("rec.money", &["money_1"], "hud", -14.0, 0.0, 0.25);
 pub const BEDS: [(&str, &str, f32); 5] = [("bed.town", "town_ambience_2", -6.0), ("bed.birds", "birds_morning_1", -6.0), ("bed.insects", "night_insects_1", -9.0), ("bed.wind", "wind_pines_1", -5.0), ("bed.service", "service_park_1", -8.0)];
 /// The Service Park hub's bed (main menu), loaded at startup.
 const MENU_BED: (&str, &str, f32) = ("bed.menu", "service_park_1", -16.0);
+/// The loading screen: soft wind in the pines under the loading song (UX_PASS §2).
+const LOADING_BED: (&str, &str, f32) = ("bed.loading", "wind_pines_1", -18.0);
 const TOWN: usize = 0;
 const BIRDS: usize = 1;
 const INSECTS: usize = 2;
@@ -60,6 +62,7 @@ pub(super) fn register(app: &mut App) {
         .add_systems(OnEnter(AppState::InGame), load_driving)
         .add_systems(OnExit(AppState::InGame), unload_driving)
         .add_systems(Update, (cues, purchases, beds, bell, scrape, trial_cues, horns, dogs, gravel))
+        .add_systems(Update, (loading_bed_on.run_if(resource_added::<crate::loading::Loading>), loading_bed_off.run_if(resource_removed::<crate::loading::Loading>)))
         .add_systems(OnEnter(AppState::MainMenu), menu_bed_on)
         .add_systems(OnExit(AppState::MainMenu), menu_bed_off);
     #[cfg(feature = "dev")]
@@ -90,11 +93,12 @@ fn cue(server: &AssetServer, (name, files, bus, db, reach, cooldown): OneShot) -
 fn load_money(server: Option<Res<AssetServer>>, cues: Option<ResMut<SoundCues>>) {
     if let (Some(server), Some(mut cues)) = (server, cues) {
         cues.add(cue(&server, MONEY));
-        let (name, file, db) = MENU_BED;
-        let mut c = SoundCue::new(name).clip(server.load(format!("sounds/sfx/{file}.ogg"))).bus("ambience").volume(db).max_instances(1, Steal::Oldest);
-        c.looping = true;
-        c.fade_in = 2.0;
-        cues.add(c);
+        for (name, file, db) in [MENU_BED, LOADING_BED] {
+            let mut c = SoundCue::new(name).clip(server.load(format!("sounds/sfx/{file}.ogg"))).bus("ambience").volume(db).max_instances(1, Steal::Oldest);
+            c.looping = true;
+            c.fade_in = 2.0;
+            cues.add(c);
+        }
     }
 }
 
@@ -108,6 +112,20 @@ fn menu_bed_on(ctl: Option<ResMut<SoundCtl>>) {
 fn menu_bed_off(ctl: Option<ResMut<SoundCtl>>) {
     if let Some(mut ctl) = ctl {
         ctl.stop_cue(MENU_BED.0, 1.0);
+    }
+}
+
+/// The loading screen's bed comes in with the screen and goes with it (the stage's own
+/// ambience takes over).
+fn loading_bed_on(ctl: Option<ResMut<SoundCtl>>) {
+    if let Some(mut ctl) = ctl {
+        ctl.play(LOADING_BED.0);
+    }
+}
+
+fn loading_bed_off(ctl: Option<ResMut<SoundCtl>>) {
+    if let Some(mut ctl) = ctl {
+        ctl.stop_cue(LOADING_BED.0, 1.5);
     }
 }
 
@@ -451,7 +469,7 @@ mod tests {
     #[test]
     fn wired_files_exist() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/sounds/sfx");
-        let files = ONE_SHOTS.iter().chain([&MONEY]).flat_map(|s| s.1.iter().copied()).chain(BEDS.iter().map(|b| b.1)).chain([MENU_BED.1]);
+        let files = ONE_SHOTS.iter().chain([&MONEY]).flat_map(|s| s.1.iter().copied()).chain(BEDS.iter().map(|b| b.1)).chain([MENU_BED.1, LOADING_BED.1]);
         for f in files {
             assert!(dir.join(format!("{f}.ogg")).exists(), "{f}");
         }

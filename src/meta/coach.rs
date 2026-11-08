@@ -151,6 +151,7 @@ fn driver_view(world_ready: bool, role: &Option<Res<super::Role>>, loading: &Opt
 fn centre_row(bottom: f32) -> impl Bundle {
     (
         Node { position_type: PositionType::Absolute, bottom: px(bottom), left: px(0), right: px(0), justify_content: JustifyContent::Center, ..default() },
+        crate::hud::SafeArea::BOTTOM,
         Pickable::IGNORE,
     )
 }
@@ -270,6 +271,7 @@ fn controls_card(
         .spawn((
             ControlsCard { age: 0.0, limit, device, free_roam },
             Name::new("Controls card"),
+            crate::hud::SafeArea::TOP_LEFT,
             DespawnOnExit(AppState::InGame),
             Node { position_type: PositionType::Absolute, left: px(40), top: px(40), ..default() },
             Visibility::Inherited,
