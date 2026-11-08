@@ -528,3 +528,14 @@ collision = "none"
 lod = "none (one level; body only)"
 built_by = "tools/art/import_sketchfab.py --profile brawn"
 
+# ---------------------------------------------------------------- original music (ACE-Step)
+
+[[asset]]
+name = "music_ace"
+paths = ["sounds/music/menu_music_4.ogg", "sounds/music/menu_music_5.ogg", "sounds/music/menu_music_6.ogg", "sounds/music/night_music_1.ogg", "sounds/music/night_music_2.ogg", "sounds/music/night_music_3.ogg", "sounds/music/loading_music_4.ogg"]
+kind = "sound"
+sources = ["original"]
+collision = "none"
+lod = "none"
+built_by = "tools/audio/gen_music_ace.py (ACE-Step 1.5, MIT code and weights) + tools/audio/cook_ace.py"
+

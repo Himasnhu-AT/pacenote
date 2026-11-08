@@ -424,7 +424,14 @@ by Andrewkn CC0, "Lofi Fusion Background Music" by Seth_Makes_Sounds CC0). `cook
 `"music": true` packs stereo and full length (-18 LUFS, 1 s fade in, 3 s fade out) into
 `assets/sounds/music/`.
 
+Original songs made with ACE-Step 1.5 (MIT code and weights; `../ACE-Step-1.5`, MLX on the Mac)
+by `tools/audio/gen_music_ace.py` (fixed captions and seeds: re-runs give the same songs, ~2 min
+per 150 s song on the M5 Pro) and cooked by `tools/audio/cook_ace.py` (the same `cook_music`):
+`menu_music_4..6` (festival rock, electronic rally theme, outback folk-rock), `night_music_1..3`
+(synthwave, downtempo, lo-fi) and `loading_music_4` (ambient). Raw renders: `assets_src/music_ace/`.
+
 - Menus: a shuffled playlist, crossfading (2.5 s out / 2 s in) into the next song 4 s before the end.
+  After dark (clock 20:30-05:30) the next song comes from the night list (the Late Run).
 - Loading screen: a calmer song crossfades in. Driving: the music fades out over 2.5 s; the car and
   the world's ambience take over. There's no music while driving, on purpose.
 - Played by the engine's `Music` on the `music` bus: Settings › Audio › Music (was hidden), ducked

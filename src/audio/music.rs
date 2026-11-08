@@ -18,10 +18,21 @@ use bevy::prelude::*;
 use engine::flow::AppState;
 use engine::sound::{Music, MusicStem, MusicTrack, MusicTransition, Quantize, SoundClip};
 
-/// Menu playlist (`assets/sounds/music/`).
-pub const MENU: [&str; 3] = ["menu_music_1", "menu_music_2", "menu_music_3"];
+/// Menu playlist (`assets/sounds/music/`): Openverse songs and originals made with ACE-Step
+/// (`tools/audio/gen_music_ace.py`: 4-6).
+pub const MENU: [&str; 6] = ["menu_music_1", "menu_music_2", "menu_music_3", "menu_music_4", "menu_music_5", "menu_music_6"];
+/// The menus' night playlist (the Late Run: the clock between [`NIGHT_FROM`] and [`NIGHT_TO`]).
+pub const NIGHT: [&str; 3] = ["night_music_1", "night_music_2", "night_music_3"];
 /// Loading-screen songs.
-pub const LOADING: [&str; 3] = ["loading_music_1", "loading_music_2", "loading_music_3"];
+pub const LOADING: [&str; 4] = ["loading_music_1", "loading_music_2", "loading_music_3", "loading_music_4"];
+/// Night for the music (clock hours).
+const NIGHT_FROM: f32 = 20.5;
+const NIGHT_TO: f32 = 5.5;
+
+/// Is it night (the menus play [`NIGHT`])?
+pub fn is_night(hours: f32) -> bool {
+    !(NIGHT_TO..NIGHT_FROM).contains(&hours)
+}
 /// Two track slots in the engine's player, used in turn so a song can crossfade into the next.
 const SLOTS: [&str; 2] = ["pacenote.music.a", "pacenote.music.b"];
 /// Crossfade between songs (s).
@@ -80,6 +91,10 @@ struct Player {
     length: f32,
     menu_order: Vec<usize>,
     menu_next: usize,
+    night_order: Vec<usize>,
+    night_next: usize,
+    /// The menus are at night: their next song is from [`NIGHT`].
+    night: bool,
     loading_order: Vec<usize>,
     loading_next: usize,
     /// Real time the music went quiet (to release the songs after the fade).
@@ -100,6 +115,9 @@ impl Player {
             length: 0.0,
             menu_order: shuffle(MENU.len(), seed),
             menu_next: 0,
+            night_order: shuffle(NIGHT.len(), seed.rotate_left(29)),
+            night_next: 0,
+            night: false,
             loading_order: shuffle(LOADING.len(), seed.rotate_left(17)),
             loading_next: 0,
             quiet_since: None,
@@ -111,6 +129,11 @@ impl Player {
     /// The next song for `w` (advances its playlist).
     fn next_song(&mut self, w: Want) -> Option<&'static str> {
         match w {
+            Want::Menu if self.night => {
+                let i = self.night_order[self.night_next % NIGHT.len()];
+                self.night_next += 1;
+                Some(NIGHT[i])
+            }
             Want::Menu => {
                 let i = self.menu_order[self.menu_next % MENU.len()];
                 self.menu_next += 1;
@@ -145,6 +168,7 @@ fn drive(
     clips: Option<Res<Assets<SoundClip>>>,
     time: Res<Time<Real>>,
     backend: Option<Res<engine::sound::SoundBackend>>,
+    clock: Option<Res<crate::daytime::DayClock>>,
 ) {
     // No audio device (headless, --mute, play.py): don't decode songs at all (75-100 MB each).
     if backend.is_none_or(|b| b.kind() != engine::sound::BackendKind::Device) {
@@ -154,6 +178,8 @@ fn drive(
     let (Some(state), Some(mut music), Some(assets), Some(clips)) = (state, music, assets, clips) else { return };
     let now = time.elapsed_secs_f64();
     let w = want(*state.get(), loading.is_some());
+    // The next menu song comes from the night list after dark.
+    player.night = clock.is_some_and(|c| is_night(c.hours));
     // While the world generates (the load's memory peak), the menu song carries on; the
     // loading song (75-100 MB decoded) comes in after (docs/festival/PERF_REPORT.md).
     if w == Want::Loading && player.now == Want::Menu && loading.as_deref().is_some_and(|l| l.generating()) {
@@ -232,7 +258,7 @@ mod tests {
         for seed in 0..50 {
             let mut o = shuffle(MENU.len(), seed);
             o.sort();
-            assert_eq!(o, vec![0, 1, 2]);
+            assert_eq!(o, (0..MENU.len()).collect::<Vec<_>>());
         }
         // Different launches start on different songs.
         let firsts: std::collections::HashSet<usize> = (0..50).map(|s| shuffle(3, s * 7919)[0]).collect();
@@ -242,17 +268,27 @@ mod tests {
     #[test]
     fn the_playlist_cycles_through_all_songs() {
         let mut p = Player::new(42);
-        let songs: Vec<_> = (0..6).map(|_| p.next_song(Want::Menu).unwrap()).collect();
-        assert_eq!(songs[0..3].iter().collect::<std::collections::HashSet<_>>().len(), 3);
-        assert_eq!(songs[0..3], songs[3..6]);
+        let n = MENU.len();
+        let songs: Vec<_> = (0..2 * n).map(|_| p.next_song(Want::Menu).unwrap()).collect();
+        assert_eq!(songs[0..n].iter().collect::<std::collections::HashSet<_>>().len(), n);
+        assert_eq!(songs[0..n], songs[n..2 * n]);
+        p.night = true;
+        assert!(NIGHT.contains(&p.next_song(Want::Menu).unwrap()));
+        p.night = false;
         assert!(LOADING.contains(&p.next_song(Want::Loading).unwrap()));
         assert_eq!(p.next_song(Want::Quiet), None);
     }
 
     #[test]
+    fn night_is_late_evening_to_dawn() {
+        assert!(is_night(23.0) && is_night(2.0) && is_night(20.5));
+        assert!(!is_night(5.5) && !is_night(12.0) && !is_night(20.0));
+    }
+
+    #[test]
     fn every_song_is_shipped() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/sounds/music");
-        for s in MENU.iter().chain(LOADING.iter()) {
+        for s in MENU.iter().chain(NIGHT.iter()).chain(LOADING.iter()) {
             assert!(dir.join(format!("{s}.ogg")).exists(), "missing {s}.ogg");
         }
     }
