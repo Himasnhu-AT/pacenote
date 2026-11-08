@@ -434,7 +434,8 @@ pub fn spawn(world: &mut World, car: Entity, model: Entity) {
     let mut hand = [Entity::PLACEHOLDER; 2];
     let mut fore = [Entity::PLACEHOLDER; 2];
     let mut upper = [Entity::PLACEHOLDER; 2];
-    let root = world.spawn((Name::new("driver arms"), Transform::IDENTITY, Visibility::Hidden, Actor)).id();
+    // A converted body's cockpit sits lower: the whole rig moves with it.
+    let root = world.spawn((Name::new("driver arms"), Transform::from_translation(super::car::art().rig), Visibility::Hidden, Actor)).id();
     for side in 0..2 {
         // Thumb on the index end of the fist: −X for the left hand, +X for the right.
         let s = if side == 0 { -1.0 } else { 1.0 };

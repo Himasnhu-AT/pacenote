@@ -2,3 +2,9 @@
 # Prune it with engine/scripts/sweep-target.sh (cargo-sweep).
 [build]
 target-dir = "/Users/himanshu/codes/game/engine/target"
+
+# The engine builds against a local, unpushed ruspy (see engine/.cargo/config.toml, 8 Nov 2026):
+# the same patch here, or pacenote cannot compile the engine. Remove once ruspy is pushed and the
+# engine bumps its rev.
+[patch."https://github.com/Himasnhu-AT/ruspy"]
+ruspy = { path = "/Users/himanshu/codes/ruspy" }

@@ -516,3 +516,15 @@ sources = ["yale_bsc5", "nasa_cgi_moon_kit", "original"]
 collision = "none"
 lod = "none (sky)"
 built_by = "tools/art/bake_sky.py"
+
+# ---------------------------------------------------------------- roster car bodies
+
+[[asset]]
+name = "car_brawn"
+paths = ["models/car_brawn.glb"]
+kind = "model"
+sources = ["sf_chevelle_ss_1970"]
+collision = "none"
+lod = "none (one level; body only)"
+built_by = "tools/art/import_sketchfab.py --profile brawn"
+

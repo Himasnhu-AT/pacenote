@@ -54,14 +54,68 @@ const BONNET_CAM_MODEL: Vec3 = Vec3::new(0.0, 0.72, -1.6);
 /// steering wheel (`build_rallycar.py` / `cockpit.py`: `DRV_X`, `STEER_C`).
 const COCKPIT_EYE_MODEL: Vec3 = Vec3::new(-0.37, 0.795, 0.60);
 
+/// What differs between car bodies (model frame: origin at hub height, nose to −Z). Every
+/// body shares the hatch's hubs (`MODEL_HALF_*`); converted bodies (`import_sketchfab.py`, its
+/// `CONST` printout) sit our cockpit lower under their roofs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CarArt {
+    pub model: &'static str,
+    /// Tyre radius (m).
+    pub wheel_radius: f32,
+    /// Driver's eye, bonnet camera, cabin fill light.
+    pub eye: Vec3,
+    pub bonnet: Vec3,
+    pub fill: Vec3,
+    /// The cockpit's offset from `cockpit.py`'s layout (the driver's arms move by it).
+    pub rig: Vec3,
+    /// Tail pipe mouth (right side; `x` mirrored for twin pipes is not drawn).
+    pub exhaust: Vec3,
+}
+
+/// The rally hatch (`build_rallycar.py`).
+pub const HATCH: CarArt = CarArt {
+    model: crate::career::garage::RALLY_MODEL,
+    wheel_radius: MODEL_WHEEL_RADIUS,
+    eye: COCKPIT_EYE_MODEL,
+    bonnet: BONNET_CAM_MODEL,
+    fill: CABIN_FILL_MODEL,
+    rig: Vec3::ZERO,
+    exhaust: Vec3::new(0.46, 0.27 - MODEL_WHEEL_RADIUS, 1.99),
+};
+
+/// Every body: the hatch and converted look-alikes (owner's ruling 8 Nov 2026;
+/// `import_sketchfab.py --profile <id>`).
+pub const BODIES: [CarArt; 2] = [
+    HATCH,
+    // 1970 muscle coupe: pipes at both rear corners.
+    CarArt { model: "models/car_brawn.glb", wheel_radius: 0.276, eye: Vec3::new(-0.37, 0.615, 0.60), bonnet: Vec3::new(0.0, 0.696, -1.6), fill: Vec3::new(0.0, 0.62, 0.5), rig: Vec3::new(0.0, -0.18, 0.0), exhaust: Vec3::new(0.51, 0.042, 2.236) },
+];
+
+/// The body drawn for model `path` (the hatch's constants for an unknown one).
+pub fn art_for(path: &str) -> &'static CarArt {
+    BODIES.iter().find(|b| b.model == path).unwrap_or(&BODIES[0])
+}
+
+/// The active car's body (set when its model spawns; read by the cameras, arms, exhaust).
+static ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn art() -> &'static CarArt {
+    &BODIES[ACTIVE.load(std::sync::atomic::Ordering::Relaxed).min(BODIES.len() - 1)]
+}
+
+fn set_active(path: &str) {
+    let i = BODIES.iter().position(|b| b.model == path).unwrap_or(0);
+    ACTIVE.store(i, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Bonnet camera position in the car body's frame.
 pub fn bonnet_cam(s: &crate::vehicle::Spec) -> Vec3 {
-    BONNET_CAM_MODEL + model_offset(s)
+    art().bonnet + model_offset(s)
 }
 
 /// Driver's eye in the car body's frame.
 pub fn cockpit_eye(s: &crate::vehicle::Spec) -> Vec3 {
-    COCKPIT_EYE_MODEL + model_offset(s)
+    art().eye + model_offset(s)
 }
 
 /// The model's wheel centres (`build_rallycar.py` `HUB`): half track and half wheelbase, about
@@ -121,7 +175,17 @@ pub fn lod_range(level: u8) -> VisibilityRange {
 }
 
 /// The car model's asset path.
-pub const MODEL: &str = "models/rallycar.glb";
+pub const MODEL: &str = crate::career::garage::RALLY_MODEL;
+
+/// The active car's body model: its roster entry's (`Body::Rally` cars each have one), else the
+/// rally hatch. Every model shares the hatch's rig frame (hubs, cockpit, cameras).
+pub fn model_path(world: &World) -> &'static str {
+    world
+        .get_resource::<crate::career::garage::Garage>()
+        .and_then(|g| g.active_car().def())
+        .filter(|d| d.body == crate::career::garage::Body::Rally)
+        .map_or(MODEL, |d| d.model)
+}
 
 /// The model under the car entity.
 #[derive(Component)]
@@ -240,7 +304,7 @@ fn cabin_fill(clock: Res<crate::daytime::DayClock>, mut fills: Query<&mut PointL
 
 pub fn model_height(s: &crate::vehicle::Spec) -> f32 {
     let static_comp = (s.mass * 9.81 / 4.0 / s.spring).min(s.travel);
-    s.mounts[0].y - (s.rest - static_comp) + (MODEL_WHEEL_RADIUS - s.wheel_radius)
+    s.mounts[0].y - (s.rest - static_comp) + (art().wheel_radius - s.wheel_radius)
 }
 
 /// Adds the model to the car entity. Visual worlds only.
@@ -249,7 +313,9 @@ pub fn spawn(world: &mut World, car: Entity) {
         return;
     }
     let spec = world.get_resource::<CarSpec>().map(|s| s.0.clone()).unwrap_or_default();
-    let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset(MODEL));
+    let path = model_path(world);
+    set_active(path);
+    let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset(path));
     let tf = Transform::from_translation(model_offset(&spec));
     let model = world.spawn((Name::new("car model"), CarModel, WorldAssetRoot(scene), tf, Visibility::default(), Actor)).id();
     world.entity_mut(car).add_child(model);
@@ -260,7 +326,7 @@ pub fn spawn(world: &mut World, car: Entity) {
             Name::new("cabin fill light"),
             CabinFill,
             PointLight { color: Color::srgb(1.0, 0.97, 0.92), intensity: CABIN_FILL_LUMENS, range: 1.6, radius: 0.3, shadow_maps_enabled: false, ..default() },
-            Transform::from_translation(CABIN_FILL_MODEL),
+            Transform::from_translation(art().fill),
             Actor,
         ))
         .id();
@@ -480,7 +546,7 @@ fn wheels(
     for (driven, shown, kids) in &cars {
         let Some(p) = CarPose::read(driven, None, shown) else { continue };
         let Some(rig) = kids.iter().find_map(|k| rigs.get(k).ok()) else { continue };
-        let (lift, base) = (MODEL_WHEEL_RADIUS - s.wheel_radius, model_height(s));
+        let (lift, base) = (art().wheel_radius - s.wheel_radius, model_height(s));
         for i in 0..4 {
             // Hub height in the body frame: mount minus the extended spring.
             // …relative to the model's origin.

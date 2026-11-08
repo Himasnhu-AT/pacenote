@@ -1119,6 +1119,16 @@ Megascans asset id (in the folder name and the bundled JSON); search the id on f
 - **Resolution / polys:** 2048 × 1024 colour mosaic
 - **Credit line:** "Moon: NASA's Scientific Visualization Studio (LRO)"
 
+### Chevrolet Chevelle SS 1970 (`sf_chevelle_ss_1970`)
+
+- **Use:** the Brawn 70 body (`assets/models/car_brawn.glb`): debadged look-alike (owner's ruling 8 Nov 2026): every emblem, script and number plate removed, the body repainted plain `Paint`, our name
+- **Path:** `asset-forge/refs/_cars_eval/src/chevrolet-chevelle-ss-1970/` (from ~/Downloads/cars)
+- **Source page:** https://sketchfab.com/3d-models/chevrolet-chevelle-ss-1970-ddcba6667cce46ad92545fc38beda4ed
+- **Author:** mohamedhussien (Sketchfab)
+- **Licence:** CC BY 4.0 (credit required). Provenance note: the FBX records an "E3D" source folder (often an Element 3D commercial pack); the owner chose to ship it on 8 Nov 2026
+- **Resolution / polys:** 892k faces, converted to 57.7k triangles by tools/art/import_sketchfab.py --profile brawn
+- **Credit line:** "Chevrolet Chevelle SS 1970" by mohamedhussien, CC BY 4.0, https://sketchfab.com/3d-models/chevrolet-chevelle-ss-1970-ddcba6667cce46ad92545fc38beda4ed (modified: debadged, repainted, rigged)
+
 <!-- SFX BEGIN (tools/audio/cook_sfx.py) -->
 ## audio/openverse
 

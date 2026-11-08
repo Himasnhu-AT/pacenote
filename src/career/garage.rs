@@ -116,21 +116,30 @@ pub struct CarDef {
     /// Showroom default paint.
     pub paint: Paint,
     pub pop_profile: PopProfile,
+    /// The body model (`Body::Rally`): a glTF under `assets/` with `art::car`'s rig (the rally
+    /// hatch or a converted look-alike, `tools/art/import_sketchfab.py`).
+    pub model: &'static str,
 }
+
+/// The rally hatch's model, the default body.
+pub const RALLY_MODEL: &str = "models/rallycar.glb";
 
 /// The Saker R5's id: today's car, owned at the start (DECISIONS E1).
 pub const SAKER: &str = "saker";
 
 /// The roster, in Dealership order (GAME_SYSTEMS §4.1; DECISIONS E2). Index 0 stays the Saker.
 pub static CARS: &[CarDef] = &[
-    CarDef { id: SAKER, name: "Saker R5", body: Body::Rally, price: 45_000, base: Spec::default, paint: Paint { colour: 0, metallic: false }, pop_profile: PopProfile::Rally },
-    CarDef { id: "wren", name: "Wren 1.4", body: Body::Hatch, price: 9_000, base: wren, paint: Paint { colour: 6, metallic: false }, pop_profile: PopProfile::Road },
-    CarDef { id: "marten", name: "Marten Tourer", body: Body::Estate, price: 14_000, base: marten, paint: Paint { colour: 5, metallic: false }, pop_profile: PopProfile::Road },
-    CarDef { id: "bruin", name: "Bruin Trail", body: Body::Suv, price: 24_000, base: bruin, paint: Paint { colour: 5, metallic: true }, pop_profile: PopProfile::Road },
-    CarDef { id: "vale", name: "Vale GT", body: Body::Saloon, price: 30_000, base: vale, paint: Paint { colour: 3, metallic: false }, pop_profile: PopProfile::Road },
-    CarDef { id: "harrier", name: "Harrier S", body: Body::Saloon, price: 62_000, base: harrier, paint: Paint { colour: 1, metallic: true }, pop_profile: PopProfile::Road },
-    CarDef { id: "fennec", name: "Fennec Kit", body: Body::Rally, price: 85_000, base: fennec, paint: Paint { colour: 3, metallic: true }, pop_profile: PopProfile::Rally },
-    CarDef { id: "ossian", name: "Ossian Evo", body: Body::Rally, price: 140_000, base: ossian, paint: Paint { colour: 2, metallic: true }, pop_profile: PopProfile::Rally },
+    CarDef { id: SAKER, name: "Saker R5", body: Body::Rally, price: 45_000, base: Spec::default, paint: Paint { colour: 0, metallic: false }, pop_profile: PopProfile::Rally, model: RALLY_MODEL },
+    CarDef { id: "wren", name: "Wren 1.4", body: Body::Hatch, price: 9_000, base: wren, paint: Paint { colour: 6, metallic: false }, pop_profile: PopProfile::Road, model: RALLY_MODEL },
+    CarDef { id: "marten", name: "Marten Tourer", body: Body::Estate, price: 14_000, base: marten, paint: Paint { colour: 5, metallic: false }, pop_profile: PopProfile::Road, model: RALLY_MODEL },
+    CarDef { id: "bruin", name: "Bruin Trail", body: Body::Suv, price: 24_000, base: bruin, paint: Paint { colour: 5, metallic: true }, pop_profile: PopProfile::Road, model: RALLY_MODEL },
+    CarDef { id: "vale", name: "Vale GT", body: Body::Saloon, price: 30_000, base: vale, paint: Paint { colour: 3, metallic: false }, pop_profile: PopProfile::Road, model: RALLY_MODEL },
+    CarDef { id: "harrier", name: "Harrier S", body: Body::Saloon, price: 62_000, base: harrier, paint: Paint { colour: 1, metallic: true }, pop_profile: PopProfile::Road, model: RALLY_MODEL },
+    CarDef { id: "fennec", name: "Fennec Kit", body: Body::Rally, price: 85_000, base: fennec, paint: Paint { colour: 3, metallic: true }, pop_profile: PopProfile::Rally, model: RALLY_MODEL },
+    CarDef { id: "ossian", name: "Ossian Evo", body: Body::Rally, price: 140_000, base: ossian, paint: Paint { colour: 2, metallic: true }, pop_profile: PopProfile::Rally, model: RALLY_MODEL },
+    // Debadged look-alike of a real car (owner's ruling, 8 Nov 2026: no logos, badges, names or
+    // sponsor liveries), its own model (`assets/models/car_<id>.glb`).
+    CarDef { id: "brawn", name: "Brawn 70", body: Body::Rally, price: 38_000, base: brawn, paint: Paint { colour: 4, metallic: false }, pop_profile: PopProfile::Road, model: "models/car_brawn.glb" },
 ];
 
 /// A roster car from the Saker's spec: torque ×, mass (inertia scales with it), grip, front
@@ -165,6 +174,11 @@ fn harrier() -> Spec {
 /// Light, tail-happy RWD kit car.
 fn fennec() -> Spec {
     variant(1.05, 1_020.0, 1.02, 0.0)
+}
+/// RWD muscle coupe: big torque, heavy nose, loose diff.
+fn brawn() -> Spec {
+    let s = variant(1.15, 1_620.0, 0.9, 0.0);
+    Spec { lsd: 35.0, drag: 0.76, ..s }
 }
 /// The top car: AWD, big brakes.
 fn ossian() -> Spec {
@@ -553,8 +567,8 @@ mod tests {
     #[test]
     fn the_roster_hits_its_pis_and_classes() {
         // GAME_SYSTEMS §4.1 (Ossian: 742 with its brakes, see `pi`).
-        let want = [("saker", 570, Class::B), ("wren", 370, Class::D), ("marten", 362, Class::D), ("bruin", 428, Class::C), ("vale", 456, Class::C), ("harrier", 585, Class::B), ("fennec", 659, Class::A), ("ossian", 742, Class::S)];
-        assert_eq!(CARS.len(), 8);
+        let want = [("saker", 570, Class::B), ("wren", 370, Class::D), ("marten", 362, Class::D), ("bruin", 428, Class::C), ("vale", 456, Class::C), ("harrier", 585, Class::B), ("fennec", 659, Class::A), ("ossian", 742, Class::S), ("brawn", 463, Class::C)];
+        assert_eq!(CARS.len(), 9);
         for (id, p, class) in want {
             let d = def(id).unwrap();
             let got = pi(&(d.base)());
@@ -566,11 +580,11 @@ mod tests {
         let mut hashes: Vec<String> = CARS.iter().map(|d| crate::meta::ghost::sim_hash(&(d.base)(), 60)).collect();
         hashes.sort();
         hashes.dedup();
-        assert_eq!(hashes.len(), 8);
+        assert_eq!(hashes.len(), CARS.len());
         let mut ids: Vec<&str> = CARS.iter().map(|d| d.id).collect();
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), 8);
+        assert_eq!(ids.len(), CARS.len());
     }
 
     #[test]

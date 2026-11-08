@@ -21,7 +21,10 @@ use crate::drive::{CameraView, CarSpec, DrivenCar};
 
 /// The tail pipe's mouth in the model's frame (right rear, under the bumper, 0.27 m above the
 /// ground; the model origin is at hub height), its axis rearward (+Z).
-pub const TIP_MODEL: Vec3 = Vec3::new(0.46, 0.27 - crate::art::car::MODEL_WHEEL_RADIUS, 1.99);
+/// (The active body's: `art::car::CarArt::exhaust`.)
+pub fn tip_model() -> Vec3 {
+    crate::art::car::art().exhaust
+}
 
 /// The pipe's axis: rearward (+Z), turned 11° down and 7° out to the right like a real
 /// rally exit (and so the chase camera sees the flame's length, not just its end).
@@ -31,7 +34,7 @@ pub fn tip_rotation() -> Quat {
 
 /// The tail pipe's mouth in the car body's frame.
 pub fn tip(s: &crate::vehicle::Spec) -> Vec3 {
-    TIP_MODEL + crate::art::car::model_offset(s)
+    tip_model() + crate::art::car::model_offset(s)
 }
 
 pub struct ExhaustPlugin;
@@ -341,7 +344,7 @@ mod tests {
         let t = tip(&s);
         assert!(t.x > 0.3 && t.z > s.mounts[2].z + 0.3, "{t}");
         // About 0.27 m above the ground at rest.
-        let ground = crate::art::car::model_offset(&s).y - crate::art::car::MODEL_WHEEL_RADIUS;
+        let ground = crate::art::car::model_offset(&s).y - crate::art::car::art().wheel_radius;
         assert!((t.y - ground - 0.27).abs() < 0.02, "{t} over {ground}");
     }
 }

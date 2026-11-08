@@ -731,8 +731,9 @@ fn spawn_ghost(world: &mut World, g: Ghost, road: &crate::stage::Road, hash: &st
     });
     // The player's car model at its far level of detail (~2k triangles), placed like the
     // driven car's (`art::car::model_offset`), all in the ghost material.
+    let path = crate::art::car::model_path(world);
     let Some(assets) = world.get_resource::<AssetServer>() else { return };
-    let scene = assets.load(GltfAssetLabel::Scene(0).from_asset(crate::art::car::MODEL));
+    let scene = assets.load(GltfAssetLabel::Scene(0).from_asset(path));
     let tf = Transform::from_translation(crate::art::car::model_offset(&spec));
     world.spawn((Name::new("ghost model"), GhostModel(mat), WorldAssetRoot(scene), tf, Visibility::default(), ChildOf(id)));
 }

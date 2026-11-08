@@ -29,3 +29,4 @@ CC0 / public domain sounds, with thanks: felix.blume, hsaunier10, lolamadeus, pr
 
 Night sky: star positions from the Yale Bright Star Catalogue (Hoffleit & Warren 1991), via NASA HEASARC.
 Moon: NASA's Scientific Visualization Studio (LRO LROC data, NASA/GSFC/Arizona State University).
+Brawn 70 body: "Chevrolet Chevelle SS 1970" by mohamedhussien (CC BY 4.0, Sketchfab): https://sketchfab.com/3d-models/chevrolet-chevelle-ss-1970-ddcba6667cce46ad92545fc38beda4ed (modified)  [CC BY: credit required]

@@ -262,9 +262,9 @@ fn swap_car(world: &mut World) {
     }
     match def.body {
         Body::Rally => {
-            let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset(crate::art::car::MODEL));
+            let scene = world.resource::<AssetServer>().load(GltfAssetLabel::Scene(0).from_asset(def.model));
             // The model's origin is at hub height.
-            let tf = Transform::from_xyz(0.0, crate::art::car::MODEL_WHEEL_RADIUS, 0.0);
+            let tf = Transform::from_xyz(0.0, crate::art::car::art_for(def.model).wheel_radius, 0.0);
             let model = world.spawn((Name::new("showroom model"), crate::art::car::CarModel, WorldAssetRoot(scene), tf, Visibility::default(), WantsPaint(want.paint))).id();
             world.entity_mut(plinth).add_child(model);
         }

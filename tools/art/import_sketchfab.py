@@ -32,6 +32,20 @@
 #            --mirror-seat MATREGEX (keep: a passenger seat from the driver's)
 #            --codriver-eye X,Y,Z  --codriver-tablet X,Y,Z (keep: glTF model frame)
 #            --profile NAME (option defaults for a known download, see PROFILES)
+#            --prep FILE (a Python file run right after the import, with `meshes`, `opts` and
+#              this module's names in scope: per-download fixes, see tools/art/car_prep/)
+#            --paint REGEX (those materials become one plain "Paint" material, no textures:
+#              the game recolours it; printed liveries and sponsor decals go with the texture)
+#            --paint-color RRGGBB  --paint-rough R
+#            --plain "REGEX=RRGGBB[,METAL,ROUGH[,ALPHA]];..." (those materials lose their
+#              textures and get a plain colour: logos printed in a texture, tyre sidewall text)
+#            --cockpit-dz M (ours: lower our cockpit by -M; default: keep the hatch's headroom)
+#            --lining-y0 Y (ours: where the cabin lining ends at the back; default the tail)
+#            --lining-ratio R (ours: the lining from the body decimated to R; default 1)
+#            --drop-mat REGEX (drop the parts with those materials)
+#            --cut "x0,x1,y0,y1,z0,z1[@MATREGEX];..." (delete the faces in those boxes, model
+#              frame after scaling: badges and plates moulded into a bigger part)
+#            --exhaust-mat REGEX (prints the exhaust tip for src/art/exhaust.rs)
 #            --preview DIR  --no-bake  --list
 #
 # arms: the "First Person arms" rig → assets/models/driver_arms.glb. Steps: import; apply
@@ -67,6 +81,34 @@ HALF_TRACK = 0.78
 PROFILES = {
     # (The profile for the former player car, a branded GT3 download, was removed with the car:
     # docs/ASSETS_BRIEF.md §0. See git history for an example of a cabin-keeping profile.)
+    # Real-car look-alikes, debadged (owner's ruling, 8 Nov 2026): no maker's logo, badge,
+    # script, plate or sponsor livery survives; the body paint is plain "Paint".
+    "kestrel": {  # 2024 GT3-class racer (2024_porsche_992_gt3_r.glb)
+        "out": os.path.join(ROOT, "assets/models/car_kestrel.glb"),
+        "prep": "car_prep/kestrel.py",
+        "forward": "-y",
+        "interior": "ours",
+        "paint": r"^BodyPaint$",
+        # The tyre sidewall text, the crest / script / fuel-cap decals.
+        "plain": "^Tyre$=1b1b1c,0,0.85;^Details$=26272a,0.3,0.5;^Glass$=1c2126,0,0.05,0.45;^LampLens$=d8dde2,0,0.05,0.3",
+        "pbr": "^Rim$|Exhaust|Disc=1,0.3;Caliper=0.6,0.35;^Glass$|LampLens=0,0.05;*=0,0.4",
+        "decimate": "BodyPaint|^Paint$=0.17;Exhaust=0.45;Mechanics|Underbody=0.2;Lamp=0.3;^Rim$=0.15;Tyre|Disc|Caliper=0.35;*=0.4",
+        "exhaust-mat": "^Exhaust$",
+        "lining-y0": "-1.25",
+        "small-mat": "Lamp|Disc|Mesh|Rim|Glass",
+    },
+    "brawn": {  # 1970 muscle coupe (chevrolet-chevelle-ss-1970/source/x/Source_mat.FBX)
+        "out": os.path.join(ROOT, "assets/models/car_brawn.glb"),
+        "prep": "car_prep/brawn.py",
+        "forward": "-y",
+        "interior": "ours",
+        "paint": r"^BodyPaint$",
+        "plain": "^Glass$=1c2126,0,0.05,0.45",
+        "decimate": "BodyPaint|^Paint$=0.07;^Glass$=0.2;^Wheel=0.035;*=0.035",
+        "lining-y0": "-1.5",
+        "exhaust-mat": "^Exhaust$",
+        "small-mat": "^Glass$",
+    },
 }
 EXTS = (".glb", ".gltf", ".fbx", ".blend", ".obj")
 WHEEL_RE = re.compile(r"wheel|tire|tyre|rim|disc|disk|brake|hub|caliper|rotor", re.I)
@@ -240,6 +282,94 @@ def fix_pbr(rules):
             b.inputs["Coat Weight"].default_value = 0.0
 
 
+def hex_rgb(h):
+    """"RRGGBB" (sRGB) → linear RGB."""
+    s = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    return tuple(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in s)
+
+
+def plain_material(mt, color, metal=0.0, rough=0.5, alpha=None):
+    """Rebuilds `mt` in place (name and users kept) as a plain Principled material (alpha:
+    see-through, blended; else the old material's fixed alpha)."""
+    mt.use_nodes = True
+    nt = mt.node_tree
+    blend = mt.surface_render_method
+    old = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if alpha is None:
+        alpha = 1.0
+        if old is not None and not old.inputs["Alpha"].is_linked:
+            alpha = old.inputs["Alpha"].default_value
+    else:
+        blend = "BLENDED"
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+    b = nt.nodes.new("ShaderNodeBsdfPrincipled")
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    nt.links.new(b.outputs[0], out.inputs["Surface"])
+    b.inputs["Base Color"].default_value = (*color, 1.0)
+    b.inputs["Metallic"].default_value = metal
+    b.inputs["Roughness"].default_value = rough
+    b.inputs["Alpha"].default_value = alpha
+    mt.surface_render_method = blend if alpha < 0.98 else "DITHERED"
+    mt.diffuse_color = (*color, 1.0)
+
+
+def paint_and_plain(objs, opts):
+    """--paint: the matching materials → one plain "Paint" (the game's livery colour);
+    --plain: the matching materials lose their textures."""
+    if "paint" in opts:
+        rx = re.compile(opts["paint"], re.I)
+        paint = bpy.data.materials.get("Paint")
+        if paint is None or not paint.users:
+            paint = bpy.data.materials.new("Paint")
+        plain_material(paint, hex_rgb(opts.get("paint-color", "1d5c5e")), 0.0, float(opts.get("paint-rough", 0.3)))
+        hit = set()
+        for o in objs:
+            for slot in o.material_slots:
+                if slot.material and slot.material is not paint and rx.search(slot.material.name):
+                    hit.add(slot.material.name)
+                    slot.material = paint
+        print(f"paint: {sorted(hit)} -> Paint")
+    if "plain" in opts:
+        for r in opts["plain"].split(";"):
+            rx, v = r.rsplit("=", 1)
+            v = v.split(",")
+            rx = re.compile(rx, re.I)
+            for mt in bpy.data.materials:
+                if mt.name != "Paint" and rx.search(mt.name):
+                    plain_material(mt, hex_rgb(v[0]), float(v[1]) if len(v) > 1 else 0.0, float(v[2]) if len(v) > 2 else 0.5,
+                                   float(v[3]) if len(v) > 3 else None)
+                    print(f"plain: {mt.name} = #{v[0]}")
+
+
+def game_constants(body, r, opts, exhaust=()):
+    """Prints the constants src/art/car.rs and exhaust.rs need for this model (glTF frame: x, z,
+    -y; origin at hub height)."""
+    g = lambda v: f"Vec3::new({v[0]:.3f}, {v[2]:.3f}, {-v[1]:.3f})"
+    print(f"CONST MODEL_WHEEL_RADIUS = {r:.3f}")
+    eye = Vector((cockpit.DRV_X, -0.60, cockpit.zg(1.12))) + getattr(cockpit, "EYE_OFFSET", Vector())
+    print(f"CONST COCKPIT_EYE_MODEL = {g(eye)}  ({eye.z + r:.3f} m above the ground)")
+    print(f"CONST hands.rs RIG = {g(getattr(cockpit, 'EYE_OFFSET', Vector()))}  (the cockpit's offset from cockpit.py's)")
+    print(f"CONST CABIN_FILL_MODEL = {g(Vector((0.0, -0.50, 0.80 + getattr(cockpit, 'EYE_OFFSET', Vector()).z)))}")
+    # Bonnet camera: 12 cm over the body's top near the middle, 0.3 m behind the nose's front
+    # axle line... measured where the bonnet is (y 1.3..1.9, |x| < 0.25).
+    mw = body.matrix_world
+    zs = [(mw @ v.co).z for v in body.data.vertices if abs((mw @ v.co).x) < 0.25 and 1.45 < (mw @ v.co).y < 1.75]
+    if zs:
+        print(f"CONST BONNET_CAM_MODEL = {g((0.0, 1.6, max(zs) + 0.13))}  (bonnet top {max(zs):.3f} at y 1.6)")
+    lo, hi = bbox([body])
+    print(f"CONST body extent (model frame) x {lo.x:.3f}..{hi.x:.3f} y {lo.y:.3f}..{hi.y:.3f} z {lo.z:.3f}..{hi.z:.3f}; roof {hi.z + r:.3f} m above the ground")
+    if exhaust:
+        # The rearmost 4 cm of the exhaust parts' vertices (taken before the body is joined).
+        ymin = min(p.y for p in exhaust)
+        pts = [p for p in exhaust if p.y < ymin + 0.04]
+        for side in (-1, 1):
+            s = [p for p in pts if p.x * side > 0]
+            if s:
+                c = sum(s, Vector()) / len(s)
+                print(f"CONST exhaust tip ({'right' if side > 0 else 'left'}) TIP_MODEL = {g(c)}  (z {c.z:.3f} = {c.z + r:.3f} - MODEL_WHEEL_RADIUS)")
+
+
 def strip_uvs(objs):
     """Drops UV layers no material reads (downloads often carry a stack of lightmap UVs)."""
     for o in objs:
@@ -307,8 +437,16 @@ def bake_transforms(objs):
         if o.data.users > 1:
             o.data = o.data.copy()
         mw = o.matrix_world.copy()
+        # (FBX files can carry transform keys: they would undo the bake on the next update.)
+        x = o
+        while x is not None:
+            x.animation_data_clear()
+            x = x.parent
         o.parent = None
         o.data.transform(mw)
+        if mw.determinant() < 0:
+            # A mirrored transform (common in FBX): keep the faces' winding outward.
+            o.data.flip_normals()
         o.matrix_world = Matrix.Identity(4)
 
 
@@ -330,9 +468,13 @@ def used_mats(o):
     return [o.data.materials[i] for i in sorted(idx) if i < len(o.data.materials) and o.data.materials[i] is not None]
 
 
+# Lamp lenses are see-through too, but not the cabin's glass (the cabin is measured from it).
+NOT_GLASS_RE = re.compile(r"lamp|light|lens|indicator|reflector", re.I)
+
+
 def is_glass(o):
     for m in used_mats(o):
-        if m is None:
+        if m is None or NOT_GLASS_RE.search(m.name):
             continue
         if GLASS_RE.search(m.name) or GLASS_RE.search(o.name):
             return True
@@ -430,7 +572,7 @@ def measure_cabin(glass, body_lo, body_hi):
     """Cabin dimensions (heights above the cockpit's ground line) from the glass, defaults where
     it's unclear."""
     cab = type("Cab", (cockpit.Cabin,), {})
-    ground = cockpit.G
+    ground = cockpit.G + COCKPIT_DZ
     front, side = [], []
     for o in glass:
         for f in o.data.polygons:
@@ -447,8 +589,13 @@ def measure_cabin(glass, body_lo, body_hi):
         cab.belt = min(p.z for p in side) - ground
         cab.door_y = (cab.screen_base[0] - 0.04, max(cab.door_y[1], min(p.y for p in side) + 0.10))
     cab.firewall_y = cab.screen_base[0] + 0.02
-    roof = body_hi.z - ground
+    roof = (body_hi.z if CABIN_ROOF is None else CABIN_ROOF) - ground
     cab.cage_roof = roof - 0.12
+    if FLOOR_Z is not None:
+        cab.floor = max(cab.floor, FLOOR_Z - ground)
+    if CAGE_ROOF is not None:
+        # Under the roof where the cage's roof bars run (a curved roof is lower there).
+        cab.cage_roof = min(cab.cage_roof, CAGE_ROOF - ground - 0.07)
     # Width: the side windows (the bounding box includes the door mirrors).
     xs = sorted(abs(p.x) for p in side)
     w = xs[int(0.9 * (len(xs) - 1))] + 0.03 if xs else (body_hi.x - body_lo.x) / 2 - 0.12
@@ -473,9 +620,16 @@ def car(opts):
     bake_transforms(meshes)
     for o in [o for o in bpy.data.objects if o.type == "EMPTY"]:
         bpy.data.objects.remove(o, do_unlink=True)
+    if "prep" in opts:
+        prep = opts["prep"] if os.path.isabs(opts["prep"]) else os.path.join(HERE, opts["prep"])
+        scope = dict(globals(), meshes=meshes, opts=opts, __file__=prep)
+        exec(compile(open(prep).read(), prep, "exec"), scope)
+        meshes = [o for o in bpy.data.objects if o.type == "MESH"]
+        print(f"prep {prep}: {len(meshes)} meshes")
     if opts.get("list"):
         list_car(meshes)
         return
+    paint_and_plain(meshes, opts)
     keep_interior = opts.get("interior", "ours") == "keep"
     if "drop-mat" in opts:
         rx = re.compile(opts["drop-mat"], re.I)
@@ -546,7 +700,18 @@ def car(opts):
             import driver
             driver.seat_harness(chassis, float(opts["passenger-harness"]))
     else:
+        if "cut" in opts:
+            cut_faces(rest, opts["cut"])
+        cockpit_drop(opts, rest)
         cab = interior_drop(opts, rest, glass, lo)
+    exhaust = []
+    if "exhaust-mat" in opts:
+        rx = re.compile(opts["exhaust-mat"], re.I)
+        for p in rest:
+            mats = [m.name if m else "" for m in p.data.materials]
+            for f in p.data.polygons:
+                if f.material_index < len(mats) and rx.search(mats[f.material_index]):
+                    exhaust += [p.matrix_world @ p.data.vertices[i].co for i in f.vertices]
     select(rest)
     bpy.ops.object.join()
     body = bpy.context.view_layer.objects.active
@@ -595,10 +760,65 @@ def car(opts):
         # Our cockpit, lined with the body's own cabin faces.
         cockpit.materials()
         glass_mats = {i for i, mt in enumerate(body.data.materials) if mt and is_glass_mat(mt)}
-        ground = cockpit.G
-        y0, y1 = lo.y + 0.12, cab.screen_base[0] + 0.06
-        skin = cockpit.inner_skin(body, lambda f, c: f.material_index not in glass_mats and y0 < c.y < y1 and c.z - ground > cab.floor and f.normal.z > -0.5)
-        cockpit.build(chassis, skin, cab, bake=not opts.get("no-bake"))
+        ground = cockpit.G + COCKPIT_DZ
+        # The lining's rear end: the tail, unless --lining-y0 says where the cabin ends (an
+        # engine behind the seats: its body faces would show through as grey patches).
+        # The front end: the windscreen base, but not into the front wheel arches.
+        y0, y1 = float(opts.get("lining-y0", lo.y + 0.12)), min(cab.screen_base[0] + 0.06, FRONT_Y - r - 0.05)
+        mid_z = ground + 0.75
+        # The lining comes from a coarser copy of the body (--lining-ratio): only seen from
+        # inside, in the cabin's shade.
+        src = body
+        if float(opts.get("lining-ratio", 1.0)) < 0.999:
+            src = body.copy()
+            src.data = body.data.copy()
+            link(src)
+            mod = src.modifiers.new("dec", "DECIMATE")
+            mod.ratio = float(opts["lining-ratio"])
+            mod.use_collapse_triangulate = True
+            select([src])
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            print(f"lining source: {len(body.data.polygons)} -> {len(src.data.polygons)} faces")
+        # (Whole faces in the cabin's length: cockpit.bake_ao splits long edges, a sliver
+        # reaching the nose would come out as dozens of faces.)
+        skin = cockpit.inner_skin(src, lambda f, c: f.material_index not in glass_mats and y0 < c.y < y1 and c.z - ground > cab.floor and f.normal.z > -0.5
+                                  and all(y0 - 0.1 < v.co.y < y1 + 0.1 for v in f.verts)
+                                  # Faces looking out of the cabin only (flipped, they look in):
+                                  # a face the wrong way round would show outside.
+                                  and f.normal.dot(Vector((c.x, 0.0, c.z - mid_z))) > 0.0)
+        print(f"lining: {len(skin.f)} faces")
+        if src is not body:
+            mesh = src.data
+            bpy.data.objects.remove(src, do_unlink=True)
+            bpy.data.meshes.remove(mesh)
+        # The cockpit is built at its own heights, then lowered by COCKPIT_DZ as a whole. The
+        # lining joins it afterwards with a flat shade (the cockpit's AO bake splits long edges
+        # first: a body's lining would come out several times bigger).
+        before = set(chassis.children)
+        cockpit.build(chassis, None, cab, bake=not opts.get("no-bake"))
+        interior = None
+        for o in set(chassis.children) - before:
+            if o.type == "MESH" and o.name == "Interior":
+                o.data.transform(Matrix.Translation((0, 0, COCKPIT_DZ)))
+                interior = o
+            else:
+                o.location.z += COCKPIT_DZ
+        cockpit.EYE_OFFSET = Vector((0, 0, COCKPIT_DZ))
+        # Nothing of the cockpit below its floor (a raised floor: seat bases, pedal boxes
+        # would hang under the body).
+        fz = ground + cab.floor - 0.03
+        bm = bmesh.new()
+        bm.from_mesh(interior.data)
+        geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
+        bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(0, 0, fz), plane_no=(0, 0, 1), clear_inner=True)
+        bm.to_mesh(interior.data)
+        bm.free()
+        lining = skin.obj("CabinLining", recalc=False, smooth_angle=35)
+        if interior.data.color_attributes.get("AO") is not None:
+            a = lining.data.color_attributes.new("AO", "BYTE_COLOR", "CORNER")
+            a.data.foreach_set("color", np.tile(np.array([0.55, 0.55, 0.55, 1.0], dtype=np.float32), len(a.data)))
+        select([interior, lining], interior)
+        bpy.ops.object.join()
     small_re = re.compile(opts["small-mat"], re.I) if "small-mat" in opts else None
     shrink_textures(int(opts.get("max-tex", 2048)), int(opts.get("small-tex", 1024)), small_re, jpeg=keep_interior or "small-mat" in opts)
     tris = 0
@@ -607,9 +827,10 @@ def car(opts):
             o.data.calc_loop_triangles()
             tris += len(o.data.loop_triangles)
     print(f"car: {tris} triangles, {len(bpy.data.materials)} materials")
+    game_constants(body, r, opts, exhaust)
     if "preview" in opts:
         import build_rallycar
-        build_rallycar.preview(opts["preview"], eye=getattr(cockpit, "EYE_OFFSET", Vector()))
+        build_rallycar.preview(opts["preview"])
     export(opts.get("out", os.path.join(ROOT, "assets/models/rallycar.glb")))
 
 
@@ -617,12 +838,49 @@ def is_caliper(p):
     return CALIPER_RE.search(p.name) or any(CALIPER_RE.search(m.name) for m in used_mats(p))
 
 
+COCKPIT_DZ = 0.0  # how far our cockpit is lowered (m; cockpit_drop)
+CABIN_ROOF = None  # roof height over the seats (model z), if measured
+CAGE_ROOF = None  # lowest roof height over the cage's roof bars (model z), if measured
+FLOOR_Z = None  # lowest the cabin floor may be (model z): above the sills' underside
+
+
+def cockpit_drop(opts, rest):
+    """--interior ours in a low body: lowers our cockpit (eye, seats, cage, wheel, levers) so
+    the driver keeps the rally hatch's headroom (0.34 m from the eye to the roof over the seats).
+    --cockpit-dz M sets it; 0 for a body as tall as the hatch or taller."""
+    global COCKPIT_DZ, CABIN_ROOF, CAGE_ROOF
+    zs = [v.co.z for p in rest for v in p.data.vertices if abs(v.co.x) < 0.45 and -0.9 < v.co.y < 0.1]
+    CABIN_ROOF = max(zs) if zs else None
+    # The roof over the cage's roof bars: its highest point near each of a few spots along
+    # the bars (x ±0.5, y -1.1..-0.1); the lowest of those.
+    co = np.array([tuple(v.co) for p in rest for v in p.data.vertices if 0.3 < abs(v.co.x) < 0.65 and -1.2 < v.co.y < 0.0])
+    tops = []
+    if len(co):
+        for sx in (-1, 1):
+            for y in np.linspace(-1.1, -0.1, 6):
+                m = (np.abs(co[:, 0] - sx * 0.5) < 0.08) & (np.abs(co[:, 1] - y) < 0.08)
+                if m.any():
+                    tops.append(co[m, 2].max())
+    CAGE_ROOF = min(tops) if tops else None
+    eye = cockpit.zg(1.12)
+    if "cockpit-dz" in opts:
+        COCKPIT_DZ = float(opts["cockpit-dz"])
+    elif CABIN_ROOF is not None:
+        COCKPIT_DZ = min(0.0, round((CABIN_ROOF - 0.34 - eye) / 0.005) * 0.005)
+    # The cabin floor stays above the sills' underside (else it shows under the body): see
+    # measure_cabin.
+    global FLOOR_Z
+    zs = [v.co.z for p in rest for v in p.data.vertices if 0.6 < abs(v.co.x) < 1.0 and -1.0 < v.co.y < 0.4]
+    FLOOR_Z = min(zs) + 0.05 if zs else None
+    print(f"roof over the seats z {CABIN_ROOF}, over the cage bars {CAGE_ROOF}; cockpit lowered by {-COCKPIT_DZ:.3f} m")
+
+
 def interior_drop(opts, rest, glass, lo):
     """Drops the model's interior (our cockpit replaces it) and thins the glass. Returns the
     measured cabin."""
     _, hi = bbox(rest)
     cab = measure_cabin(glass, lo, hi)
-    ground = cockpit.G
+    ground = cockpit.G + COCKPIT_DZ
     # Drop the model's interior: parts inside the cabin (or named so), unless --keep says not.
     drop_re = re.compile(opts["drop"], re.I) if "drop" in opts else None
     keep_re = re.compile(opts["keep"], re.I) if "keep" in opts else None
@@ -949,6 +1207,8 @@ def interior_keep(opts, steer, glass, root, r):
 
 
 def is_glass_mat(mt):
+    if NOT_GLASS_RE.search(mt.name):
+        return False
     if GLASS_RE.search(mt.name):
         return True
     if mt.use_nodes:

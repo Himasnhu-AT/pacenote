@@ -367,8 +367,12 @@ def toggle(M, at, u, v, rot, guard=False):
 def footwell(M, cab):
     fl = cab.floor
     # Floor and firewall (boxes, so AO and normals behave).
-    M.box((0, -0.55, zg(fl - 0.01)), (1.62, 2.40, 0.02), "CabinPaint")
-    M.box((0, cab.firewall_y + 0.01, zg(0.58)), (1.62, 0.02, 0.56), "CabinPaint")  # under the cowl
+    # (No wider than the cabin: a narrow body's sides would show them.)
+    w = min(1.62, 2 * cab.side_x + 0.02)
+    M.box((0, -0.55, zg(fl - 0.01)), (w, 2.40, 0.02), "CabinPaint")
+    # Under the cowl: up to 0.86 m, or just under a lower windscreen base (a low body).
+    top = min(0.86, cab.screen_base[1] - 0.03)
+    M.box((0, cab.firewall_y + 0.01, zg((0.30 + top) / 2)), (w, 0.02, top - 0.30), "CabinPaint")
     # Driver's pedals (drilled alloy pads on black arms) and dead pedal.
     for x, top in ((DRV_X - 0.13, 0.43), (DRV_X - 0.01, 0.43), (DRV_X + 0.11, 0.40)):
         pad = Vector((x, 0.43, zg(top)))

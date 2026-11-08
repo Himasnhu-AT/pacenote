@@ -61,11 +61,13 @@ made for Pacenote. Licences allowed: CC0, CC BY (credited), SIL OFL for fonts, F
 | Models of people x 10 01 | Volandemor0026 | https://www.fab.com/listings/d374612c-c07f-4825-8688-4b57da7522f2 | Fab Standard License, claimed by the owner on 7 Nov 2026. **TO CONFIRM before release:** on 8 Nov the listing showed a price on both tiers (Personal 468.93 INR, Professional 938.8 INR), so it was probably a limited-time free claim; check in the owner's Fab library which licence tier was claimed (Professional covers commercial use without limits). | card_crowd (textures/card_crowd/*) |
 | Yale Bright Star Catalogue, 5th ed. | D. Hoffleit, W. H. Warren Jr. (Yale University Observatory, 1991); NASA HEASARC distribution | https://heasarc.gsfc.nasa.gov/W3Browse/star-catalog/bsc5p.html | Public catalogue data (HEASARC table security: public); factual star data, free to use with acknowledgement | night_sky (sky/stars.bin, sky/milkyway.bin, sky/moon.bin) |
 | CGI Moon Kit | NASA's Scientific Visualization Studio (Ernie Wright); LRO LROC data, NASA/GSFC/Arizona State University | https://svs.gsfc.nasa.gov/4720 | Public domain (NASA imagery, not copyrighted; NASA media guidelines) | night_sky (sky/stars.bin, sky/milkyway.bin, sky/moon.bin) |
+| Chevrolet Chevelle SS 1970 | mohamedhussien (Sketchfab) | https://sketchfab.com/3d-models/chevrolet-chevelle-ss-1970-ddcba6667cce46ad92545fc38beda4ed | CC BY 4.0 (credit required). Provenance note: the FBX records an "E3D" source folder (often an Element 3D commercial pack); the owner chose to ship it on 8 Nov 2026 | car_brawn (models/car_brawn.glb) |
 | Barlow, Barlow Condensed (fonts) | The Barlow Project Authors (Jeremy Tribby) | https://github.com/jpt/barlow | SIL Open Font License 1.1 | UI text (engine/assets/fonts) |
 
 ## Must be credited in game (CC BY)
 
 - Models of people x 10 01 by Volandemor0026 (Fab Standard License, claimed by the owner on 7 Nov 2026. **TO CONFIRM before release:** on 8 Nov the listing showed a price on both tiers (Personal 468.93 INR, Professional 938.8 INR), so it was probably a limited-time free claim; check in the owner's Fab library which licence tier was claimed (Professional covers commercial use without limits).)
+- Chevrolet Chevelle SS 1970 by mohamedhussien (Sketchfab) (CC BY 4.0 (credit required). Provenance note: the FBX records an "E3D" source folder (often an Element 3D commercial pack); the owner chose to ship it on 8 Nov 2026)
 
 ## Flags
 
