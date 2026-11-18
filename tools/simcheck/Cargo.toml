@@ -8,7 +8,7 @@ publish = false
 # same code builds in seconds for arm64 and x86_64. See tools/simcheck/run.sh.
 [dependencies]
 bevy = { path = "bevyshim" }
-pcg-core = { path = "/Users/himanshu/codes/game/engine/crates/pcg-core" }
+pcg-core = { git = "https://github.com/himasnhu-AT/hull-dep", rev = "caf33e1887e106de3409c7796d0e244bfa30858e" }
 serde = { version = "1", features = ["derive"] }
 libm = "0.2"
 
